@@ -533,6 +533,9 @@ def collision(m: Model, d: Data):
   d.ncollision.zero_()
   d.ncon.zero_()
 
+  if d.nconmax == 0:
+    return
+
   dsbl_flg = m.opt.disableflags
   if (dsbl_flg & DisableBit.CONSTRAINT) | (dsbl_flg & DisableBit.CONTACT):
     return
