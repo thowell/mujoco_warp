@@ -17,6 +17,7 @@ import mujoco
 import numpy as np
 import warp as wp
 
+from . import collision_driver
 from . import support
 from . import types
 
@@ -329,6 +330,10 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
   m.actuator_affine_bias_gain = bool(
     np.any(mjm.actuator_biastype == types.BiasType.AFFINE.value)
     or np.any(mjm.actuator_gaintype == types.GainType.AFFINE.value)
+  )
+
+  m.collision_geom_pair = wp.array(
+    collision_driver.geom_pair(mjm), dtype=wp.vec2i, ndim=1
   )
 
   return m
