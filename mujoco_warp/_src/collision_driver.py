@@ -536,8 +536,8 @@ def collision(m: Model, d: Data):
   if d.nconmax == 0:
     return
 
-  dsbl_flg = m.opt.disableflags
-  if (dsbl_flg & DisableBit.CONSTRAINT) | (dsbl_flg & DisableBit.CONTACT):
+  dsbl_flgs = m.opt.disableflags
+  if (dsbl_flgs & DisableBit.CONSTRAINT) | (dsbl_flgs & DisableBit.CONTACT):
     return
 
   # TODO(team): determine ngeom to switch from n^2 to sap
