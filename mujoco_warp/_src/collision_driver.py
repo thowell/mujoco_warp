@@ -533,6 +533,13 @@ def collision(m: Model, d: Data):
   d.ncollision.zero_()
   d.ncon.zero_()
 
+  if d.nconmax == 0:
+    return
+
+  dsbl_flgs = m.opt.disableflags
+  if (dsbl_flgs & DisableBit.CONSTRAINT) | (dsbl_flgs & DisableBit.CONTACT):
+    return
+
   # TODO(team): determine ngeom to switch from n^2 to sap
   if m.ngeom <= 100:
     nxn_broadphase(m, d)
