@@ -19,6 +19,7 @@ import numpy as np
 from absl.testing import absltest
 from absl.testing import parameterized
 from . import collision_driver
+from . import test_util
 
 import mujoco_warp as mjwarp
 
@@ -133,28 +134,54 @@ class PrimitiveTest(parameterized.TestCase):
   def test_contact_exclude(self):
     """Tests contact exclude."""
     mjm = mujoco.MjModel.from_xml_string("""
-   <mujoco>
-      <worldbody>
-        <body name="body1">
-          <freejoint/>
-          <geom type="sphere" size=".1"/>
-        </body>
-        <body name="body2">
-          <freejoint/>
-          <geom type="sphere" size=".1"/>
-        </body>
-        <body name="body3">
-          <freejoint/>
-          <geom type="sphere" size=".1"/>
-        </body>
-      </worldbody>
-      <contact>
-        <exclude body1="body1" body2="body2"/>
-      </contact>
-    </mujoco>
+      <mujoco>
+        <worldbody>
+          <body name="body1">
+            <freejoint/>
+            <geom type="sphere" size=".1"/>
+          </body>
+          <body name="body2">
+            <freejoint/>
+            <geom type="sphere" size=".1"/>
+          </body>
+          <body name="body3">
+            <freejoint/>
+            <geom type="sphere" size=".1"/>
+          </body>
+        </worldbody>
+        <contact>
+          <exclude body1="body1" body2="body2"/>
+        </contact>
+      </mujoco>
     """)
     pairs = collision_driver.geom_pair(mjm)
     self.assertEqual(pairs.shape[0], 2)
+
+  @parameterized.parameters(
+    (True, True),
+    (True, False),
+    (False, True),
+    (False, False),
+  )
+  def test_collision_disableflags(self, dsbl_constraint, dsbl_contact):
+    """Tests collision disableflags."""
+    mjm, mjd, _, _ = test_util.fixture("humanoid/humanoid.xml")
+
+    if dsbl_constraint:
+      mjm.opt.disableflags |= mujoco.mjtDisableBit.mjDSBL_CONSTRAINT
+    if dsbl_contact:
+      mjm.opt.disableflags |= mujoco.mjtDisableBit.mjDSBL_CONTACT
+
+    mjd = mujoco.MjData(mjm)
+    mujoco.mj_resetDataKeyframe(mjm, mjd, 0)
+    mujoco.mj_forward(mjm, mjd)
+    m = mjwarp.put_model(mjm)
+    d = mjwarp.put_data(mjm, mjd)
+
+    mujoco.mj_collision(mjm, mjd)
+    mjwarp.collision(m, d)
+
+    self.assertEqual(d.ncon.numpy()[0], mjd.ncon)
 
 
 if __name__ == "__main__":
