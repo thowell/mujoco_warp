@@ -798,7 +798,7 @@ def _linesearch_parallel(m: types.Model, d: types.Data):
 
   dsbl_floss = m.opt.disableflags & types.DisableBit.FRICTIONLOSS
   wp.launch(_quad_total_candidate, dim=(d.njmax, m.nlsp), inputs=[m, d, dsbl_floss])
-  
+
   wp.launch(_cost_alpha, dim=(d.nworld, m.nlsp), inputs=[m, d])
   wp.launch(_best_alpha, dim=(d.nworld), inputs=[d])
 
