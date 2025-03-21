@@ -231,7 +231,7 @@ class BroadphaseTest(absltest.TestCase):
     mjm4, _, m4, d4 = _load_from_string(_NXN_MODEL, keyframe=1)
     mjm4.geom_contype[:3] = 0
     m4.geom_contype = wp.array(mjm4.geom_contype, dtype=wp.int32)
-    m4.collision_geom_pair = wp.array(collision_driver.geom_pair(mjm4), dtype=wp.vec2i)
+    m4.nxn_geom_pair = wp.array(collision_driver.geom_pair(mjm4), dtype=wp.vec2i)
     collision_driver.nxn_broadphase(m4, d4)
     np.testing.assert_allclose(d4.ncollision.numpy()[0], 0)
 

@@ -332,9 +332,7 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
     or np.any(mjm.actuator_gaintype == types.GainType.AFFINE.value)
   )
 
-  m.collision_geom_pair = wp.array(
-    collision_driver.geom_pair(mjm), dtype=wp.vec2i, ndim=1
-  )
+  m.nxn_geom_pair = wp.array(collision_driver.geom_pair(mjm), dtype=wp.vec2i, ndim=1)
 
   return m
 

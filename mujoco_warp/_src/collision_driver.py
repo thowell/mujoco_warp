@@ -30,20 +30,13 @@ def geom_pair(m: mujoco.MjModel) -> np.array:
   filterparent = not (m.opt.disableflags & DisableBit.FILTERPARENT.value)
   exclude_signature = set(m.exclude_signature)
 
+  tri = np.triu_indices(m.ngeom)
+  ntri = tri[0].size
+
   pairs = []
-  for i in range(m.ngeom * (m.ngeom - 1) // 2):
-    geom1 = (
-      m.ngeom
-      - 2
-      - int(wp.sqrt(float(-8 * i + 4 * m.ngeom * (m.ngeom - 1) - 7)) / 2.0 - 0.5)
-    )
-    geom2 = (
-      i
-      + geom1
-      + 1
-      - m.ngeom * (m.ngeom - 1) // 2
-      + (m.ngeom - geom1) * ((m.ngeom - geom1) - 1) // 2
-    )
+  for i in range(ntri):
+    geom1 = tri[0][i]
+    geom2 = tri[1][i]
 
     bodyid1 = m.geom_bodyid[geom1]
     bodyid2 = m.geom_bodyid[geom2]
@@ -510,8 +503,9 @@ def nxn_broadphase(m: Model, d: Data):
   @wp.kernel
   def _nxn_broadphase(m: Model, d: Data):
     worldid, elementid = wp.tid()
-    geom1 = m.collision_geom_pair[elementid][0]
-    geom2 = m.collision_geom_pair[elementid][1]
+    geom = m.nxn_geom_pair[elementid]
+    geom1 = geom[0]
+    geom2 = geom[1]
 
     margin1 = m.geom_margin[geom1]
     margin2 = m.geom_margin[geom2]
@@ -541,10 +535,8 @@ def nxn_broadphase(m: Model, d: Data):
     if bounds_filter:
       _add_geom_pair(m, d, geom1, geom2, worldid)
 
-  if m.collision_geom_pair.shape[0]:
-    wp.launch(
-      _nxn_broadphase, dim=(d.nworld, m.collision_geom_pair.shape[0]), inputs=[m, d]
-    )
+  if m.nxn_geom_pair.shape[0]:
+    wp.launch(_nxn_broadphase, dim=(d.nworld, m.nxn_geom_pair.shape[0]), inputs=[m, d])
 
 
 def get_contact_solver_params(m: Model, d: Data):
