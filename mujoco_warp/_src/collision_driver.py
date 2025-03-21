@@ -498,7 +498,6 @@ def sap_broadphase(m: Model, d: Data):
 
 def nxn_broadphase(m: Model, d: Data):
   """Broadphase collision detective via brute-force search."""
-  filterparent = not (m.opt.disableflags & DisableBit.FILTERPARENT.value)
 
   @wp.kernel
   def _nxn_broadphase(m: Model, d: Data):
