@@ -533,10 +533,10 @@ def put_data(
     raise ValueError("njmax must be >= 1")
 
   if nworld * mjd.ncon > nconmax:
-    raise ValueError(f"not enough space for contacts (nconmax must be >= {nworld * mjd.ncon})")
+    raise ValueError(f"nconmax overflow (nconmax must be >= {nworld * mjd.ncon})")
 
   if nworld * mjd.nefc > njmax:
-    raise ValueError(f"not enough space for constraints (njmax must be >= {nworld * mjd.nefc})")
+    raise ValueError(f"njmax overflow (njmax must be >= {nworld * mjd.nefc})")
 
   d.nworld = nworld
   # TODO(team): move nconmax and njmax to Model?
