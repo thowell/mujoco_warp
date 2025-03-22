@@ -18,6 +18,8 @@
 import mujoco
 import numpy as np
 import warp as wp
+from packaging import version
+
 from absl.testing import absltest
 from absl.testing import parameterized
 
@@ -101,7 +103,11 @@ class SmoothTest(parameterized.TestCase):
     mjwarp.factor_m(m, d)
 
     if sparse:
-      _assert_eq(d.qLD.numpy()[0, 0], mjd.qLD, "qLD (sparse)")
+      mjqLD = mjd.qLD
+      if version.parse(mujoco.__version__) > version.parse("3.2.7"):
+        # compare with legacy format.
+        mjqLD = mjqLD[np.argsort(mjd.mapM2M)]
+      _assert_eq(d.qLD.numpy()[0, 0], mjqLD, "qLD (sparse)")
       _assert_eq(d.qLDiagInv.numpy()[0], mjd.qLDiagInv, "qLDiagInv")
     else:
       _assert_eq(d.qLD.numpy()[0], qLD, "qLD (dense)")
