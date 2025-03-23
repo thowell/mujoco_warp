@@ -538,6 +538,7 @@ def fwd_actuation(m: Model, d: Data):
     f = gain * ctrl + bias
     if m.actuator_forcelimited[uid]:
       r = m.actuator_forcerange[uid]
+      f = wp.clamp(f, r[0], r[1])
     force[worldid, uid] = f
 
   @kernel
