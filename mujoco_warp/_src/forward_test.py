@@ -44,7 +44,6 @@ class ForwardTest(absltest.TestCase):
     mjm.opt.jacobian = is_sparse
     mjd = mujoco.MjData(mjm)
     mujoco.mj_resetDataKeyframe(mjm, mjd, 1)  # reset to stand_on_left_leg
-    np.random.seed(42)
     mjd.qvel = np.random.uniform(low=-0.01, high=0.01, size=mjd.qvel.shape)
     mjd.ctrl = np.random.normal(scale=1, size=mjd.ctrl.shape)
     mujoco.mj_forward(mjm, mjd)
@@ -87,7 +86,6 @@ class ForwardTest(absltest.TestCase):
     for arr in (d.qfrc_smooth, d.qacc_smooth):
       arr.zero_()
 
-    mjwarp.factor_m(m, d)  # for dense, get tile cholesky factorization
     mjwarp.fwd_acceleration(m, d)
 
     _assert_eq(d.qfrc_smooth.numpy()[0], mjd.qfrc_smooth, "qfrc_smooth")
