@@ -742,6 +742,9 @@ def _linesearch(m: types.Model, d: types.Data):
   def _zero_jv(d: types.Data):
     efcid = wp.tid()
 
+    if efcid >= d.nefc[0]:
+      return
+
     if wp.static(m.opt.iterations) > 1:
       if d.efc.done[d.efc.worldid[efcid]]:
         return
