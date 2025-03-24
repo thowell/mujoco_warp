@@ -13,6 +13,8 @@
 # limitations under the License.
 # ==============================================================================
 
+from typing import Optional
+
 import mujoco
 import numpy as np
 import warp as wp
@@ -509,25 +511,37 @@ def make_data(
 def put_data(
   mjm: mujoco.MjModel,
   mjd: mujoco.MjData,
-  nworld: int = 1,
-  nconmax: int = -1,
-  njmax: int = -1,
+  nworld: Optional[int] = None,
+  nconmax: Optional[int] = None,
+  njmax: Optional[int] = None,
 ) -> types.Data:
   d = types.Data()
-  d.nworld = nworld
 
-  # TODO(team): move to Model?
-  if nconmax == -1:
-    # TODO(team): heuristic for nconmax
-    nconmax = max(512, mjd.ncon * nworld)
-  d.nconmax = nconmax
-  if njmax == -1:
-    # TODO(team): heuristic for njmax
-    njmax = max(512, mjd.nefc * nworld)
-  d.njmax = njmax
+  nworld = nworld or 1
+  # TODO(team): better heuristic for nconmax
+  nconmax = nconmax or max(512, mjd.ncon * nworld)
+  # TODO(team): better heuristic for njmax
+  njmax = njmax or max(512, mjd.nefc * nworld)
+
+  if nworld < 1:
+    raise ValueError("nworld must be >= 1")
+
+  if nconmax < 1:
+    raise ValueError("nconmax must be >= 1")
+
+  if njmax < 1:
+    raise ValueError("njmax must be >= 1")
+
+  if nworld * mjd.ncon > nconmax:
+    raise ValueError(f"nconmax overflow (nconmax must be >= {nworld * mjd.ncon})")
 
   if nworld * mjd.nefc > njmax:
-    raise ValueError("nworld * nefc > njmax")
+    raise ValueError(f"njmax overflow (njmax must be >= {nworld * mjd.nefc})")
+
+  d.nworld = nworld
+  # TODO(team): move nconmax and njmax to Model?
+  d.nconmax = nconmax
+  d.njmax = njmax
 
   d.ncon = wp.array([mjd.ncon * nworld], dtype=wp.int32, ndim=1)
   d.nl = mjd.nl

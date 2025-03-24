@@ -24,8 +24,9 @@ import warp as wp
 from etils import epath
 
 from . import io
-from . import types
 from . import warp_util
+from .types import Data
+from .types import Model
 
 
 def fixture(fname: str, keyframe: int = -1, sparse: bool = True):
@@ -55,46 +56,24 @@ def _sum(stack1, stack2):
 
 
 def benchmark(
-  fn: Callable[[types.Model, types.Data], None],
-  mjm: mujoco.MjModel,
-  mjd: mujoco.MjData,
-  nstep: int = 1000,
-  batch_size: int = 1024,
-  solver: str = "cg",
-  iterations: int = 1,
-  ls_iterations: int = 4,
-  ls_parallel: bool = False,
-  nconmax: int = -1,
-  njmax: int = -1,
+  fn: Callable[[Model, Data], None],
+  m: Model,
+  d: Data,
+  nstep: int,
   event_trace: bool = False,
   measure_alloc: bool = False,
-) -> Tuple[float, float, dict, int, list, list]:
-  """Benchmark a model."""
-
-  if solver == "cg":
-    mjm.opt.solver = mujoco.mjtSolver.mjSOL_CG
-  elif solver == "newton":
-    mjm.opt.solver = mujoco.mjtSolver.mjSOL_NEWTON
-
-  mjm.opt.iterations = iterations
-  mjm.opt.ls_iterations = ls_iterations
-
-  m = io.put_model(mjm)
-  m.opt.ls_parallel = ls_parallel
-  d = io.put_data(mjm, mjd, nworld=batch_size, nconmax=nconmax, njmax=njmax)
-
+) -> Tuple[float, float, dict, list, list]:
+  """Benchmark a function of Model and Data."""
   jit_beg = time.perf_counter()
 
-  fn(m, d)
-  # double warmup to work around issues with compilation during graph capture:
   fn(m, d)
 
   jit_end = time.perf_counter()
   jit_duration = jit_end - jit_beg
   wp.synchronize()
+
   trace = {}
-  ncon = []
-  nefc = []
+  ncon, nefc = [], []
 
   with warp_util.EventTracer(enabled=event_trace) as tracer:
     # capture the whole function as a CUDA graph
@@ -117,4 +96,4 @@ def benchmark(
     run_end = time.perf_counter()
     run_duration = run_end - run_beg
 
-  return jit_duration, run_duration, trace, batch_size * nstep, ncon, nefc
+  return jit_duration, run_duration, trace, ncon, nefc

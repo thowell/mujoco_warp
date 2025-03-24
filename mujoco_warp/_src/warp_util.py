@@ -27,8 +27,23 @@ _STACK = None
 
 
 class EventTracer:
+  """Calculates elapsed times of functions annotated with `event_scope`.
+
+  Use as a context manager like so:
+
+    @event_trace
+    def my_warp_function(...):
+      ...
+
+    with EventTracer() as tracer:
+      my_warp_function(...)
+      print(tracer.trace())
+  """
+
   def __init__(self, enabled: bool = True):
     global _STACK
+    if _STACK is not None:
+      raise ValueError("only one EventTracer can run at a time")
     if enabled:
       _STACK = {}
 
@@ -36,6 +51,7 @@ class EventTracer:
     return self
 
   def trace(self) -> dict:
+    """Calculates elapsed times for every node of the trace."""
     global _STACK
 
     if _STACK is None:
@@ -60,7 +76,22 @@ class EventTracer:
     _STACK = None
 
 
+def _merge(a: dict, b: dict) -> dict:
+  """Merges two event trace stacks."""
+  ret = {}
+  if not a or not b:
+    return dict(**a, **b)
+  if set(a) != set(b):
+    raise ValueError("incompatible stacks")
+  for key in a:
+    a1_events, a1_substack = a[key]
+    a2_events, a2_substack = b[key]
+    ret[key] = (a1_events + a2_events, _merge(a1_substack, a2_substack))
+  return ret
+
+
 def event_scope(fn, name: str = ""):
+  """Wraps a function and records an event before and after the fucntion invocation."""
   name = name or getattr(fn, "__name__")
 
   @functools.wraps(fn)
@@ -77,9 +108,11 @@ def event_scope(fn, name: str = ""):
     wp.record_event(end)
     # pop back up to current level
     sub_stack, _STACK = _STACK, saved_stack
-    # append events
-    events, _ = _STACK.get(name, ((), None))
-    _STACK[name] = (events + ((beg, end),), sub_stack)
+    # append events and substack
+    prev_events, prev_substack = _STACK.get(name, ((), {}))
+    events = prev_events + ((beg, end),)
+    sub_stack = _merge(prev_substack, sub_stack)
+    _STACK[name] = (events, sub_stack)
     return res
 
   return wrapper
