@@ -66,12 +66,12 @@ The following features are implemented:
 Benchmark as follows:
 
 ```bash
-mjwarp-testspeed --function=step --mjcf=humanoid/humanoid.xml --batch_size=8192
+mjwarp-testspeed --function=step --mjcf=test_data/humanoid/humanoid.xml --batch_size=8192
 ```
 
 To get a full trace of the physics steps (e.g. timings of the subcomponents) run the following:
 
 ```bash
-mjwarp-testspeed --function=step --mjcf=humanoid/humanoid.xml --batch_size=8192 --event_trace=True
+mjwarp-testspeed --function=step --mjcf=test_data/humanoid/humanoid.xml --batch_size=8192 --event_trace=True
 ```
 
