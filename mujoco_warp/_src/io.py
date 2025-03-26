@@ -24,18 +24,15 @@ from . import types
 
 
 def put_model(mjm: mujoco.MjModel) -> types.Model:
-  trntype_supported = np.isin(mjm.actuator_trntype, list(types.TrnType))
-  if (~trntype_supported).any():
-    raise NotImplementedError(
-      f"Actuator transmission type {mjm.actuator_trntype[~trntype_supported]} not supported."
-    )
+  # check supported features
+  for field, field_types, field_str in (
+    (mjm.actuator_trntype, types.TrnType, "Actuator transmission type"),
+    (mjm.actuator_dyntype, types.DynType, "Actuator dynamics type"),
+  ):
+    unsupported = ~np.isin(field, list(field_types))
+    if unsupported.any():
+      raise NotImplementedError(f"{field_str} {field[unsupported]} not supported.")
 
-  dyntype_unsupported = ~np.isin(mjm.actuator_dyntype, list(types.DynType))
-  if dyntype_unsupported.any():
-    raise NotImplementedError(
-      f"Actuator dynamics type {mjm.actuator_dyntype[dyntype_unsupported]} not supported."
-    )
-      
   if mjm.neq > 0:
     raise NotImplementedError("Equality constraints are unsupported.")
 
