@@ -29,6 +29,7 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
     (mjm.actuator_trntype, types.TrnType, "Actuator transmission type"),
     (mjm.actuator_dyntype, types.DynType, "Actuator dynamics type"),
     (mjm.actuator_gaintype, types.GainType, "Gain type"),
+    (mjm.actuator_biastype, types.BiasType, "Bias type"),
   ):
     unsupported = ~np.isin(field, list(field_types))
     if unsupported.any():
