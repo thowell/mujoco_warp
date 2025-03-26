@@ -43,6 +43,12 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
   if mjm.opt.solver not in set(types.SolverType):
     raise NotImplementedError(f"Solver: {mjm.opt.solver} is unsupported.")
 
+  if mjm.opt.wind.any():
+    raise NotImplementedError(f"Wind is unsupported.")
+
+  if mjm.opt.density > 0 or mjm.opt.viscosity > 0:
+    raise NotImplementedError(f"Fluid forces are unsupported.")
+
   m = types.Model()
 
   m.nq = mjm.nq
