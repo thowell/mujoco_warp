@@ -97,12 +97,9 @@ class IOTest(absltest.TestCase):
           <body name="body">          
             <geom type="sphere" size=".1"/>
             <site name="site0"/>
-            <joint name="slide" type="slide"/>
-            <body pos="0 0 .1">
-              <geom type="sphere" size=".1"/>
-              <site name="site1"/>
-            </body>
+            <joint type="slide"/>
           </body>
+          <site name="site1"/>
         </worldbody>  
         <tendon>
           <spatial name="tendon">
@@ -111,10 +108,10 @@ class IOTest(absltest.TestCase):
           </spatial>                      
         </tendon>
         <actuator>
-          <position cranksite="site0" slidersite="site1" cranklength=".1"/>
-          <motor tendon="tendon"/>
-          <position site="site0" refsite="site1"/>
-          <adhesion body="body" ctrlrange="0 1"/>
+          <general cranksite="site0" slidersite="site1" cranklength=".1"/>
+          <general tendon="tendon"/>
+          <general site="site0" refsite="site1"/>
+          <general body="body" ctrlrange="0 1"/>
         </actuator>           
       </mujoco>
     """)
