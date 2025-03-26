@@ -1,5 +1,5 @@
 <mujoco model="n Humanoids">
-  <option timestep="0.005" solver="CG"/>
+  <option timestep="0.005"/>
 
   <size memory="100M"/>
 
