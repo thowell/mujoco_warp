@@ -90,6 +90,38 @@ class IOTest(absltest.TestCase):
     with self.assertRaises(NotImplementedError):
       mjwarp.put_model(mjm)
 
+  def test_actuator_trntype(self):
+    mjm = mujoco.MjModel.from_xml_string("""
+      <mujoco>
+        <worldbody>
+          <body name="body">          
+            <geom type="sphere" size=".1"/>
+            <site name="site0"/>
+            <joint name="slide" type="slide"/>
+            <body pos="0 0 .1">
+              <geom type="sphere" size=".1"/>
+              <site name="site1"/>
+            </body>
+          </body>
+        </worldbody>  
+        <tendon>
+          <spatial name="tendon">
+            <site site="site0"/>
+            <site site="site1"/>
+          </spatial>                      
+        </tendon>
+        <actuator>
+          <position cranksite="site0" slidersite="site1" cranklength=".1"/>
+          <motor tendon="tendon"/>
+          <position site="site0" refsite="site1"/>
+          <adhesion body="body" ctrlrange="0 1"/>
+        </actuator>           
+      </mujoco>
+    """)
+
+    with self.assertRaises(NotImplementedError):
+      mjwarp.put_model(mjm)
+
 
 if __name__ == "__main__":
   wp.init()
