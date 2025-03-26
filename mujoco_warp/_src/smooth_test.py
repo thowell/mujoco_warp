@@ -104,9 +104,9 @@ class SmoothTest(parameterized.TestCase):
 
     if sparse:
       mjqLD = mjd.qLD
-      if version.parse(mujoco.__version__) > version.parse("3.2.7"):
-        # compare with legacy format.
-        mjqLD = mjqLD[np.argsort(mjd.mapM2M)]
+      # if version.parse(mujoco.__version__) > version.parse("3.2.7"):
+      #   # compare with legacy format.
+      #   # mjqLD = mjqLD[np.argsort(mjd.mapM2M)]
       _assert_eq(d.qLD.numpy()[0, 0], mjqLD, "qLD (sparse)")
       _assert_eq(d.qLDiagInv.numpy()[0], mjd.qLDiagInv, "qLDiagInv")
     else:

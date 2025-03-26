@@ -541,9 +541,9 @@ def put_data(
 
   if support.is_sparse(mjm):
     qM, qLD = np.expand_dims(mjd.qM, axis=0), mjd.qLD
-    if version.parse(mujoco.__version__) > version.parse("3.2.7"):
-      # convert from CSR back to legacy format.
-      qLD = qLD[np.argsort(mjd.mapM2M)]
+    # if version.parse(mujoco.__version__) > version.parse("3.2.7"):
+    #   # convert from CSR back to legacy format.
+    #   qLD = qLD[np.argsort(mjd.mapM2M)]
     qLD = np.expand_dims(qLD, axis=0)
     efc_J = np.zeros((mjd.nefc, mjm.nv))
     mujoco.mju_sparse2dense(
@@ -554,7 +554,6 @@ def put_data(
     mujoco.mj_fullM(mjm, qM, mjd.qM)
     qLD = np.linalg.cholesky(qM)
     efc_J = mjd.efc_J.reshape((mjd.nefc, mjm.nv))
-  mapM2M = np.expand_dims(mjd.mapM2M, axis=0)
 
   # TODO(taylorhowell): sparse actuator_moment
   actuator_moment = np.zeros((mjm.nu, mjm.nv))
@@ -590,7 +589,7 @@ def put_data(
   d.crb = wp.array(tile(mjd.crb), dtype=types.vec10, ndim=2)
   d.qM = wp.array(tile(qM), dtype=wp.float32, ndim=3)
   d.qLD = wp.array(tile(qLD), dtype=wp.float32, ndim=3)
-  d.mapM2M = wp.array(tile(mapM2M), dtype=wp.int32, ndim=3)
+  d.mapM2M = wp.array(mjd.mapM2M, dtype=wp.int32, ndim=1)
   d.qLDiagInv = wp.array(tile(mjd.qLDiagInv), dtype=wp.float32, ndim=2)
   d.ctrl = wp.array(tile(mjd.ctrl), dtype=wp.float32, ndim=2)
   d.actuator_velocity = wp.array(tile(mjd.actuator_velocity), dtype=wp.float32, ndim=2)
@@ -727,7 +726,36 @@ def put_data(
   d.collision_pair = wp.empty(nconmax, dtype=wp.vec2i, ndim=1)
   d.collision_worldid = wp.empty(nconmax, dtype=wp.int32, ndim=1)
   d.ncollision = wp.zeros(1, dtype=wp.int32, ndim=1)
+  
+  d.M_rownnz = wp.array(mjd.M_rownnz, dtype=wp.int32, ndim=1)
+  d.M_rowadr = wp.array(mjd.M_rowadr, dtype=wp.int32, ndim=1)
+  d.M_colind = wp.array(mjd.M_colind, dtype=wp.int32, ndim=1)
+  
+  if support.is_sparse(mjm):
+    qLD_updates, dof_depth = {}, np.zeros(mjm.nv, dtype=int) - 1
 
+    rownnz = mjd.M_rownnz
+    rowadr = mjd.M_rowadr
+
+    for k in range(mjm.nv):
+        dof_depth[k] = dof_depth[mjm.dof_parentid[k]] + 1
+        i = mjm.dof_parentid[k]
+        diag_k = rowadr[k] + rownnz[k] - 1
+        Madr_ki = diag_k - 1
+        while i > -1:
+            qLD_updates.setdefault(dof_depth[i], []).append((i, k, Madr_ki))
+            i = mjm.dof_parentid[i]
+            Madr_ki -= 1
+
+    qLD_update_tree = np.concatenate([qLD_updates[i] for i in range(len(qLD_updates))])
+    tree_off = [0] + [len(qLD_updates[i]) for i in range(len(qLD_updates))]
+    qLD_update_treeadr = np.cumsum(tree_off)[:-1]
+    
+    d.qLD_update_tree = wp.array(qLD_update_tree, dtype=wp.vec3i, ndim=1)
+    d.qLD_update_treeadr = wp.array(
+      qLD_update_treeadr, dtype=wp.int32, ndim=1, device="cpu"
+    )
+  
   return d
 
 

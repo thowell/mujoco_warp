@@ -314,40 +314,86 @@ def crb(m: Model, d: Data):
     wp.launch(qM_dense, dim=(d.nworld, m.nv), inputs=[m, d])
 
 
+# def _factor_i_sparse(m: Model, d: Data, M: array3df, L: array3df, D: array2df):
+#   """Sparse L'*D*L factorizaton of inertia-like matrix M, assumed spd."""
+
+#   @kernel
+#   def qLD_acc(m: Model, leveladr: int, L: array3df):
+#     worldid, nodeid = wp.tid()
+#     update = m.qLD_update_tree[leveladr + nodeid]
+#     i, k, Madr_ki = update[0], update[1], update[2]
+#     Madr_i = m.dof_Madr[i]
+#     # tmp = M(k,i) / M(k,k)
+#     tmp = L[worldid, 0, Madr_ki] / L[worldid, 0, m.dof_Madr[k]]
+#     for j in range(m.dof_Madr[i + 1] - Madr_i):
+#       # M(i,j) -= M(k,j) * tmp
+#       wp.atomic_sub(L[worldid, 0], Madr_i + j, L[worldid, 0, Madr_ki + j] * tmp)
+#     # M(k,i) = tmp
+#     L[worldid, 0, Madr_ki] = tmp
+
+#   @kernel
+#   def qLDiag_div(m: Model, L: array3df, D: array2df):
+#     worldid, dofid = wp.tid()
+#     D[worldid, dofid] = 1.0 / L[worldid, 0, m.dof_Madr[dofid]]
+
+#   kernel_copy(L, M)
+
+#   qLD_update_treeadr = m.qLD_update_treeadr.numpy()
+
+#   for i in reversed(range(len(qLD_update_treeadr))):
+#     if i == len(qLD_update_treeadr) - 1:
+#       beg, end = qLD_update_treeadr[i], m.qLD_update_tree.shape[0]
+#     else:
+#       beg, end = qLD_update_treeadr[i], qLD_update_treeadr[i + 1]
+#     wp.launch(qLD_acc, dim=(d.nworld, end - beg), inputs=[m, beg, L])
+
+#   wp.launch(qLDiag_div, dim=(d.nworld, m.nv), inputs=[m, L, D])
+
+
 def _factor_i_sparse(m: Model, d: Data, M: array3df, L: array3df, D: array2df):
   """Sparse L'*D*L factorizaton of inertia-like matrix M, assumed spd."""
 
   @kernel
-  def qLD_acc(m: Model, leveladr: int, L: array3df):
+  def qLD_acc(d: Data, leveladr: int, L: array3df):
     worldid, nodeid = wp.tid()
-    update = m.qLD_update_tree[leveladr + nodeid]
+    update = d.qLD_update_tree[leveladr + nodeid]
     i, k, Madr_ki = update[0], update[1], update[2]
-    Madr_i = m.dof_Madr[i]
+    # Madr_i = d.dof_Madr[i]
+    Madr_i = d.M_rowadr[i] # Address of row being updated
+    diag_k = d.M_rowadr[k] + d.M_rownnz[k] - 1 # Address of diagonal element of k
     # tmp = M(k,i) / M(k,k)
-    tmp = L[worldid, 0, Madr_ki] / L[worldid, 0, m.dof_Madr[k]]
-    for j in range(m.dof_Madr[i + 1] - Madr_i):
+    tmp = L[worldid, 0, Madr_ki] / L[worldid, 0, diag_k]
+    for j in range(d.M_rownnz[i]):
       # M(i,j) -= M(k,j) * tmp
-      wp.atomic_sub(L[worldid, 0], Madr_i + j, L[worldid, 0, Madr_ki + j] * tmp)
+      wp.atomic_sub(L[worldid, 0], Madr_i + j, L[worldid, 0, d.M_rowadr[k] + j] * tmp)
     # M(k,i) = tmp
     L[worldid, 0, Madr_ki] = tmp
 
   @kernel
-  def qLDiag_div(m: Model, L: array3df, D: array2df):
+  def qLDiag_div(d: Data, L: array3df, D: array2df):
     worldid, dofid = wp.tid()
-    D[worldid, dofid] = 1.0 / L[worldid, 0, m.dof_Madr[dofid]]
+    diag_i = d.M_rowadr[dofid] + d.M_rownnz[dofid] - 1 # Address of diagonal element of i
+    D[worldid, dofid] = 1.0 / L[worldid, 0, diag_i]
 
-  kernel_copy(L, M)
+  @kernel
+  def copy_CSR(L: wp.array(dtype=wp.float32, ndim=3),
+               M: wp.array(dtype=wp.float32, ndim=3),
+               mapM2M: wp.array(dtype=wp.int32, ndim=1)):
+    worldid, ind = wp.tid()
+    L[worldid, 0, ind] = M[worldid, 0, mapM2M[ind]]
+  wp.launch(copy_CSR, dim=(d.nworld, m.nM), inputs=[L, M, d.mapM2M])
 
-  qLD_update_treeadr = m.qLD_update_treeadr.numpy()
+
+  qLD_update_treeadr = d.qLD_update_treeadr.numpy()
 
   for i in reversed(range(len(qLD_update_treeadr))):
     if i == len(qLD_update_treeadr) - 1:
-      beg, end = qLD_update_treeadr[i], m.qLD_update_tree.shape[0]
+      beg, end = qLD_update_treeadr[i], d.qLD_update_tree.shape[0]
     else:
       beg, end = qLD_update_treeadr[i], qLD_update_treeadr[i + 1]
-    wp.launch(qLD_acc, dim=(d.nworld, end - beg), inputs=[m, beg, L])
+    wp.launch(qLD_acc, dim=(d.nworld, end - beg), inputs=[d, beg, L])
 
-  wp.launch(qLDiag_div, dim=(d.nworld, m.nv), inputs=[m, L, D])
+  wp.launch(qLDiag_div, dim=(d.nworld, m.nv), inputs=[d, L, D])
 
 
 def _factor_i_dense(m: Model, d: Data, M: wp.array, L: wp.array):
