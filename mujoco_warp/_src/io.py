@@ -24,6 +24,17 @@ from . import types
 
 
 def put_model(mjm: mujoco.MjModel) -> types.Model:
+  # check supported features
+  for field, field_types, field_str in (
+    (mjm.actuator_trntype, types.TrnType, "Actuator transmission type"),
+    (mjm.actuator_dyntype, types.DynType, "Actuator dynamics type"),
+    (mjm.actuator_gaintype, types.GainType, "Gain type"),
+    (mjm.actuator_biastype, types.BiasType, "Bias type"),
+  ):
+    unsupported = ~np.isin(field, list(field_types))
+    if unsupported.any():
+      raise NotImplementedError(f"{field_str} {field[unsupported]} not supported.")
+
   if mjm.neq > 0:
     raise NotImplementedError("Equality constraints are unsupported.")
 
@@ -35,6 +46,9 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
 
   if mjm.nplugin > 0:
     raise NotImplementedError("Plugins are unsupported.")
+
+  if mjm.nflex > 0:
+    raise NotImplementedError("Flexes are unsupported.")
 
   # check options
   if mjm.opt.integrator not in set(types.IntegratorType):
