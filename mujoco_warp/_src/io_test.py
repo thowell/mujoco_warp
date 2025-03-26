@@ -188,8 +188,8 @@ class IOTest(absltest.TestCase):
       </mujoco>
     """)
 
-    # with self.assertRaises(NotImplementedError):
-    mjwarp.put_model(mjm)
+    with self.assertRaises(NotImplementedError):
+      mjwarp.put_model(mjm)
 
 
 if __name__ == "__main__":
