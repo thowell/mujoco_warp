@@ -29,16 +29,11 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
     (mjm.actuator_trntype, types.TrnType, "Actuator transmission type"),
     (mjm.actuator_dyntype, types.DynType, "Actuator dynamics type"),
     (mjm.actuator_gaintype, types.GainType, "Gain type"),
+    (mjm.actuator_biastype, types.BiasType, "Bias type"),
   ):
     unsupported = ~np.isin(field, list(field_types))
     if unsupported.any():
       raise NotImplementedError(f"{field_str} {field[unsupported]} not supported.")
-
-  biastype_supported = np.isin(mjm.actuator_biastype, list(types.BiasType))
-  if (~biastype_supported).any():
-    raise NotImplementedError(
-      f"Bias type {mjm.actuator_biastype[~biastype_supported]} is unsupported."
-    )
 
   if mjm.neq > 0:
     raise NotImplementedError("Equality constraints are unsupported.")
