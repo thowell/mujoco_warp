@@ -24,12 +24,18 @@ from . import types
 
 
 def put_model(mjm: mujoco.MjModel) -> types.Model:
+  trntype_supported = np.isin(mjm.actuator_trntype, list(types.TrnType))
+  if (~trntype_supported).any():
+    raise NotImplementedError(
+      f"Actuator transmission type {mjm.actuator_trntype[~trntype_supported]} not supported."
+    )
+
   dyntype_unsupported = ~np.isin(mjm.actuator_dyntype, list(types.DynType))
   if dyntype_unsupported.any():
     raise NotImplementedError(
       f"Actuator dynamics type {mjm.actuator_dyntype[dyntype_unsupported]} not supported."
     )
-
+      
   if mjm.neq > 0:
     raise NotImplementedError("Equality constraints are unsupported.")
 
