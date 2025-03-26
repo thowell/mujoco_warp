@@ -24,8 +24,11 @@ from . import types
 
 
 def put_model(mjm: mujoco.MjModel) -> types.Model:
-  if mjm.neq > 0:
-    raise NotImplementedError("Equality constraints are unsupported.")
+  eq_type_unsupported = ~np.isin(mjm.eq_type, list(types.EqType))
+  if eq_type_unsupported.any():
+    raise NotImplementedError(
+      f"Equality constraint types {mjm.eq_type[eq_type_unsupported]} are unsupported."
+    )
 
   if mjm.nsensor > 0:
     raise NotImplementedError("Sensors are unsupported.")
