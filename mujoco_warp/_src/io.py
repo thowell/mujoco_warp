@@ -24,6 +24,12 @@ from . import types
 
 
 def put_model(mjm: mujoco.MjModel) -> types.Model:
+  biastype_supported = np.isin(mjm.actuator_biastype, list(types.BiasType))
+  if (~biastype_supported).any():
+    raise NotImplementedError(
+      f"Bias type {mjm.actuator_biastype[~biastype_supported]} is unsupported."
+    )
+
   if mjm.neq > 0:
     raise NotImplementedError("Equality constraints are unsupported.")
 
