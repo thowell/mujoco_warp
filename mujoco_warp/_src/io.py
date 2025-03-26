@@ -44,6 +44,9 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
   if mjm.ntendon > 0:
     raise NotImplementedError("Tendons are unsupported.")
 
+  if mjm.nplugin > 0:
+    raise NotImplementedError("Plugins are unsupported.")
+
   if mjm.nflex > 0:
     raise NotImplementedError("Flexes are unsupported.")
 
