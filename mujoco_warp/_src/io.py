@@ -24,6 +24,12 @@ from . import types
 
 
 def put_model(mjm: mujoco.MjModel) -> types.Model:
+  gaintype_supported = np.isin(mjm.actuator_gaintype, list(types.GainType))
+  if (~gaintype_supported).any():
+    raise NotImplementedError(
+      f"Gain type {mjm.actuator_gaintype[~gaintype_supported]} is unsupported."
+    )
+
   if mjm.neq > 0:
     raise NotImplementedError("Equality constraints are unsupported.")
 
