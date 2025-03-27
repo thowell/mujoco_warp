@@ -102,8 +102,7 @@ class SmoothTest(parameterized.TestCase):
     mjwarp.factor_m(m, d)
 
     if sparse:
-      mjqLD = mjd.qLD
-      _assert_eq(d.qLD.numpy()[0, 0], mjqLD, "qLD (sparse)")
+      _assert_eq(d.qLD.numpy()[0, 0], mjd.qLD, "qLD (sparse)")
       _assert_eq(d.qLDiagInv.numpy()[0], mjd.qLDiagInv, "qLDiagInv")
     else:
       _assert_eq(d.qLD.numpy()[0], qLD, "qLD (dense)")

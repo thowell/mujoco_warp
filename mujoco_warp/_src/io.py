@@ -566,8 +566,8 @@ def put_data(
     return np.tile(x, (nworld,) + (1,) * len(x.shape))
 
   if support.is_sparse(mjm):
-    qM, qLD = np.expand_dims(mjd.qM, axis=0), mjd.qLD
-    qLD = np.expand_dims(qLD, axis=0)
+    qM = np.expand_dims(mjd.qM, axis=0)
+    qLD = np.expand_dims(mjd.qLD, axis=0)
     efc_J = np.zeros((mjd.nefc, mjm.nv))
     mujoco.mju_sparse2dense(
       efc_J, mjd.efc_J, mjd.efc_J_rownnz, mjd.efc_J_rowadr, mjd.efc_J_colind
