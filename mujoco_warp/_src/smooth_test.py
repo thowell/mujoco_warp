@@ -20,7 +20,6 @@ import numpy as np
 import warp as wp
 from absl.testing import absltest
 from absl.testing import parameterized
-from packaging import version
 
 import mujoco_warp as mjwarp
 
