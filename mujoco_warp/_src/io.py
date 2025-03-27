@@ -46,12 +46,13 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
       raise NotImplementedError(f"{msg} are unsupported.")
 
   # check options
-  for opt, msg in (
-    (mjm.opt.integrator, "Integrator"),
-    (mjm.opt.cone, "Cone"),
-    (mjm.opt.solver, "Solver"),
+  for opt, opt_types, msg in (
+    (mjm.opt.integrator, types.IntegratorType, "Integrator"),
+    (mjm.opt.cone, types.ConeType, "Cone"),
+    (mjm.opt.solver, types.SolverType, "Solver"),
   ):
-    raise NotImplementedError(f"{msg} {opt} is unsupported.")
+    if opt not in set(opt_types):
+      raise NotImplementedError(f"{msg} {opt} is unsupported.")
 
   if mjm.opt.wind.any():
     raise NotImplementedError("Wind is unsupported.")
