@@ -133,20 +133,46 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
   if support.is_sparse(mjm):
     # qLD_update_tree has dof tree ordering of qLD updates for sparse factor m
     # qLD_update_treeadr contains starting index of each dof tree level
-    qLD_updates, dof_depth = {}, np.zeros(mjm.nv, dtype=int) - 1
-    for k in range(mjm.nv):
-      dof_depth[k] = dof_depth[mjm.dof_parentid[k]] + 1
-      i = mjm.dof_parentid[k]
-      Madr_ki = mjm.dof_Madr[k] + 1
-      while i > -1:
-        qLD_updates.setdefault(dof_depth[i], []).append((i, k, Madr_ki))
-        i = mjm.dof_parentid[i]
-        Madr_ki += 1
+    mjd = mujoco.MjData(mjm)
+    if version.parse(mujoco.__version__) > version.parse("3.2.7"):
+      m.M_rownnz = wp.array(mjd.M_rownnz, dtype=wp.int32, ndim=1)
+      m.M_rowadr = wp.array(mjd.M_rowadr, dtype=wp.int32, ndim=1)
+      m.M_colind = wp.array(mjd.M_colind, dtype=wp.int32, ndim=1)
+      m.mapM2M = wp.array(mjd.mapM2M, dtype=wp.int32, ndim=1)
+      qLD_updates, dof_depth = {}, np.zeros(mjm.nv, dtype=int) - 1
 
-    # qLD_treeadr contains starting indicies of each level of sparse updates
-    qLD_update_tree = np.concatenate([qLD_updates[i] for i in range(len(qLD_updates))])
-    tree_off = [0] + [len(qLD_updates[i]) for i in range(len(qLD_updates))]
-    qLD_update_treeadr = np.cumsum(tree_off)[:-1]
+      rownnz = mjd.M_rownnz
+      rowadr = mjd.M_rowadr
+
+      for k in range(mjm.nv):
+          dof_depth[k] = dof_depth[mjm.dof_parentid[k]] + 1
+          i = mjm.dof_parentid[k]
+          diag_k = rowadr[k] + rownnz[k] - 1
+          Madr_ki = diag_k - 1
+          while i > -1:
+              qLD_updates.setdefault(dof_depth[i], []).append((i, k, Madr_ki))
+              i = mjm.dof_parentid[i]
+              Madr_ki -= 1
+
+      qLD_update_tree = np.concatenate([qLD_updates[i] for i in range(len(qLD_updates))])
+      tree_off = [0] + [len(qLD_updates[i]) for i in range(len(qLD_updates))]
+      qLD_update_treeadr = np.cumsum(tree_off)[:-1]
+    else:
+      qLD_updates, dof_depth = {}, np.zeros(mjm.nv, dtype=int) - 1
+      for k in range(mjm.nv):
+        dof_depth[k] = dof_depth[mjm.dof_parentid[k]] + 1
+        i = mjm.dof_parentid[k]
+        Madr_ki = mjm.dof_Madr[k] + 1
+        while i > -1:
+          qLD_updates.setdefault(dof_depth[i], []).append((i, k, Madr_ki))
+          i = mjm.dof_parentid[i]
+          Madr_ki += 1
+
+      # qLD_treeadr contains starting indicies of each level of sparse updates
+      qLD_update_tree = np.concatenate([qLD_updates[i] for i in range(len(qLD_updates))])
+      tree_off = [0] + [len(qLD_updates[i]) for i in range(len(qLD_updates))]
+      qLD_update_treeadr = np.cumsum(tree_off)[:-1]
+
   else:
     # qLD_tile has the dof id of each tile in qLD for dense factor m
     # qLD_tileadr contains starting index in qLD_tile of each tile group
@@ -586,8 +612,6 @@ def put_data(
   d.crb = wp.array(tile(mjd.crb), dtype=types.vec10, ndim=2)
   d.qM = wp.array(tile(qM), dtype=wp.float32, ndim=3)
   d.qLD = wp.array(tile(qLD), dtype=wp.float32, ndim=3)
-  if version.parse(mujoco.__version__) > version.parse("3.2.7"):
-    d.mapM2M = wp.array(mjd.mapM2M, dtype=wp.int32, ndim=1)
   d.qLDiagInv = wp.array(tile(mjd.qLDiagInv), dtype=wp.float32, ndim=2)
   d.ctrl = wp.array(tile(mjd.ctrl), dtype=wp.float32, ndim=2)
   d.actuator_velocity = wp.array(tile(mjd.actuator_velocity), dtype=wp.float32, ndim=2)
@@ -724,37 +748,6 @@ def put_data(
   d.collision_pair = wp.empty(nconmax, dtype=wp.vec2i, ndim=1)
   d.collision_worldid = wp.empty(nconmax, dtype=wp.int32, ndim=1)
   d.ncollision = wp.zeros(1, dtype=wp.int32, ndim=1)
-  
-  if support.is_sparse(mjm) and version.parse(mujoco.__version__) > version.parse("3.2.7"):
-    d.M_rownnz = wp.array(mjd.M_rownnz, dtype=wp.int32, ndim=1)
-    d.M_rowadr = wp.array(mjd.M_rowadr, dtype=wp.int32, ndim=1)
-    d.M_colind = wp.array(mjd.M_colind, dtype=wp.int32, ndim=1)
-
-    # qLD_update_tree has dof tree ordering of qLD updates for sparse factor m
-    # qLD_update_treeadr contains starting index of each dof tree level
-    qLD_updates, dof_depth = {}, np.zeros(mjm.nv, dtype=int) - 1
-
-    rownnz = mjd.M_rownnz
-    rowadr = mjd.M_rowadr
-
-    for k in range(mjm.nv):
-        dof_depth[k] = dof_depth[mjm.dof_parentid[k]] + 1
-        i = mjm.dof_parentid[k]
-        diag_k = rowadr[k] + rownnz[k] - 1
-        Madr_ki = diag_k - 1
-        while i > -1:
-            qLD_updates.setdefault(dof_depth[i], []).append((i, k, Madr_ki))
-            i = mjm.dof_parentid[i]
-            Madr_ki -= 1
-
-    qLD_update_tree = np.concatenate([qLD_updates[i] for i in range(len(qLD_updates))])
-    tree_off = [0] + [len(qLD_updates[i]) for i in range(len(qLD_updates))]
-    qLD_update_treeadr = np.cumsum(tree_off)[:-1]
-
-    d.qLD_update_tree = wp.array(qLD_update_tree, dtype=wp.vec3i, ndim=1)
-    d.qLD_update_treeadr = wp.array(
-      qLD_update_treeadr, dtype=wp.int32, ndim=1, device="cpu"
-    )
   
   return d
 

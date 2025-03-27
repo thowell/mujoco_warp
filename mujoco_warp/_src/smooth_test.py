@@ -109,7 +109,7 @@ class SmoothTest(parameterized.TestCase):
     else:
       _assert_eq(d.qLD.numpy()[0], qLD, "qLD (dense)")
 
-  @parameterized.parameters((True,))
+  @parameterized.parameters(True, False)
   def test_solve_m(self, sparse: bool):
     """Tests solve_m."""
     mjm, mjd, m, d = test_util.fixture("pendula.xml", sparse=sparse)

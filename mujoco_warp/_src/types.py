@@ -397,6 +397,12 @@ class Model:
     qM_mulm_i: sparse mass matrix addressing
     qM_mulm_j: sparse mass matrix addressing
     qM_madr_ij: sparse mass matrix addressing
+    qLD_update_tree: dof tree ordering for qLD updates
+    qLD_update_treeadr: index of each dof tree level
+    M_rownnz: number of non-zeros in each row of qM             (nv,)
+    M_rowadr: index of each row in qM                           (nv,)
+    M_colind: column indices of non-zeros in qM                 (nM,)
+    mapM2M: index mapping from M (legacy) to M (CSR)            (nM)
     qLD_tile: tiling configuration
     qLD_tileadr: tiling configuration
     qLD_tilesize: tiling configuration
@@ -519,6 +525,10 @@ class Model:
   qM_madr_ij: wp.array(dtype=wp.int32, ndim=1)  # warp only
   qLD_update_tree: wp.array(dtype=wp.vec3i, ndim=1)  # warp only
   qLD_update_treeadr: wp.array(dtype=wp.int32, ndim=1)  # warp only
+  M_rownnz: wp.array(dtype=wp.int32, ndim=1)
+  M_rowadr: wp.array(dtype=wp.int32, ndim=1)
+  M_colind: wp.array(dtype=wp.int32, ndim=1)
+  mapM2M: wp.array(dtype=wp.int32, ndim=1)
   qLD_tile: wp.array(dtype=wp.int32, ndim=1)  # warp only
   qLD_tileadr: wp.array(dtype=wp.int32, ndim=1)  # warp only
   qLD_tilesize: wp.array(dtype=wp.int32, ndim=1)  # warp only
@@ -682,11 +692,6 @@ class Data:
     crb: com-based composite inertia and mass                   (nworld, nbody, 10)
     qM: total inertia (sparse) (nworld, 1, nM) or               (nworld, nv, nv) if dense
     qLD: L'*D*L factorization of M (sparse) (nworld, 1, nM) or  (nworld, nv, nv) if dense
-    qLD_update_tree: dof tree ordering for qLD updates
-    qLD_update_treeadr: index of each dof tree level
-    M_rownnz: number of non-zeros in each row of qM             (nv,)
-    M_rowadr: index of each row in qM                           (nv,)
-    M_colind: column indices of non-zeros in qM                 (nM,)
     qLDiagInv: 1/diag(D)                                        (nworld, nv)
     actuator_velocity: actuator velocities                      (nworld, nu)
     cvel: com-based velocity (rot:lin)                          (nworld, nbody, 6)
@@ -695,7 +700,6 @@ class Data:
     qfrc_spring: passive spring force                           (nworld, nv)
     qfrc_damper: passive damper force                           (nworld, nv)
     qfrc_passive: total passive force                           (nworld, nv)
-    mapM2M: index mapping from M (legacy) to M (CSR)            (nM)
     actuator_force: actuator force in actuation space           (nworld, nu)
     qfrc_actuator: actuator force                               (nworld, nv)
     qfrc_smooth: net unconstrained force                        (nworld, nv)
@@ -762,11 +766,6 @@ class Data:
   crb: wp.array(dtype=vec10, ndim=2)
   qM: wp.array(dtype=wp.float32, ndim=3)
   qLD: wp.array(dtype=wp.float32, ndim=3)
-  qLD_update_tree: wp.array(dtype=wp.vec3i, ndim=1)  # warp only
-  qLD_update_treeadr: wp.array(dtype=wp.int32, ndim=1)  # warp only
-  M_rownnz: wp.array(dtype=wp.int32, ndim=1)
-  M_rowadr: wp.array(dtype=wp.int32, ndim=1)
-  M_colind: wp.array(dtype=wp.int32, ndim=1)
   qLDiagInv: wp.array(dtype=wp.float32, ndim=2)
   actuator_velocity: wp.array(dtype=wp.float32, ndim=2)
   cvel: wp.array(dtype=wp.spatial_vector, ndim=2)
@@ -775,7 +774,6 @@ class Data:
   qfrc_spring: wp.array(dtype=wp.float32, ndim=2)
   qfrc_damper: wp.array(dtype=wp.float32, ndim=2)
   qfrc_passive: wp.array(dtype=wp.float32, ndim=2)
-  mapM2M: wp.array(dtype=wp.int32, ndim=1)
   actuator_force: wp.array(dtype=wp.float32, ndim=2)
   qfrc_actuator: wp.array(dtype=wp.float32, ndim=2)
   qfrc_smooth: wp.array(dtype=wp.float32, ndim=2)
