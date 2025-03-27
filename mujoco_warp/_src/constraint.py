@@ -232,6 +232,7 @@ def _efc_contact_elliptic(
     efcid = wp.atomic_add(d.nefc, 0, 1)
     worldid = d.contact.worldid[conid]
     d.efc.worldid[efcid] = worldid
+    d.contact.efc_address[conid, dimid] = efcid
 
     geom = d.contact.geom[conid]
     body1 = m.geom_bodyid[geom[0]]
