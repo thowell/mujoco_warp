@@ -13,9 +13,10 @@
 # limitations under the License.
 # ==============================================================================
 
+import mujoco
 import warp as wp
 from packaging import version
-import mujoco
+
 from . import math
 from .types import Data
 from .types import DisableBit
