@@ -414,6 +414,7 @@ def _constraint(
     shape=(nworld, mjm.opt.ls_iterations), dtype=wp.vec3f
   )
 
+  # TODO(team): skip allocation if not elliptic?
   efc.fri = wp.empty((nconmax, 6), dtype=wp.float32)
   efc.dm = wp.empty((nconmax,), dtype=wp.float32)
   efc.u = wp.empty((nconmax, 6), dtype=wp.float32)
