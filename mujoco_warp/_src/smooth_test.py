@@ -125,7 +125,6 @@ class SmoothTest(parameterized.TestCase):
     d.qacc_smooth.zero_()
 
     mjwarp.solve_m(m, d, d.qacc_smooth, d.qfrc_smooth)
-    
     _assert_eq(d.qacc_smooth.numpy()[0], qacc_smooth[0], "qacc_smooth")
 
   def test_rne(self):
