@@ -132,10 +132,11 @@ class ConeType(enum.IntEnum):
 
   Members:
     PYRAMIDAL: pyramidal
+    ELLIPTIC: elliptic
   """
 
   PYRAMIDAL = mujoco.mjtCone.mjCONE_PYRAMIDAL
-  # unsupported: ELLIPTIC
+  ELLIPTIC = mujoco.mjtCone.mjCONE_ELLIPTIC
 
 
 class IntegratorType(enum.IntEnum):
