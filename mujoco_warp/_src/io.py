@@ -31,7 +31,7 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
     (mjm.actuator_gaintype, types.GainType, "Gain type"),
     (mjm.actuator_biastype, types.BiasType, "Bias type"),
     (mjm.eq_type, types.EqType, "Equality constraint types"),
-    (mjm.sensor_type, types.SensorType, "Sensor types")
+    (mjm.sensor_type, types.SensorType, "Sensor types"),
   ):
     unsupported = ~np.isin(field, list(field_types))
     if unsupported.any():
