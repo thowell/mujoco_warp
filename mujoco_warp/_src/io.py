@@ -31,6 +31,9 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
   if mjm.ntendon > 0:
     raise NotImplementedError("Tendons are unsupported.")
 
+  if mjm.tendon_frictionloss.any():
+    raise NotImplementedError("Tendon frictionloss is unsupported.")
+
   # check options
   if mjm.opt.integrator not in set(types.IntegratorType):
     raise NotImplementedError(f"Integrator: {mjm.opt.integrator} is unsupported.")
