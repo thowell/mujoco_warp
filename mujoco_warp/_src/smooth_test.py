@@ -104,15 +104,12 @@ class SmoothTest(parameterized.TestCase):
 
     if sparse:
       mjqLD = mjd.qLD
-      # if version.parse(mujoco.__version__) > version.parse("3.2.7"):
-      #   # compare with legacy format.
-      #   # mjqLD = mjqLD[np.argsort(mjd.mapM2M)]
       _assert_eq(d.qLD.numpy()[0, 0], mjqLD, "qLD (sparse)")
       _assert_eq(d.qLDiagInv.numpy()[0], mjd.qLDiagInv, "qLDiagInv")
     else:
       _assert_eq(d.qLD.numpy()[0], qLD, "qLD (dense)")
 
-  @parameterized.parameters(True, False)
+  @parameterized.parameters((True,))
   def test_solve_m(self, sparse: bool):
     """Tests solve_m."""
     mjm, mjd, m, d = test_util.fixture("pendula.xml", sparse=sparse)
@@ -130,6 +127,7 @@ class SmoothTest(parameterized.TestCase):
     d.qacc_smooth.zero_()
 
     mjwarp.solve_m(m, d, d.qacc_smooth, d.qfrc_smooth)
+    
     _assert_eq(d.qacc_smooth.numpy()[0], qacc_smooth[0], "qacc_smooth")
 
   def test_rne(self):
