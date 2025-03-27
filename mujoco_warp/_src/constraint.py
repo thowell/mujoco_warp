@@ -247,6 +247,6 @@ def make_constraint(m: types.Model, d: types.Data):
     ):
       wp.launch(
         _efc_contact_pyramidal,
-        dim=(d.nconmax, 10),  # TODO(team): determine 4, 6, 10 based on max condim
+        dim=(d.nconmax, 2 * (m.condim_max - 1)),
         inputs=[m, d, refsafe],
       )
