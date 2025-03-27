@@ -153,7 +153,8 @@ def _efc_contact_pyramidal(
   if d.contact.dim[conid] != 3:
     return
 
-  pos = d.contact.dist[conid] - d.contact.includemargin[conid]
+  includemargin = d.contact.includemargin[conid]
+  pos = d.contact.dist[conid] - includemargin
   active = pos < 0
 
   if active:
@@ -205,7 +206,7 @@ def _efc_contact_pyramidal(
       invweight,
       d.contact.solref[conid],
       d.contact.solimp[conid],
-      d.contact.includemargin[conid],
+      includemargin,
       refsafe,
       Jqvel,
     )
