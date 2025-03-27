@@ -165,7 +165,10 @@ def _efc_contact_pyramidal(
     body1 = m.geom_bodyid[geom[0]]
     body2 = m.geom_bodyid[geom[1]]
 
-    fri0 = d.contact.friction[conid][0]
+    con_pos = d.contact.pos[conid]
+    frame = d.contact.frame[conid]
+    friction = d.contact.friction[conid]
+    fri0 = friction[0]
 
     # pyramidal has common invweight across all edges
     invweight = m.body_invweight0[body1, 0] + m.body_invweight0[body2, 0]
@@ -179,15 +182,12 @@ def _efc_contact_pyramidal(
       diff_0 = float(0.0)
       diff_i = float(0.0)
       for xyz in range(3):
-        con_pos = d.contact.pos[conid]
         jac1p = _jac(m, d, con_pos, xyz, body1, i, worldid)
         jac2p = _jac(m, d, con_pos, xyz, body2, i, worldid)
         jac_dif = jac2p - jac1p
-        frame = d.contact.frame[conid]
         diff_0 += frame[0, xyz] * jac_dif
         diff_i += frame[dimid2, xyz] * jac_dif
 
-      friction = d.contact.friction[conid]
       if dimid % 2 == 0:
         J = diff_0 + diff_i * friction[dimid2 - 1]
       else:
