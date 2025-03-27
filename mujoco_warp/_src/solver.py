@@ -104,26 +104,38 @@ def _update_constraint(m: types.Model, d: types.Data):
     efc_D = d.efc.D[efcid]
 
     active = (Jaref < 0.0) or (efcid < d.ne[0] + d.nf[0])
-    cost = 0.5 * efc_D * Jaref * Jaref
-    efc_force = -1.0 * efc_D * Jaref
 
     if wp.static(m.dof_frictionloss_adr.size > 0 and (not DSBL_FLOSS)):
       f = d.efc.frictionloss[efcid]
-      r = _safe_div(1.0, d.efc.D[efcid])
-      linear_neg = (Jaref <= -r * f) and (f > 0.0)
-      linear_pos = (Jaref >= r * f) and (f > 0.0)
+      r = _safe_div(1.0, efc_D)
+      rf = r * f
+      f_pos = f > 0.0
+      linear_neg = (Jaref <= -rf) and f_pos
+      linear_pos = (Jaref >= rf) and f_pos
       active = active and (not linear_neg) and (not linear_pos)
 
-      floss_force = float(linear_neg) * f + float(linear_pos) * -f
-      floss_cost = float(linear_neg) * (-0.5 * r * f * f - f * Jaref)
-      floss_cost += float(linear_pos) * (-0.5 * r * f * f + f * Jaref)
+      linear_negf = float(linear_neg) * f
+      linear_posf = float(linear_pos) * f
+      floss_force = linear_negf - linear_posf
+
+      floss_cost = linear_negf * (-0.5 * rf - Jaref)
+      floss_cost += linear_posf * (-0.5 * rf + Jaref)
+
+      cost = floss_cost
+      efc_force = floss_force
     else:
-      floss_cost = 0.0
-      floss_force = 0.0
+      cost = 0.0
+      efc_force = 0.0
+
+    # TODO(team): benchmark options for active
+
+    efc_DJaref_active = efc_D * Jaref * float(active)
+    cost += 0.5 * efc_DJaref_active * Jaref
+    efc_force -= efc_DJaref_active
 
     d.efc.active[efcid] = int(active)
-    d.efc.force[efcid] = float(active) * efc_force + floss_force
-    wp.atomic_add(d.efc.cost, worldid, float(active) * cost + floss_cost)
+    d.efc.force[efcid] = efc_force
+    wp.atomic_add(d.efc.cost, worldid, cost)
 
   @kernel
   def _zero_qfrc_constraint(d: types.Data):
