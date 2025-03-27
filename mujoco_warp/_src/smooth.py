@@ -362,8 +362,8 @@ def _factor_i_sparse(m: Model, d: Data, M: array3df, L: array3df, D: array2df):
     worldid, nodeid = wp.tid()
     update = m.qLD_update_tree[leveladr + nodeid]
     i, k, Madr_ki = update[0], update[1], update[2]
-    Madr_i = m.M_rowadr[i] # Address of row being updated
-    diag_k = m.M_rowadr[k] + m.M_rownnz[k] - 1 # Address of diagonal element of k
+    Madr_i = m.M_rowadr[i]  # Address of row being updated
+    diag_k = m.M_rowadr[k] + m.M_rownnz[k] - 1  # Address of diagonal element of k
     # tmp = M(k,i) / M(k,k)
     tmp = L[worldid, 0, Madr_ki] / L[worldid, 0, diag_k]
     for j in range(m.M_rownnz[i]):
@@ -375,17 +375,17 @@ def _factor_i_sparse(m: Model, d: Data, M: array3df, L: array3df, D: array2df):
   @kernel
   def qLDiag_div(m: Model, L: array3df, D: array2df):
     worldid, dofid = wp.tid()
-    diag_i = m.M_rowadr[dofid] + m.M_rownnz[dofid] - 1 # Address of diagonal element of i
+    diag_i = (
+      m.M_rowadr[dofid] + m.M_rownnz[dofid] - 1
+    )  # Address of diagonal element of i
     D[worldid, dofid] = 1.0 / L[worldid, 0, diag_i]
 
   @kernel
-  def copy_CSR(L: array3df,
-               M: array3df,
-               mapM2M: wp.array(dtype=wp.int32, ndim=1)):
+  def copy_CSR(L: array3df, M: array3df, mapM2M: wp.array(dtype=wp.int32, ndim=1)):
     worldid, ind = wp.tid()
     L[worldid, 0, ind] = M[worldid, 0, mapM2M[ind]]
-  wp.launch(copy_CSR, dim=(d.nworld, m.nM), inputs=[L, M, m.mapM2M])
 
+  wp.launch(copy_CSR, dim=(d.nworld, m.nM), inputs=[L, M, m.mapM2M])
 
   qLD_update_treeadr = m.qLD_update_treeadr.numpy()
 

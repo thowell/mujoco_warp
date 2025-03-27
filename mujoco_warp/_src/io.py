@@ -145,16 +145,18 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
       rowadr = mjd.M_rowadr
 
       for k in range(mjm.nv):
-          dof_depth[k] = dof_depth[mjm.dof_parentid[k]] + 1
-          i = mjm.dof_parentid[k]
-          diag_k = rowadr[k] + rownnz[k] - 1
-          Madr_ki = diag_k - 1
-          while i > -1:
-              qLD_updates.setdefault(dof_depth[i], []).append((i, k, Madr_ki))
-              i = mjm.dof_parentid[i]
-              Madr_ki -= 1
+        dof_depth[k] = dof_depth[mjm.dof_parentid[k]] + 1
+        i = mjm.dof_parentid[k]
+        diag_k = rowadr[k] + rownnz[k] - 1
+        Madr_ki = diag_k - 1
+        while i > -1:
+          qLD_updates.setdefault(dof_depth[i], []).append((i, k, Madr_ki))
+          i = mjm.dof_parentid[i]
+          Madr_ki -= 1
 
-      qLD_update_tree = np.concatenate([qLD_updates[i] for i in range(len(qLD_updates))])
+      qLD_update_tree = np.concatenate(
+        [qLD_updates[i] for i in range(len(qLD_updates))]
+      )
       tree_off = [0] + [len(qLD_updates[i]) for i in range(len(qLD_updates))]
       qLD_update_treeadr = np.cumsum(tree_off)[:-1]
     else:
@@ -169,7 +171,9 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
           Madr_ki += 1
 
       # qLD_treeadr contains starting indicies of each level of sparse updates
-      qLD_update_tree = np.concatenate([qLD_updates[i] for i in range(len(qLD_updates))])
+      qLD_update_tree = np.concatenate(
+        [qLD_updates[i] for i in range(len(qLD_updates))]
+      )
       tree_off = [0] + [len(qLD_updates[i]) for i in range(len(qLD_updates))]
       qLD_update_treeadr = np.cumsum(tree_off)[:-1]
 
