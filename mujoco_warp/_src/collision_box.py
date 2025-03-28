@@ -141,9 +141,7 @@ def get_box_axis(
 
 
 @wp.func
-def get_box_axis_support(
-  axis: wp.vec3, degenerate_axis: bool, a: Box, b: Box
-):
+def get_box_axis_support(axis: wp.vec3, degenerate_axis: bool, a: Box, b: Box):
   """Get the overlap (or separating distance if negative) along `axis`, and the sign."""
   axis_d = wp.vec3d(axis)
   support_a_max, support_b_max = wp.float32(-_HUGE_VAL), wp.float32(-_HUGE_VAL)
@@ -203,7 +201,9 @@ def box_box_kernel(
 
     ga, gb = geoms[0], geoms[1]
 
-    if m.geom_type[ga] != int(GeomType.BOX.value) or m.geom_type[gb] != int(GeomType.BOX.value):
+    if m.geom_type[ga] != int(GeomType.BOX.value) or m.geom_type[gb] != int(
+      GeomType.BOX.value
+    ):
       continue
 
     worldid = d.collision_worldid[bp_idx]
@@ -231,35 +231,35 @@ def box_box_kernel(
     #   best_sign: int32
     #   best_idx: int32
     R = rot_atob
-        
+
     # launch tiled with block_dim=21
     if axis_idx > 20:
       continue
-  
+
     axis, degenerate_axis = get_box_axis(axis_idx, R)
     axis_dist, axis_sign = get_box_axis_support(axis, degenerate_axis, a, b)
-  
+
     supports = wp.tile(AxisSupport(axis_dist, wp.int8(axis_sign), wp.int8(axis_idx)))
-  
+
     face_supports = wp.tile_view(supports, offset=(0,), shape=(12,))
     edge_supports = wp.tile_view(supports, offset=(12,), shape=(9,))
-  
+
     face_supports_red = wp.tile_reduce(reduce_axis_support, face_supports)
     edge_supports_red = wp.tile_reduce(reduce_axis_support, edge_supports)
-  
+
     face = face_supports_red[0]
     edge = edge_supports_red[0]
-  
+
     if axis_idx > 0:  # single thread
       continue
-  
+
     # choose the best separating axis
     face_axis, _ = get_box_axis(wp.int32(face.best_idx), R)
     best_axis = wp.vec3(face_axis)
     best_sign = wp.int32(face.best_sign)
     best_idx = wp.int32(face.best_idx)
     best_dist = wp.float32(face.best_dist)
-  
+
     if edge.best_dist < face.best_dist:
       edge_axis, _ = get_box_axis(wp.int32(edge.best_idx), R)
       if wp.abs(wp.dot(face_axis, edge_axis)) < 0.99:
@@ -268,7 +268,7 @@ def box_box_kernel(
         best_idx = wp.int32(edge.best_idx)
         best_dist = wp.float32(edge.best_dist)
     # end inlined collision_axis_tiled
-    
+
     # if axis_idx != 0:
     #   continue
     if best_dist < 0:
@@ -551,8 +551,6 @@ def _create_contact_manifold(
   return dist, contact_pts
 
 
-
-
 def box_box_narrowphase(
   m: Model,
   d: Data,
@@ -568,5 +566,3 @@ def box_box_narrowphase(
     inputs=[m, d, num_threads],
     block_dim=BOX_BOX_BLOCK_DIM,
   )
-
-
