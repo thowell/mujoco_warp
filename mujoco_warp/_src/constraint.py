@@ -221,14 +221,26 @@ def _efc_contact_elliptic(
   if conid >= d.ncon[0]:
     return
 
-  if d.contact.dim[conid] != 3:
+  condim = d.contact.dim[conid]
+
+  if condim == 1 and dimid > 0:
+    return
+
+  if condim == 3 and dimid > 2:
+    return
+  
+  # TODO(team): condim=4
+  if condim == 4:
+    return
+  
+  # TODO(team): condim=6
+  if condim == 6:
     return
 
   includemargin = d.contact.includemargin[conid]
   pos = d.contact.dist[conid] - includemargin
-  active = pos < 0
 
-  if active:
+  if pos < 0.0:
     efcid = wp.atomic_add(d.nefc, 0, 1)
     worldid = d.contact.worldid[conid]
     d.efc.worldid[efcid] = worldid
@@ -240,7 +252,6 @@ def _efc_contact_elliptic(
 
     cpos = d.contact.pos[conid]
     frame = d.contact.frame[conid]
-    friction = d.contact.friction[conid]
 
     Jqvel = float(0.0)
     for i in range(m.nv):
@@ -267,6 +278,7 @@ def _efc_contact_elliptic(
       solref = solreffriction
 
       invweight = invweight / m.opt.impratio
+      friction = d.contact.friction[conid]
       if dimid > 1:
         fri0 = friction[0]
         frii = friction[dimid - 1]
@@ -325,5 +337,5 @@ def make_constraint(m: types.Model, d: types.Data):
         wp.launch(
           _efc_contact_elliptic,
           dim=(d.nconmax, 3),
-          inputs=[m, d, refsafe],
+          inputs=[m, d, refsafe]
         )
