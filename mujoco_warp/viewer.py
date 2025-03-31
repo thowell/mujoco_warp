@@ -81,7 +81,7 @@ def _main(argv: Sequence[str]) -> None:
     mjwarp.step(m, d)
     # double warmup to work around issues with compilation during graph capture:
     mjwarp.step(m, d)
-    # capture the whole smooth.kinematic() function as a CUDA graph
+    # capture the whole step function as a CUDA graph
     with wp.ScopedCapture() as capture:
       mjwarp.step(m, d)
     graph = capture.graph

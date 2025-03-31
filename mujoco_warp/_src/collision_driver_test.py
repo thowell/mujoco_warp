@@ -21,6 +21,8 @@ from absl.testing import parameterized
 
 import mujoco_warp as mjwarp
 
+from . import test_util
+
 # tolerance for difference between MuJoCo and MJWarp calculations - mostly
 # due to float precision
 _TOLERANCE = 5e-5
@@ -128,6 +130,32 @@ class PrimitiveTest(parameterized.TestCase):
       _assert_eq(d.contact.frame.numpy()[i].flatten(), mjd.contact.frame[i], "frame")
 
   # TODO(team): test primitive_narrowphase
+
+  @parameterized.parameters(
+    (True, True),
+    (True, False),
+    (False, True),
+    (False, False),
+  )
+  def test_collision_disableflags(self, dsbl_constraint, dsbl_contact):
+    """Tests collision disableflags."""
+    mjm, mjd, _, _ = test_util.fixture("humanoid/humanoid.xml")
+
+    if dsbl_constraint:
+      mjm.opt.disableflags |= mujoco.mjtDisableBit.mjDSBL_CONSTRAINT
+    if dsbl_contact:
+      mjm.opt.disableflags |= mujoco.mjtDisableBit.mjDSBL_CONTACT
+
+    mjd = mujoco.MjData(mjm)
+    mujoco.mj_resetDataKeyframe(mjm, mjd, 0)
+    mujoco.mj_forward(mjm, mjd)
+    m = mjwarp.put_model(mjm)
+    d = mjwarp.put_data(mjm, mjd)
+
+    mujoco.mj_collision(mjm, mjd)
+    mjwarp.collision(m, d)
+
+    self.assertEqual(d.ncon.numpy()[0], mjd.ncon)
 
 
 if __name__ == "__main__":

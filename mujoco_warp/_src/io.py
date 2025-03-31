@@ -13,33 +13,53 @@
 # limitations under the License.
 # ==============================================================================
 
+from typing import Optional
+
 import mujoco
 import numpy as np
 import warp as wp
+from packaging import version
 
 from . import support
 from . import types
 
 
 def put_model(mjm: mujoco.MjModel) -> types.Model:
-  if mjm.neq > 0:
-    raise NotImplementedError("Equality constraints are unsupported.")
+  # check supported features
+  for field, field_types, field_str in (
+    (mjm.actuator_trntype, types.TrnType, "Actuator transmission type"),
+    (mjm.actuator_dyntype, types.DynType, "Actuator dynamics type"),
+    (mjm.actuator_gaintype, types.GainType, "Gain type"),
+    (mjm.actuator_biastype, types.BiasType, "Bias type"),
+    (mjm.eq_type, types.EqType, "Equality constraint types"),
+    (mjm.sensor_type, types.SensorType, "Sensor types"),
+  ):
+    unsupported = ~np.isin(field, list(field_types))
+    if unsupported.any():
+      raise NotImplementedError(f"{field_str} {field[unsupported]} not supported.")
 
-  if mjm.nsensor > 0:
-    raise NotImplementedError("Sensors are unsupported.")
-
-  if mjm.ntendon > 0:
-    raise NotImplementedError("Tendons are unsupported.")
+  for n, msg in (
+    (mjm.ntendon, "Tendons"),
+    (mjm.nplugin, "Plugins"),
+    (mjm.nflex, "Flexes"),
+  ):
+    if n > 0:
+      raise NotImplementedError(f"{msg} are unsupported.")
 
   # check options
-  if mjm.opt.integrator not in set(types.IntegratorType):
-    raise NotImplementedError(f"Integrator: {mjm.opt.integrator} is unsupported.")
+  for opt, opt_types, msg in (
+    (mjm.opt.integrator, types.IntegratorType, "Integrator"),
+    (mjm.opt.cone, types.ConeType, "Cone"),
+    (mjm.opt.solver, types.SolverType, "Solver"),
+  ):
+    if opt not in set(opt_types):
+      raise NotImplementedError(f"{msg} {opt} is unsupported.")
 
-  if mjm.opt.cone not in set(types.ConeType):
-    raise NotImplementedError(f"Cone: {mjm.opt.cone} is unsupported.")
+  if mjm.opt.wind.any():
+    raise NotImplementedError("Wind is unsupported.")
 
-  if mjm.opt.solver not in set(types.SolverType):
-    raise NotImplementedError(f"Solver: {mjm.opt.solver} is unsupported.")
+  if mjm.opt.density > 0 or mjm.opt.viscosity > 0:
+    raise NotImplementedError("Fluid forces are unsupported.")
 
   # TODO(team): remove after solver._update_gradient for Newton solver utilizes tile operations for islands
   nv_max = 60
@@ -137,20 +157,50 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
   if support.is_sparse(mjm):
     # qLD_update_tree has dof tree ordering of qLD updates for sparse factor m
     # qLD_update_treeadr contains starting index of each dof tree level
-    qLD_updates, dof_depth = {}, np.zeros(mjm.nv, dtype=int) - 1
-    for k in range(mjm.nv):
-      dof_depth[k] = dof_depth[mjm.dof_parentid[k]] + 1
-      i = mjm.dof_parentid[k]
-      Madr_ki = mjm.dof_Madr[k] + 1
-      while i > -1:
-        qLD_updates.setdefault(dof_depth[i], []).append((i, k, Madr_ki))
-        i = mjm.dof_parentid[i]
-        Madr_ki += 1
+    mjd = mujoco.MjData(mjm)
+    if version.parse(mujoco.__version__) > version.parse("3.2.7"):
+      m.M_rownnz = wp.array(mjd.M_rownnz, dtype=wp.int32, ndim=1)
+      m.M_rowadr = wp.array(mjd.M_rowadr, dtype=wp.int32, ndim=1)
+      m.M_colind = wp.array(mjd.M_colind, dtype=wp.int32, ndim=1)
+      m.mapM2M = wp.array(mjd.mapM2M, dtype=wp.int32, ndim=1)
+      qLD_updates, dof_depth = {}, np.zeros(mjm.nv, dtype=int) - 1
 
-    # qLD_treeadr contains starting indicies of each level of sparse updates
-    qLD_update_tree = np.concatenate([qLD_updates[i] for i in range(len(qLD_updates))])
-    tree_off = [0] + [len(qLD_updates[i]) for i in range(len(qLD_updates))]
-    qLD_update_treeadr = np.cumsum(tree_off)[:-1]
+      rownnz = mjd.M_rownnz
+      rowadr = mjd.M_rowadr
+
+      for k in range(mjm.nv):
+        dof_depth[k] = dof_depth[mjm.dof_parentid[k]] + 1
+        i = mjm.dof_parentid[k]
+        diag_k = rowadr[k] + rownnz[k] - 1
+        Madr_ki = diag_k - 1
+        while i > -1:
+          qLD_updates.setdefault(dof_depth[i], []).append((i, k, Madr_ki))
+          i = mjm.dof_parentid[i]
+          Madr_ki -= 1
+
+      qLD_update_tree = np.concatenate(
+        [qLD_updates[i] for i in range(len(qLD_updates))]
+      )
+      tree_off = [0] + [len(qLD_updates[i]) for i in range(len(qLD_updates))]
+      qLD_update_treeadr = np.cumsum(tree_off)[:-1]
+    else:
+      qLD_updates, dof_depth = {}, np.zeros(mjm.nv, dtype=int) - 1
+      for k in range(mjm.nv):
+        dof_depth[k] = dof_depth[mjm.dof_parentid[k]] + 1
+        i = mjm.dof_parentid[k]
+        Madr_ki = mjm.dof_Madr[k] + 1
+        while i > -1:
+          qLD_updates.setdefault(dof_depth[i], []).append((i, k, Madr_ki))
+          i = mjm.dof_parentid[i]
+          Madr_ki += 1
+
+      # qLD_treeadr contains starting indicies of each level of sparse updates
+      qLD_update_tree = np.concatenate(
+        [qLD_updates[i] for i in range(len(qLD_updates))]
+      )
+      tree_off = [0] + [len(qLD_updates[i]) for i in range(len(qLD_updates))]
+      qLD_update_treeadr = np.cumsum(tree_off)[:-1]
+
   else:
     # qLD_tile has the dof id of each tile in qLD for dense factor m
     # qLD_tileadr contains starting index in qLD_tile of each tile group
@@ -514,25 +564,37 @@ def make_data(
 def put_data(
   mjm: mujoco.MjModel,
   mjd: mujoco.MjData,
-  nworld: int = 1,
-  nconmax: int = -1,
-  njmax: int = -1,
+  nworld: Optional[int] = None,
+  nconmax: Optional[int] = None,
+  njmax: Optional[int] = None,
 ) -> types.Data:
   d = types.Data()
-  d.nworld = nworld
 
-  # TODO(team): move to Model?
-  if nconmax == -1:
-    # TODO(team): heuristic for nconmax
-    nconmax = max(512, mjd.ncon * nworld)
-  d.nconmax = nconmax
-  if njmax == -1:
-    # TODO(team): heuristic for njmax
-    njmax = max(512, mjd.nefc * nworld)
-  d.njmax = njmax
+  nworld = nworld or 1
+  # TODO(team): better heuristic for nconmax
+  nconmax = nconmax or max(512, mjd.ncon * nworld)
+  # TODO(team): better heuristic for njmax
+  njmax = njmax or max(512, mjd.nefc * nworld)
+
+  if nworld < 1:
+    raise ValueError("nworld must be >= 1")
+
+  if nconmax < 1:
+    raise ValueError("nconmax must be >= 1")
+
+  if njmax < 1:
+    raise ValueError("njmax must be >= 1")
+
+  if nworld * mjd.ncon > nconmax:
+    raise ValueError(f"nconmax overflow (nconmax must be >= {nworld * mjd.ncon})")
 
   if nworld * mjd.nefc > njmax:
-    raise ValueError("nworld * nefc > njmax")
+    raise ValueError(f"njmax overflow (njmax must be >= {nworld * mjd.nefc})")
+
+  d.nworld = nworld
+  # TODO(team): move nconmax and njmax to Model?
+  d.nconmax = nconmax
+  d.njmax = njmax
 
   d.ncon = wp.array([mjd.ncon * nworld], dtype=wp.int32, ndim=1)
   d.nl = mjd.nl
@@ -726,7 +788,6 @@ def put_data(
   d.collision_pair = wp.empty(nconmax, dtype=wp.vec2i, ndim=1)
   d.collision_worldid = wp.empty(nconmax, dtype=wp.int32, ndim=1)
   d.ncollision = wp.zeros(1, dtype=wp.int32, ndim=1)
-
   return d
 
 
