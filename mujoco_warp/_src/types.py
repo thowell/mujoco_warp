@@ -336,7 +336,7 @@ class Constraint:
   cost: wp.array(dtype=wp.float32, ndim=1)
   prev_cost: wp.array(dtype=wp.float32, ndim=1)
   solver_niter: wp.array(dtype=wp.int32, ndim=1)
-  active: wp.array(dtype=wp.int32, ndim=1)
+  active: wp.array(dtype=bool, ndim=1)
   gtol: wp.array(dtype=wp.float32, ndim=1)
   mv: wp.array(dtype=wp.float32, ndim=2)
   jv: wp.array(dtype=wp.float32, ndim=1)

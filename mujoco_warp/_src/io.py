@@ -366,7 +366,7 @@ def _constraint(mjm: mujoco.MjModel, nworld: int, njmax: int) -> types.Constrain
   efc.cost = wp.empty(shape=(nworld,), dtype=wp.float32)
   efc.prev_cost = wp.empty(shape=(nworld,), dtype=wp.float32)
   efc.solver_niter = wp.empty(shape=(nworld,), dtype=wp.int32)
-  efc.active = wp.empty(shape=(njmax,), dtype=wp.int32)
+  efc.active = wp.empty(shape=(njmax,), dtype=bool)
   efc.gtol = wp.empty(shape=(nworld,), dtype=wp.float32)
   efc.mv = wp.empty(shape=(nworld, mjm.nv), dtype=wp.float32)
   efc.jv = wp.empty(shape=(njmax,), dtype=wp.float32)

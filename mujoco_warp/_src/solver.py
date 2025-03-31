@@ -140,9 +140,9 @@ def _update_constraint(m: types.Model, d: types.Data):
       DJ = efc_D * Jaref
       cost += 0.5 * DJ * Jaref
       force -= DJ
-      d.efc.active[efcid] = 1
+      d.efc.active[efcid] = True
     else:
-      d.efc.active[efcid] = 0
+      d.efc.active[efcid] = False
 
     d.efc.force[efcid] = force
 
@@ -300,7 +300,7 @@ def _update_gradient(m: types.Model, d: types.Data):
 
     efc_D = d.efc.D[efcid]
     active = d.efc.active[efcid]
-    if efc_D == 0.0 or active == 0:
+    if efc_D == 0.0 or not active:
       return
 
     # TODO(team): sparse efc_J
