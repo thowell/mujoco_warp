@@ -228,11 +228,11 @@ def _efc_contact_elliptic(
 
   if condim == 3 and dimid > 2:
     return
-  
+
   # TODO(team): condim=4
   if condim == 4:
     return
-  
+
   # TODO(team): condim=6
   if condim == 6:
     return
@@ -334,8 +334,4 @@ def make_constraint(m: types.Model, d: types.Data):
           inputs=[m, d, refsafe],
         )
       elif m.opt.cone == types.ConeType.ELLIPTIC.value:
-        wp.launch(
-          _efc_contact_elliptic,
-          dim=(d.nconmax, 3),
-          inputs=[m, d, refsafe]
-        )
+        wp.launch(_efc_contact_elliptic, dim=(d.nconmax, 3), inputs=[m, d, refsafe])
