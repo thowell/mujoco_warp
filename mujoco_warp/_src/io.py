@@ -24,9 +24,8 @@ from . import types
 
 
 def put_model(mjm: mujoco.MjModel) -> types.Model:
-  geom_type_render = mjm.geom_type >= mujoco.mjtGeom.mjNGEOMTYPES.value
   geom_type_supported = np.isin(mjm.geom_type, list(types.GeomType))
-  geom_type_unsupported = ~(geom_type_supported | geom_type_render)
+  geom_type_unsupported = ~geom_type_supported
   if geom_type_unsupported.any():
     raise NotImplementedError(
       f"Geom type {mjm.geom_type[geom_type_unsupported]} is unsupported."
