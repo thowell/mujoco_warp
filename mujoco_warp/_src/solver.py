@@ -105,7 +105,7 @@ def _update_constraint(m: types.Model, d: types.Data):
 
     ne = d.ne[0]
     nf = d.nf[0]
-    
+
     if efcid < ne:
       # equality
       active = True
@@ -125,12 +125,12 @@ def _update_constraint(m: types.Model, d: types.Data):
       if f > 0.0:
         r = _safe_div(1.0, efc_D)
         rf = r * f
-    
+
         if Jaref <= -rf:
           cost += -0.5 * rf - Jaref
           force += f
           active = False
-        
+
         if Jaref >= rf:
           cost += -0.5 * rf + Jaref
           force -= f
@@ -370,21 +370,15 @@ def _eval_pt(quad: wp.vec3, alpha: wp.float32) -> wp.vec3:
 def _quad_floss(
   quad: wp.vec3, floss: float, efc_D: float, Jaref: float, jv: float
 ) -> wp.vec3:
-  r = _safe_div(1.0, efc_D)
-  rf = r * floss
-  linear_neg = Jaref <= -rf
-  linear_pos = Jaref >= rf
-  quadfloss = wp.vec3(
-    float(linear_neg) * floss * (-0.5 * rf - Jaref)
-    + float(linear_pos) * floss * (-0.5 * rf + Jaref),
-    float(linear_neg) * -floss * jv + float(linear_pos) * floss * jv,
-    0.0,
-  )
+  if floss > 0.0:
+    r = _safe_div(1.0, efc_D)
+    rf = r * floss
+    if Jaref <= -rf:
+      return wp.vec3(floss * (-0.5 * rf - Jaref), -floss * jv, 0.0)
+    elif Jaref >= rf:
+      return wp.vec3(floss * (-0.5 * rf + Jaref), floss * jv, 0.0)
 
-  if (linear_neg or linear_pos) and (floss > 0.0):
-    return quadfloss
-  else:
-    return quad
+  return quad
 
 
 @wp.func
