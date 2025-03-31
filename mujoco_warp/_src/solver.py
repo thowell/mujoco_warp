@@ -125,17 +125,16 @@ def _update_constraint(m: types.Model, d: types.Data):
       if f > 0.0:
         r = _safe_div(1.0, efc_D)
         rf = r * f
-        linear_neg = Jaref <= -rf
-        linear_pos = Jaref >= rf
-        active = active and (not linear_neg) and (not linear_pos)
-
-        if linear_neg:
+    
+        if Jaref <= -rf:
           cost += -0.5 * rf - Jaref
           force += f
+          active = False
         
-        if linear_pos:
+        if Jaref >= rf:
           cost += -0.5 * rf + Jaref
           force -= f
+          active = False
 
     if active:
       DJ = efc_D * Jaref
