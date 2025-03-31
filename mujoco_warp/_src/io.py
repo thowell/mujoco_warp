@@ -61,6 +61,11 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
   if mjm.opt.density > 0 or mjm.opt.viscosity > 0:
     raise NotImplementedError("Fluid forces are unsupported.")
 
+  # TODO(team): remove after solver._update_gradient for Newton solver utilizes tile operations for islands
+  nv_max = 60
+  if mjm.nv > nv_max and (not mjm.opt.jacobian == mujoco.mjtJacobian.mjJAC_SPARSE):
+    raise ValueError(f"Dense is unsupported for nv > {nv_max} (nv = {mjm.nv}).")
+
   m = types.Model()
 
   m.nq = mjm.nq
