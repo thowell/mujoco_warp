@@ -103,39 +103,52 @@ def _update_constraint(m: types.Model, d: types.Data):
     Jaref = d.efc.Jaref[efcid]
     efc_D = d.efc.D[efcid]
 
-    active = (Jaref < 0.0) or (efcid < d.ne[0] + d.nf[0])
+    ne = d.ne[0]
+    nf = d.nf[0]
+    
+    if efcid < ne:
+      # equality
+      active = True
+    elif efcid < ne + nf:
+      # friction
+      active = True
+    else:
+      # limits, contact
+      active = Jaref < 0.0
+
+    cost = 0.0
+    force = 0.0
 
     if wp.static(m.dof_frictionloss_adr.size > 0 and (not DSBL_FLOSS)):
       f = d.efc.frictionloss[efcid]
-      r = _safe_div(1.0, efc_D)
-      rf = r * f
-      f_pos = f > 0.0
-      linear_neg = (Jaref <= -rf) and f_pos
-      linear_pos = (Jaref >= rf) and f_pos
-      active = active and (not linear_neg) and (not linear_pos)
 
-      linear_negf = float(linear_neg) * f
-      linear_posf = float(linear_pos) * f
-      floss_force = linear_negf - linear_posf
+      if f > 0.0:
+        r = _safe_div(1.0, efc_D)
+        rf = r * f
+        linear_neg = Jaref <= -rf
+        linear_pos = Jaref >= rf
+        active = active and (not linear_neg) and (not linear_pos)
 
-      floss_cost = linear_negf * (-0.5 * rf - Jaref)
-      floss_cost += linear_posf * (-0.5 * rf + Jaref)
+        if linear_neg:
+          cost += -0.5 * rf - Jaref
+          force += f
+        
+        if linear_pos:
+          cost += -0.5 * rf + Jaref
+          force -= f
 
-      cost = floss_cost
-      efc_force = floss_force
+    if active:
+      DJ = efc_D * Jaref
+      cost += 0.5 * DJ * Jaref
+      force -= DJ
+      d.efc.active[efcid] = 1
     else:
-      cost = 0.0
-      efc_force = 0.0
+      d.efc.active[efcid] = 0
 
-    # TODO(team): benchmark options for active
+    d.efc.force[efcid] = force
 
-    efc_DJaref_active = efc_D * Jaref * float(active)
-    cost += 0.5 * efc_DJaref_active * Jaref
-    efc_force -= efc_DJaref_active
-
-    d.efc.active[efcid] = int(active)
-    d.efc.force[efcid] = efc_force
-    wp.atomic_add(d.efc.cost, worldid, cost)
+    if cost:
+      wp.atomic_add(d.efc.cost, worldid, cost)
 
   @kernel
   def _zero_qfrc_constraint(d: types.Data):
