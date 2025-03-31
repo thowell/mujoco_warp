@@ -127,13 +127,12 @@ def _update_constraint(m: types.Model, d: types.Data):
         rf = r * f
 
         if Jaref <= -rf:
-          cost += -0.5 * rf - Jaref
-          force += f
+          cost = -0.5 * rf - Jaref
+          force = f
           active = False
-
-        if Jaref >= rf:
-          cost += -0.5 * rf + Jaref
-          force -= f
+        elif Jaref >= rf:
+          cost = -0.5 * rf + Jaref
+          force = -f
           active = False
 
     if active:
