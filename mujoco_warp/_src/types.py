@@ -503,7 +503,6 @@ class Model:
     actuator_affine_bias_gain: affine bias/gain present
     sensor_type: sensor type (mjtSensor)                     (nsensor,)
     sensor_datatype: numeric data type (mjtDataType)         (nsensor,)
-    sensor_needstage: required compute stage (mjtState)      (nsensor,)
     sensor_objtype: type of sensorized object (mjtObj)       (nsensor,)
     sensor_objid: id of sensorized object                    (nsensor,)
     sensor_reftype: type of reference frame (mjtObj)         (nsensor,)
@@ -644,7 +643,6 @@ class Model:
   actuator_affine_bias_gain: bool  # warp only
   sensor_type: wp.array(dtype=wp.int32, ndim=1)
   sensor_datatype: wp.array(dtype=wp.int32, ndim=1)
-  sensor_needstage: wp.array(dtype=wp.int32, ndim=1)
   sensor_objtype: wp.array(dtype=wp.int32, ndim=1)
   sensor_objid: wp.array(dtype=wp.int32, ndim=1)
   sensor_reftype: wp.array(dtype=wp.int32, ndim=1)
