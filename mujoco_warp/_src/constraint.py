@@ -268,18 +268,18 @@ def _efc_contact_elliptic(
 
     invweight = m.body_invweight0[body1, 0] + m.body_invweight0[body2, 0]
 
+    ref = d.contact.solref[conid]
+    pos_aref = pos
+
     if dimid > 0:
       solreffriction = d.contact.solreffriction[conid]
 
-      if not ((solreffriction[0] != 0.0) or (solreffriction[1] != 0.0)):
-        _solref = d.contact.solref[conid]
-        solreffriction[0] += _solref[0]
-        solreffriction[1] += _solref[1]
-
-      solref = solreffriction
+      if solreffriction[0] or solreffriction[1]:
+        ref = solreffriction
 
       invweight = invweight / m.opt.impratio
       friction = d.contact.friction[conid]
+
       if dimid > 1:
         fri0 = friction[0]
         frii = friction[dimid - 1]
@@ -287,9 +287,6 @@ def _efc_contact_elliptic(
         invweight *= fri
 
       pos_aref = 0.0
-    else:
-      solref = d.contact.solref[conid]
-      pos_aref = pos
 
     _update_efc_row(
       m,
@@ -299,7 +296,7 @@ def _efc_contact_elliptic(
       pos_aref,
       pos,
       invweight,
-      solref,
+      ref,
       d.contact.solimp[conid],
       includemargin,
       refsafe,
