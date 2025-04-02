@@ -274,6 +274,7 @@ def _efc_contact_elliptic(
     if dimid > 0:
       solreffriction = d.contact.solreffriction[conid]
 
+      # non-normal directions use solreffriction (if non-zero)
       if solreffriction[0] or solreffriction[1]:
         ref = solreffriction
 
