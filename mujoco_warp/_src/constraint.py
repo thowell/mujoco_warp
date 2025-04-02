@@ -239,8 +239,9 @@ def _efc_contact_elliptic(
 
   includemargin = d.contact.includemargin[conid]
   pos = d.contact.dist[conid] - includemargin
+  active = pos < 0.0
 
-  if pos < 0.0:
+  if active:
     efcid = wp.atomic_add(d.nefc, 0, 1)
     worldid = d.contact.worldid[conid]
     d.efc.worldid[efcid] = worldid
