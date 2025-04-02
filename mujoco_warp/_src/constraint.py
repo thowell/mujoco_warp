@@ -150,7 +150,16 @@ def _efc_contact_pyramidal(
   if conid >= d.ncon[0]:
     return
 
-  if d.contact.dim[conid] != 3:
+  condim = d.contact.dim[conid]
+
+  # TODO(team): condim=4, condim=6
+  if condim != 1 and condim != 3:
+    return
+
+  if condim == 1 and dimid > 0:
+    return
+
+  if condim == 3 and dimid > 3:
     return
 
   includemargin = d.contact.includemargin[conid]
@@ -168,31 +177,38 @@ def _efc_contact_pyramidal(
 
     con_pos = d.contact.pos[conid]
     frame = d.contact.frame[conid]
-    friction = d.contact.friction[conid]
-    fri0 = friction[0]
 
     # pyramidal has common invweight across all edges
     invweight = m.body_invweight0[body1, 0] + m.body_invweight0[body2, 0]
-    invweight = invweight + fri0 * fri0 * invweight
-    invweight = invweight * 2.0 * fri0 * fri0 / m.opt.impratio
 
-    dimid2 = dimid / 2 + 1
+    if condim > 1:
+      dimid2 = dimid / 2 + 1
+
+      friction = d.contact.friction[conid]
+      fri0 = friction[0]
+      frii = friction[dimid2 - 1]
+      invweight = invweight + fri0 * fri0 * invweight
+      invweight = invweight * 2.0 * fri0 * fri0 / m.opt.impratio
 
     Jqvel = float(0.0)
     for i in range(m.nv):
-      diff_0 = float(0.0)
-      diff_i = float(0.0)
+      J = float(0.0)
+      Ji = float(0.0)
       for xyz in range(3):
         jac1p = _jac(m, d, con_pos, xyz, body1, i, worldid)
         jac2p = _jac(m, d, con_pos, xyz, body2, i, worldid)
         jac_dif = jac2p - jac1p
-        diff_0 += frame[0, xyz] * jac_dif
-        diff_i += frame[dimid2, xyz] * jac_dif
 
-      if dimid % 2 == 0:
-        J = diff_0 + diff_i * friction[dimid2 - 1]
-      else:
-        J = diff_0 - diff_i * friction[dimid2 - 1]
+        J += frame[0, xyz] * jac_dif
+
+        if condim > 1:
+          Ji += frame[dimid2, xyz] * jac_dif
+
+      if condim > 1:
+        if dimid % 2 == 0:
+          J += Ji * frii
+        else:
+          J -= Ji * frii
 
       d.efc.J[efcid, i] = J
       Jqvel += J * d.qvel[worldid, i]
@@ -232,12 +248,14 @@ def make_constraint(m: types.Model, d: types.Data):
         inputs=[m, d, refsafe],
       )
 
-    if (
-      not (m.opt.disableflags & types.DisableBit.CONTACT.value)
-      and m.opt.cone == types.ConeType.PYRAMIDAL.value
-    ):
-      wp.launch(
-        _efc_contact_pyramidal,
-        dim=(d.nconmax, 4),
-        inputs=[m, d, refsafe],
-      )
+    # contact
+    if not (m.opt.disableflags & types.DisableBit.CONTACT.value):
+      if m.opt.cone == types.ConeType.PYRAMIDAL.value:
+        wp.launch(
+          _efc_contact_pyramidal,
+          dim=(d.nconmax, 4),
+          inputs=[m, d, refsafe],
+        )
+
+        # TODO(team): condim=4
+        # TODO(team): condim=6
