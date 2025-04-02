@@ -876,13 +876,18 @@ def get_data_into(
     # )
   else:
     qM = d.qM.numpy()
-    qLD = d.qLD.numpy()
+    mujoco.mju_dense2sparse(
+      result.qLD,
+      d.qLD.numpy()[0],
+      result.C_rownnz,
+      result.C_rowadr,
+      result.C_colind,
+    )
     adr = 0
     for i in range(mjm.nv):
       j = i
       while j >= 0:
         result.qM[adr] = qM[0, i, j]
-        result.qLD[adr] = qLD[0, i, j]
         j = mjm.dof_parentid[j]
         adr += 1
     # TODO(team): set efc_J after fix to _realloc_con_efc lands
