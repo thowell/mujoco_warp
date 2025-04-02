@@ -54,8 +54,8 @@ The following features are implemented:
 | Constraint        | `LIMIT_JOINT`, `CONTACT_PYRAMIDAL` |
 | Equality          | Not yet implemented                |
 | Integrator        | `EULER`, `IMPLICITFAST`            |
-| Cone              | `PYRAMIDAL`                        |
-| Condim            | 3                                  |
+| Cone              | `PYRAMIDAL`, `ELLIPTIC`            |
+| Condim            | (1, 3), (1, 3)                     |
 | Solver            | `CG`, `NEWTON`                     |
 | Fluid Model       | None                               |
 | Tendons           | Not yet implemented.               |
