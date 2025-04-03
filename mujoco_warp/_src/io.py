@@ -833,7 +833,7 @@ def get_data_into(
   result.contact.solreffriction[:] = d.contact.solreffriction.numpy()[:ncon]
   result.contact.solimp[:] = d.contact.solimp.numpy()[:ncon]
   result.contact.dim[:] = d.contact.dim.numpy()[:ncon]
-  result.contact.efc_address[:] = d.contact.efc_address.numpy()[:ncon]
+  result.contact.efc_address[:] = d.contact.efc_address.numpy()[:ncon, 0]
 
   if support.is_sparse(mjm):
     result.qM[:] = d.qM.numpy()[0, 0]
