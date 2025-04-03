@@ -148,7 +148,8 @@ class IntegratorType(enum.IntEnum):
 
   EULER = mujoco.mjtIntegrator.mjINT_EULER
   IMPLICITFAST = mujoco.mjtIntegrator.mjINT_IMPLICITFAST
-  # unsupported: RK4, IMPLICIT
+  RK4 = mujoco.mjtIntegrator.mjINT_RK4
+  # unsupported: IMPLICIT
 
 
 class GeomType(enum.IntEnum):
@@ -712,6 +713,12 @@ class Data:
     njmax: maximum number of constraints                        ()
     rne_cacc: arrays used for smooth.rne                        (nworld, nbody, 6)
     rne_cfrc: arrays used for smooth.rne                        (nworld, nbody, 6)
+    qpos_t0: temporary array for rk4                            (nworld, nq)
+    qvel_t0: temporary array for rk4                            (nworld, nv)
+    act_t0: temporary array for rk4                             (nworld, na)
+    qvel_rk: temporary array for rk4                            (nworld, nv)
+    qacc_rk: temporary array for rk4                            (nworld, nv)
+    act_dot_rk: temporary array for rk4                         (nworld, na)
     qfrc_integration: temporary array for integration           (nworld, nv)
     qacc_integration: temporary array for integration           (nworld, nv)
     act_vel_integration: temporary array for integration        (nworld, nu)
@@ -786,6 +793,12 @@ class Data:
   njmax: int
   rne_cacc: wp.array(dtype=wp.spatial_vector, ndim=2)
   rne_cfrc: wp.array(dtype=wp.spatial_vector, ndim=2)
+  qpos_t0: wp.array(dtype=wp.float32, ndim=2)
+  qvel_t0: wp.array(dtype=wp.float32, ndim=2)
+  act_t0: wp.array(dtype=wp.float32, ndim=2)
+  qvel_rk: wp.array(dtype=wp.float32, ndim=2)
+  qacc_rk: wp.array(dtype=wp.float32, ndim=2)
+  act_dot_rk: wp.array(dtype=wp.float32, ndim=2)
   qfrc_integration: wp.array(dtype=wp.float32, ndim=2)
   qacc_integration: wp.array(dtype=wp.float32, ndim=2)
   act_vel_integration: wp.array(dtype=wp.float32, ndim=2)
