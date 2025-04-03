@@ -59,6 +59,7 @@ def _integrate_pos(
   qpos_out: array2df,
   qpos_in: array2df,
   qvel_in: array2df,
+  qvel_scale: float = 1.0,
 ):
   jnt_type = m.jnt_type[jntid]
   qpos_adr = m.jnt_qposadr[jntid]
@@ -68,7 +69,7 @@ def _integrate_pos(
 
   if jnt_type == wp.static(JointType.FREE.value):
     qpos_pos = wp.vec3(qpos[qpos_adr], qpos[qpos_adr + 1], qpos[qpos_adr + 2])
-    qvel_lin = wp.vec3(qvel[dof_adr], qvel[dof_adr + 1], qvel[dof_adr + 2])
+    qvel_lin = wp.vec3(qvel[dof_adr], qvel[dof_adr + 1], qvel[dof_adr + 2]) * qvel_scale
 
     qpos_new = qpos_pos + m.opt.timestep * qvel_lin
 
@@ -78,7 +79,9 @@ def _integrate_pos(
       qpos[qpos_adr + 5],
       qpos[qpos_adr + 6],
     )
-    qvel_ang = wp.vec3(qvel[dof_adr + 3], qvel[dof_adr + 4], qvel[dof_adr + 5])
+    qvel_ang = (
+      wp.vec3(qvel[dof_adr + 3], qvel[dof_adr + 4], qvel[dof_adr + 5]) * qvel_scale
+    )
 
     qpos_quat_new = math.quat_integrate(qpos_quat, qvel_ang, m.opt.timestep)
 
@@ -97,7 +100,7 @@ def _integrate_pos(
       qpos[qpos_adr + 2],
       qpos[qpos_adr + 3],
     )
-    qvel_ang = wp.vec3(qvel[dof_adr], qvel[dof_adr + 1], qvel[dof_adr + 2])
+    qvel_ang = wp.vec3(qvel[dof_adr], qvel[dof_adr + 1], qvel[dof_adr + 2]) * qvel_scale
 
     qpos_quat_new = math.quat_integrate(qpos_quat, qvel_ang, m.opt.timestep)
 
@@ -107,7 +110,9 @@ def _integrate_pos(
     qpos_out[worldId, qpos_adr + 3] = qpos_quat_new[3]
 
   else:  # if jnt_type in (JointType.HINGE, JointType.SLIDE):
-    qpos_out[worldId, qpos_adr] = qpos[qpos_adr] + m.opt.timestep * qvel[dof_adr]
+    qpos_out[worldId, qpos_adr] = (
+      qpos[qpos_adr] + m.opt.timestep * qvel[dof_adr] * qvel_scale
+    )
 
 
 def _advance(
@@ -283,48 +288,36 @@ def rungekutta4(m: Model, d: Data):
       d.qvel_rk[worldId, tid] += b * d.qvel[worldId, tid]
       d.qacc_rk[worldId, tid] += b * d.qacc[worldId, tid]
 
-    wp.launch(_qvel_acc, dim=(d.nworld, m.nv), inputs=[d, b])
-
     @kernel
     def _act_dot(d: Data, b: float):
       worldId, tid = wp.tid()
       d.act_dot_rk[worldId, tid] += b * d.act_dot[worldId, tid]
 
+    wp.launch(_qvel_acc, dim=(d.nworld, m.nv), inputs=[d, b])
     wp.launch(_act_dot, dim=(d.nworld, m.na), inputs=[d, b])
 
   def perturb_state(m: Model, d: Data, a: float):
     @kernel
-    def _dqvel(d: Data, a: float):
-      """Required for _qpos below"""
-      worldId, tid = wp.tid()
-      # Temp storage, since soon overwritten
-      d.qvel[worldId, tid] = d.qvel[worldId, tid] * a
-
-    wp.launch(_dqvel, dim=(d.nworld, m.nv), inputs=[d, a])
-
-    @kernel
     def _qpos(m: Model, d: Data):
       """Integrate joint positions"""
       worldId, jntId = wp.tid()
-      _integrate_pos(worldId, jntId, m, d.qpos, d.qpos_t0, d.qvel)
-
-    wp.launch(_qpos, dim=(d.nworld, m.njnt), inputs=[m, d])
+      _integrate_pos(worldId, jntId, m, d.qpos, d.qpos_t0, d.qvel, qvel_scale=a)
 
     @kernel
-    def _act(m: Model, d: Data, a: float):
+    def _act(m: Model, d: Data):
       worldId, tid = wp.tid()
       dact_dot = a * d.act_dot[worldId, tid]
       d.act[worldId, tid] = d.act_t0[worldId, tid] + dact_dot * m.opt.timestep
 
-    wp.launch(_act, dim=(d.nworld, m.na), inputs=[m, d, a])
-
     @kernel
-    def _qvel(m: Model, d: Data, a: float):
+    def _qvel(m: Model, d: Data):
       worldId, tid = wp.tid()
       dqacc = a * d.qacc[worldId, tid]
       d.qvel[worldId, tid] = d.qvel_t0[worldId, tid] + dqacc * m.opt.timestep
 
-    wp.launch(_qvel, dim=(d.nworld, m.nv), inputs=[m, d, a])
+    wp.launch(_qpos, dim=(d.nworld, m.njnt), inputs=[m, d])
+    wp.launch(_act, dim=(d.nworld, m.na), inputs=[m, d])
+    wp.launch(_qvel, dim=(d.nworld, m.nv), inputs=[m, d])
 
   rk_accumulate(d, B[0])
   for i in range(3):

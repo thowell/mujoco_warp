@@ -145,7 +145,7 @@ class ForwardTest(parameterized.TestCase):
     np.testing.assert_allclose(d.qvel.numpy()[0], 1 + mjm.opt.timestep)
 
   def test_rungekutta4(self):
-    # `forward` kernel dispatch is very slow
+    # slower than other tests because `forward` compilation
     mjm = mujoco.MjModel.from_xml_string("""
         <mujoco>
           <option integrator="RK4">
