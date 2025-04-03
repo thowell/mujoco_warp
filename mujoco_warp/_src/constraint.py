@@ -278,6 +278,7 @@ def _efc_contact_elliptic(
       if solreffriction[0] or solreffriction[1]:
         ref = solreffriction
 
+      # TODO(team): precompute 1 / impratio
       invweight = invweight / m.opt.impratio
       friction = d.contact.friction[conid]
 
