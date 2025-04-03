@@ -164,7 +164,7 @@ class ForwardTest(parameterized.TestCase):
           </worldbody>
         </mujoco>
         """)
-    
+
     mjd = mujoco.MjData(mjm)
     mjd.qvel[:] = np.array([0.2, -0.1])
     mujoco.mj_step(mjm, mjd, 10)
@@ -179,6 +179,7 @@ class ForwardTest(parameterized.TestCase):
     _assert_eq(d.qvel.numpy()[0], mjd.qvel, "qvel")
     _assert_eq(d.act.numpy()[0], mjd.act, "act")
     _assert_eq(d.time, mjd.time, "time")
+
 
 class ImplicitIntegratorTest(parameterized.TestCase):
   def _load(self, fname: str, disableFlags: int):
