@@ -24,7 +24,6 @@ from .types import array2df
 from .types import array3df
 from .warp_util import event_scope
 from .warp_util import kernel
-from .types import ConeType_PYRAMIDAL
 from .types import vec5
 
 
@@ -238,26 +237,28 @@ def contact_force(
 ) -> wp.spatial_vector:
   """Extract 6D force:torque for one contact, in contact frame by default."""
   efc_address = d.contact.efc_address[contact_id]
-  condim = d.contact.dim[contact_id]
   force = wp.spatial_vector()
 
-  if m.opt.cone == ConeType_PYRAMIDAL:
-    force = _decode_pyramid(
-      d.efc.force, efc_address, d.contact.friction[contact_id], condim
-    )
-  # elif m.opt.cone == ConeType.ELLIPTIC.value:
-  #   for i in range(condim):
-  #     force[i] = d.efc_force[efc_address + i]
-  # else:
-  #    wp.abort(f'Unknown cone type: {m.opt.cone}')
-
-  if to_world_frame:
-    # Transform both top and bottom parts of spatial vector by the full contact frame matrix
-    t = wp.spatial_top(force) @ d.contact.frame[contact_id]
-    b = wp.spatial_bottom(force) @ d.contact.frame[contact_id]
-    force = wp.spatial_vector(t, b)
-
   if efc_address >= 0:
+    condim = d.contact.dim[contact_id]
+
+    # TODO: add support for elliptical cone type
+    if m.opt.cone == int(mujoco.mjtCone.mjCONE_PYRAMIDAL.value):
+      force = _decode_pyramid(
+        d.efc.force, efc_address, d.contact.friction[contact_id], condim
+      )
+    # elif m.opt.cone == ConeType.ELLIPTIC.value:
+    #   for i in range(condim):
+    #     force[i] = d.efc_force[efc_address + i]
+    # else:
+    #  wp.printf(f'Unknown cone type: {m.opt.cone}')
+
+    if to_world_frame:
+      # Transform both top and bottom parts of spatial vector by the full contact frame matrix
+      t = wp.spatial_top(force) @ d.contact.frame[contact_id]
+      b = wp.spatial_bottom(force) @ d.contact.frame[contact_id]
+      force = wp.spatial_vector(t, b)
+
     valid_contact = 1.0
   else:
     valid_contact = 0.0

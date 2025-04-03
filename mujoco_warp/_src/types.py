@@ -138,10 +138,6 @@ class ConeType(enum.IntEnum):
   # unsupported: ELLIPTIC
 
 
-# Define again to use inside warp kernels as they do not suport enum.IntEnum
-ConeType_PYRAMIDAL = int(mujoco.mjtCone.mjCONE_PYRAMIDAL)
-
-
 class IntegratorType(enum.IntEnum):
   """Integrator mode.
 
