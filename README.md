@@ -52,6 +52,7 @@ The following features are implemented:
 | Actuator Bias     | `NONE`, `AFFINE`                   |
 | Geom              | `PLANE`, `SPHERE`, `CAPSULE`       |
 | Constraint        | `LIMIT_JOINT`, `CONTACT_PYRAMIDAL` |
+|                   | `CONTACT_ELLIPTIC`                 |
 | Equality          | Not yet implemented                |
 | Integrator        | `EULER`, `IMPLICITFAST`            |
 | Cone              | `PYRAMIDAL`, `ELLIPTIC`            |
