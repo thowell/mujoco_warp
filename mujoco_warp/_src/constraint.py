@@ -254,6 +254,7 @@ def _efc_contact_elliptic(
     cpos = d.contact.pos[conid]
     frame = d.contact.frame[conid]
 
+    # TODO(team): parallelize J and Jqvel computation?
     Jqvel = float(0.0)
     for i in range(m.nv):
       J = float(0.0)
