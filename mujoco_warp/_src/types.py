@@ -166,8 +166,8 @@ class GeomType(enum.IntEnum):
   SPHERE = mujoco.mjtGeom.mjGEOM_SPHERE
   CAPSULE = mujoco.mjtGeom.mjGEOM_CAPSULE
   BOX = mujoco.mjtGeom.mjGEOM_BOX
-  # unsupported: HFIELD, ELLIPSOID, CYLINDER, MESH,
-  # NGEOMTYPES, ARROW*, LINE, SKIN, LABEL, NONE
+  # unsupported: HFIELD, ELLIPSOID, CYLINDER, MESH, SDF
+  # ARROW*, LINE, LINEBOX, FLEX, SKIN, LABEL, TRIANGLE
 
 
 class SolverType(enum.IntEnum):
@@ -400,6 +400,10 @@ class Model:
     qM_madr_ij: sparse mass matrix addressing
     qLD_update_tree: dof tree ordering for qLD updates
     qLD_update_treeadr: index of each dof tree level
+    M_rownnz: number of non-zeros in each row of qM             (nv,)
+    M_rowadr: index of each row in qM                           (nv,)
+    M_colind: column indices of non-zeros in qM                 (nM,)
+    mapM2M: index mapping from M (legacy) to M (CSR)            (nM)
     qLD_tile: tiling configuration
     qLD_tileadr: tiling configuration
     qLD_tilesize: tiling configuration
@@ -522,6 +526,10 @@ class Model:
   qM_madr_ij: wp.array(dtype=wp.int32, ndim=1)  # warp only
   qLD_update_tree: wp.array(dtype=wp.vec3i, ndim=1)  # warp only
   qLD_update_treeadr: wp.array(dtype=wp.int32, ndim=1)  # warp only
+  M_rownnz: wp.array(dtype=wp.int32, ndim=1)
+  M_rowadr: wp.array(dtype=wp.int32, ndim=1)
+  M_colind: wp.array(dtype=wp.int32, ndim=1)
+  mapM2M: wp.array(dtype=wp.int32, ndim=1)
   qLD_tile: wp.array(dtype=wp.int32, ndim=1)  # warp only
   qLD_tileadr: wp.array(dtype=wp.int32, ndim=1)  # warp only
   qLD_tilesize: wp.array(dtype=wp.int32, ndim=1)  # warp only
@@ -702,7 +710,7 @@ class Data:
     efc: constraint data
     nworld: number of worlds                                    ()
     nconmax: maximum number of contacts                         ()
-    njmax: maximum number of joints                             ()
+    njmax: maximum number of constraints                        ()
     rne_cacc: arrays used for smooth.rne                        (nworld, nbody, 6)
     rne_cfrc: arrays used for smooth.rne                        (nworld, nbody, 6)
     qfrc_integration: temporary array for integration           (nworld, nv)
