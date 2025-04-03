@@ -876,13 +876,6 @@ def get_data_into(
     # )
   else:
     qM = d.qM.numpy()
-    mujoco.mju_dense2sparse(
-      result.qLD,
-      d.qLD.numpy()[0],
-      result.C_rownnz,
-      result.C_rowadr,
-      result.C_colind,
-    )
     adr = 0
     for i in range(mjm.nv):
       j = i
@@ -890,6 +883,7 @@ def get_data_into(
         result.qM[adr] = qM[0, i, j]
         j = mjm.dof_parentid[j]
         adr += 1
+    mujoco.mj_factorM(mjm, result)
     # TODO(team): set efc_J after fix to _realloc_con_efc lands
     # if nefc > 0:
     #   result.efc_J[:nefc * mjm.nv] = d.efc_J.numpy()[:nefc].flatten()
