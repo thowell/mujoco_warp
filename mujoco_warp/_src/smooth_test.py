@@ -126,16 +126,15 @@ class SmoothTest(parameterized.TestCase):
     mjwarp.solve_m(m, d, d.qacc_smooth, d.qfrc_smooth)
     _assert_eq(d.qacc_smooth.numpy()[0], qacc_smooth[0], "qacc_smooth")
 
-  def test_rne(self):
+  @parameterized.parameters(True, False)
+  def test_rne(self, gravity):
     """Tests rne."""
-    _, mjd, m, d = test_util.fixture("pendula.xml")
+    _, mjd, m, d = test_util.fixture("pendula.xml", gravity=gravity)
 
     d.qfrc_bias.zero_()
 
     mjwarp.rne(m, d)
     _assert_eq(d.qfrc_bias.numpy()[0], mjd.qfrc_bias, "qfrc_bias")
-
-    # TODO(team): test DisableBit.GRAVITY
 
   def test_com_vel(self):
     """Tests com_vel."""

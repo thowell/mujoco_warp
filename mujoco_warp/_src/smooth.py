@@ -447,11 +447,17 @@ def factor_m(m: Model, d: Data):
 @event_scope
 def rne(m: Model, d: Data):
   """Computes inverse dynamics using Newton-Euler algorithm."""
+  DSBL_GRAVITY = m.opt.disableflags & DisableBit.GRAVITY.value
 
   @kernel
-  def cacc_gravity(m: Model, d: Data):
+  def cacc_world(m: Model, d: Data):
     worldid = wp.tid()
-    d.rne_cacc[worldid, 0] = wp.spatial_vector(wp.vec3(0.0), -m.opt.gravity)
+    if not DSBL_GRAVITY:
+      frc = -m.opt.gravity
+    else:
+      frc = wp.vec3(0.0)
+
+    d.rne_cacc[worldid, 0] = wp.spatial_vector(wp.vec3(0.0), frc)
 
   @kernel
   def cacc_level(
@@ -494,10 +500,7 @@ def rne(m: Model, d: Data):
       d.cdof[worldid, dofid], d.rne_cfrc[worldid, bodyid]
     )
 
-  if m.opt.disableflags & DisableBit.GRAVITY:
-    d.rne_cacc.zero_()
-  else:
-    wp.launch(cacc_gravity, dim=[d.nworld], inputs=[m, d])
+  wp.launch(cacc_world, dim=[d.nworld], inputs=[m, d])
 
   body_treeadr = m.body_treeadr.numpy()
   for i in range(len(body_treeadr)):
