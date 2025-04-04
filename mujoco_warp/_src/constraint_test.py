@@ -38,48 +38,55 @@ def _assert_eq(a, b, name):
 class ConstraintTest(parameterized.TestCase):
   def test_condim(self):
     """Test condim."""
-
     mjm = mujoco.MjModel.from_xml_string("""
       <mujoco>
         <worldbody>
           <body pos="0 0 0">
             <joint type="slide"/>
-            <geom type="sphere" size=".1" condim="3"/>
+            <geom type="sphere" size=".1" condim="1"/>
           </body>
           <body pos="1 0 0">
             <joint type="slide"/>
-            <geom type="sphere" size=".1" condim="3"/>
+            <geom type="sphere" size=".1" condim="1"/>
           </body>
           <body pos="2 0 0">
             <joint type="slide"/>
-            <geom type="sphere" size=".1" condim="4"/>
+            <geom type="sphere" size=".1" condim="3"/>
           </body>
           <body pos="3 0 0">
             <joint type="slide"/>
-            <geom type="sphere" size=".1" condim="4"/>
+            <geom type="sphere" size=".1" condim="3"/>
           </body>
           <body pos="4 0 0">
             <joint type="slide"/>
-            <geom type="sphere" size=".1" condim="6"/>
+            <geom type="sphere" size=".1" condim="4"/>
           </body>
           <body pos="5 0 0">
+            <joint type="slide"/>
+            <geom type="sphere" size=".1" condim="4"/>
+          </body>
+          <body pos="6 0 0">
+            <joint type="slide"/>
+            <geom type="sphere" size=".1" condim="6"/>
+          </body>
+          <body pos="7 0 0">
             <joint type="slide"/>
             <geom type="sphere" size=".1" condim="6"/>
           </body>
         </worldbody>
         <keyframe>
-          <key qpos='0 0 0 0 0 0'/>
-          <key qpos='0 .01 .02 .03 .04 .05'/>
-          <key qpos='0 0 1 2 3 4'/>
-          <key qpos='1 2 0 0 3 4'/>
-          <key qpos='1 2 3 4 0 0'/>
+          <key qpos='0 0 0 0 0 0 0 0'/>
+          <key qpos='0 .01 .02 .03 .04 .05 .06 .07'/>
+          <key qpos='0 0 1 2 3 4 5 6'/>
+          <key qpos='1 2 0 0 3 4 5 6'/>
+          <key qpos='1 2 3 4 0 0 5 6'/>
+          <key qpos='1 2 3 4 5 6 0 0'/>
         </keyframe>
       </mujoco>
     """)
 
     mjm.opt.cone = mujoco.mjtCone.mjCONE_PYRAMIDAL
 
-    # TODO(team): test condim=1
     # TODO(team): test elliptic friction cone
 
     mjd = mujoco.MjData(mjm)
@@ -98,10 +105,13 @@ class ConstraintTest(parameterized.TestCase):
       _assert_eq(d.efc.pos.numpy()[: mjd.nefc], mjd.efc_pos, "efc_pos")
       _assert_eq(d.efc.margin.numpy()[: mjd.nefc], mjd.efc_margin, "efc_margin")
 
-  def test_constraints(self):
+  @parameterized.parameters(
+    mujoco.mjtCone.mjCONE_PYRAMIDAL,
+    mujoco.mjtCone.mjCONE_ELLIPTIC,
+  )
+  def test_constraints(self, cone):
     """Test constraints."""
-    mjm, mjd, _, _ = test_util.fixture("constraints.xml", sparse=False)
-    mjm.opt.cone = mujoco.mjtCone.mjCONE_PYRAMIDAL
+    mjm, mjd, _, _ = test_util.fixture("constraints.xml", sparse=False, cone=cone)
 
     for key in range(3):
       mujoco.mj_resetDataKeyframe(mjm, mjd, key)
