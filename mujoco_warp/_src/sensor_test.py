@@ -104,6 +104,7 @@ class SensorTest(parameterized.TestCase):
           <velocimeter site="site2"/>                           
           <gyro site="site2"/>       
           <jointvel joint="slide"/>
+          <actuatorvel actuator="slide"/>
           <actuatorfrc actuator="slide"/>
           <jointactuatorfrc joint="slide"/>                      
         </sensor>

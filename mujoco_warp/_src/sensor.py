@@ -252,6 +252,11 @@ def _joint_vel(m: Model, d: Data, worldid: int, objid: int) -> wp.float32:
   return d.qvel[worldid, m.jnt_dofadr[objid]]
 
 
+@wp.func
+def _actuator_vel(m: Model, d: Data, worldid: int, objid: int) -> wp.float32:
+  return d.actuator_velocity[worldid, objid]
+
+
 @event_scope
 def sensor_vel(m: Model, d: Data):
   """Compute velocity-dependent sensor values."""
@@ -276,6 +281,8 @@ def sensor_vel(m: Model, d: Data):
       d.sensordata[worldid, adr + 2] = gyro[2]
     elif sensortype == int(SensorType.JOINTVEL.value):
       d.sensordata[worldid, adr] = _joint_vel(m, d, worldid, objid)
+    elif sensortype == int(SensorType.ACTUATORVEL.value):
+      d.sensordata[worldid, adr] = _actuator_vel(m, d, worldid, objid)
 
   if (m.sensor_vel_adr.size == 0) or (m.opt.disableflags & DisableBit.SENSOR):
     return
