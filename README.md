@@ -53,7 +53,7 @@ The following features are implemented:
 | Geom              | `PLANE`, `SPHERE`, `CAPSULE`       |
 | Constraint        | `LIMIT_JOINT`, `CONTACT_PYRAMIDAL` |
 | Equality          | Not yet implemented                |
-| Integrator        | `EULER`, `IMPLICITFAST`            |
+| Integrator        | `EULER`, `IMPLICITFAST`, `RK4`     |
 | Cone              | `PYRAMIDAL`                        |
 | Condim            | 3                                  |
 | Solver            | `CG`, `NEWTON`                     |
