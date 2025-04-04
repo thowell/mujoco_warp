@@ -105,6 +105,7 @@ class SensorTest(parameterized.TestCase):
           <gyro site="site2"/>       
           <jointvel joint="slide"/>
           <actuatorvel actuator="slide"/>
+          <ballangvel joint="ballquat"/>
           <actuatorfrc actuator="slide"/>
           <jointactuatorfrc joint="slide"/>                      
         </sensor>

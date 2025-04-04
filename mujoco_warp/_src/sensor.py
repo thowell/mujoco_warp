@@ -257,6 +257,16 @@ def _actuator_vel(m: Model, d: Data, worldid: int, objid: int) -> wp.float32:
   return d.actuator_velocity[worldid, objid]
 
 
+@wp.func
+def _ball_ang_vel(m: Model, d: Data, worldid: int, objid: int) -> wp.vec3:
+  jnt_dofadr = m.jnt_dofadr[objid]
+  return wp.vec3(
+    d.qvel[worldid, jnt_dofadr + 0],
+    d.qvel[worldid, jnt_dofadr + 1],
+    d.qvel[worldid, jnt_dofadr + 2],
+  )
+
+
 @event_scope
 def sensor_vel(m: Model, d: Data):
   """Compute velocity-dependent sensor values."""
@@ -283,6 +293,11 @@ def sensor_vel(m: Model, d: Data):
       d.sensordata[worldid, adr] = _joint_vel(m, d, worldid, objid)
     elif sensortype == int(SensorType.ACTUATORVEL.value):
       d.sensordata[worldid, adr] = _actuator_vel(m, d, worldid, objid)
+    elif sensortype == int(SensorType.BALLANGVEL.value):
+      angvel = _ball_ang_vel(m, d, worldid, objid)
+      d.sensordata[worldid, adr + 0] = angvel[0]
+      d.sensordata[worldid, adr + 1] = angvel[1]
+      d.sensordata[worldid, adr + 2] = angvel[2]
 
   if (m.sensor_vel_adr.size == 0) or (m.opt.disableflags & DisableBit.SENSOR):
     return
