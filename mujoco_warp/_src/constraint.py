@@ -93,15 +93,17 @@ def _jac(
       break
     parentid = m.body_parentid[parentid]
 
+  if not in_tree:
+    return 0.0, 0.0
+
   offset = point - wp.vec3(d.subtree_com[worldid, m.body_rootid[bodyid]])
 
-  jacp = wp.spatial_bottom(d.cdof[worldid, dofid]) + wp.cross(
-    wp.spatial_top(d.cdof[worldid, dofid]), offset
-  )
-  jacp_xyz = jacp[xyz] * float(in_tree)
-
-  jacr = d.cdof[worldid, dofid]
-  jacr_xyz = jacr[xyz] * float(in_tree)
+  cdof = d.cdof[worldid, dofid]
+  cdof_ang = wp.spatial_top(cdof)
+  cdof_lin = wp.spatial_bottom(cdof)
+  
+  jacp_xyz = (cdof_lin + wp.cross(cdof_ang, offset))[xyz]
+  jacr_xyz = cdof_ang[xyz]
 
   return jacp_xyz, jacr_xyz
 
