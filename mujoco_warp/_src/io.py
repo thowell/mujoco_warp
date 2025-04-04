@@ -77,6 +77,8 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
   m.njnt = mjm.njnt
   m.ngeom = mjm.ngeom
   m.nsite = mjm.nsite
+  m.ncam = mjm.ncam
+  m.nlight = mjm.nlight
   m.nmocap = mjm.nmocap
   m.nM = mjm.nM
   m.nlsp = mjm.opt.ls_iterations  # TODO(team): how to set nlsp?
@@ -354,6 +356,22 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
   m.site_pos = wp.array(mjm.site_pos, dtype=wp.vec3, ndim=1)
   m.site_quat = wp.array(mjm.site_quat, dtype=wp.quat, ndim=1)
   m.site_bodyid = wp.array(mjm.site_bodyid, dtype=wp.int32, ndim=1)
+  m.cam_mode = wp.array(mjm.cam_mode, dtype=wp.int32, ndim=1)
+  m.cam_bodyid = wp.array(mjm.cam_bodyid, dtype=wp.int32, ndim=1)
+  m.cam_targetbodyid = wp.array(mjm.cam_targetbodyid, dtype=wp.int32, ndim=1)
+  m.cam_pos = wp.array(mjm.cam_pos, dtype=wp.vec3, ndim=1)
+  m.cam_quat = wp.array(mjm.cam_quat, dtype=wp.quat, ndim=1)
+  m.cam_poscom0 = wp.array(mjm.cam_poscom0, dtype=wp.vec3, ndim=1)
+  m.cam_pos0 = wp.array(mjm.cam_pos0, dtype=wp.vec3, ndim=1)
+  m.cam_mat0 = wp.array(mjm.cam_mat0.reshape(-1, 3, 3), dtype=wp.mat33, ndim=1)
+  m.light_mode = wp.array(mjm.light_mode, dtype=wp.int32, ndim=1)
+  m.light_bodyid = wp.array(mjm.light_bodyid, dtype=wp.int32, ndim=1)
+  m.light_targetbodyid = wp.array(mjm.light_targetbodyid, dtype=wp.int32, ndim=1)
+  m.light_pos = wp.array(mjm.light_pos, dtype=wp.vec3, ndim=1)
+  m.light_dir = wp.array(mjm.light_dir, dtype=wp.vec3, ndim=1)
+  m.light_poscom0 = wp.array(mjm.light_poscom0, dtype=wp.vec3, ndim=1)
+  m.light_pos0 = wp.array(mjm.light_pos0, dtype=wp.vec3, ndim=1)
+  m.light_dir0 = wp.array(mjm.light_dir0, dtype=wp.vec3, ndim=1)
   m.dof_bodyid = wp.array(mjm.dof_bodyid, dtype=wp.int32, ndim=1)
   m.dof_jntid = wp.array(mjm.dof_jntid, dtype=wp.int32, ndim=1)
   m.dof_parentid = wp.array(mjm.dof_parentid, dtype=wp.int32, ndim=1)
@@ -489,6 +507,10 @@ def make_data(
   d.geom_xmat = wp.zeros((nworld, mjm.ngeom), dtype=wp.mat33)
   d.site_xpos = wp.zeros((nworld, mjm.nsite), dtype=wp.vec3)
   d.site_xmat = wp.zeros((nworld, mjm.nsite), dtype=wp.mat33)
+  d.cam_xpos = wp.zeros((nworld, mjm.ncam), dtype=wp.vec3)
+  d.cam_xmat = wp.zeros((nworld, mjm.ncam), dtype=wp.mat33)
+  d.light_xpos = wp.zeros((nworld, mjm.nlight), dtype=wp.vec3)
+  d.light_xdir = wp.zeros((nworld, mjm.nlight), dtype=wp.vec3)
   d.cinert = wp.zeros((nworld, mjm.nbody), dtype=types.vec10)
   d.cdof = wp.zeros((nworld, mjm.nv), dtype=wp.spatial_vector)
   d.ctrl = wp.zeros((nworld, mjm.nu), dtype=wp.float32)
@@ -648,6 +670,10 @@ def put_data(
   d.geom_xmat = wp.array(tile(mjd.geom_xmat), dtype=wp.mat33, ndim=2)
   d.site_xpos = wp.array(tile(mjd.site_xpos), dtype=wp.vec3, ndim=2)
   d.site_xmat = wp.array(tile(mjd.site_xmat), dtype=wp.mat33, ndim=2)
+  d.cam_xpos = wp.array(tile(mjd.cam_xpos), dtype=wp.vec3, ndim=2)
+  d.cam_xmat = wp.array(tile(mjd.cam_xmat.reshape(-1, 3, 3)), dtype=wp.mat33, ndim=2)
+  d.light_xpos = wp.array(tile(mjd.light_xpos), dtype=wp.vec3, ndim=2)
+  d.light_xdir = wp.array(tile(mjd.light_xdir), dtype=wp.vec3, ndim=2)
   d.cinert = wp.array(tile(mjd.cinert), dtype=types.vec10, ndim=2)
   d.cdof = wp.array(tile(mjd.cdof), dtype=wp.spatial_vector, ndim=2)
   d.crb = wp.array(tile(mjd.crb), dtype=types.vec10, ndim=2)
@@ -834,6 +860,10 @@ def get_data_into(
   result.geom_xmat = d.geom_xmat.numpy().reshape((-1, 9))
   result.site_xpos = d.site_xpos.numpy()[0]
   result.site_xmat = d.site_xmat.numpy().reshape((-1, 9))
+  result.cam_xpos = d.cam_xpos.numpy()[0]
+  result.cam_xmat = d.cam_xmat.numpy().reshape((-1, 9))
+  result.light_xpos = d.light_xpos.numpy()[0]
+  result.light_xdir = d.light_xdir.numpy()[0]
   result.cinert = d.cinert.numpy()[0]
   result.cdof = d.cdof.numpy()[0]
   result.crb = d.crb.numpy()[0]
