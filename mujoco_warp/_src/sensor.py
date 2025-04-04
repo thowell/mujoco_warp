@@ -123,7 +123,9 @@ def _frame_axis(
 
 
 @wp.func
-def _frame_quat(m: Model, d: Data, worldid: int, objid: int, objtype: int, refid: int) -> wp.quat:
+def _frame_quat(
+  m: Model, d: Data, worldid: int, objid: int, objtype: int, refid: int
+) -> wp.quat:
   if objtype == int(ObjType.BODY.value):
     quat = math.mul_quat(d.xquat[worldid, objid], m.body_iquat[objid])
     if refid == -1:
@@ -144,12 +146,12 @@ def _frame_quat(m: Model, d: Data, worldid: int, objid: int, objtype: int, refid
     if refid == -1:
       return quat
     refquat = math.mul_quat(d.xquat[worldid, m.site_bodyid[refid]], m.site_quat[refid])
-  
+
   # TODO(team): camera
 
   else:  # UNKNOWN
     return wp.quat(1.0, 0.0, 0.0, 0.0)
-  
+
   return math.mul_quat(math.quat_inv(refquat), quat)
 
 
@@ -215,6 +217,15 @@ def sensor_pos(m: Model, d: Data):
 
 
 @wp.func
+def _gyro(m: Model, d: Data, worldid: int, objid: int) -> wp.vec3:
+  bodyid = m.site_bodyid[objid]
+  rot = d.site_xmat[worldid, objid]
+  cvel = d.cvel[worldid, bodyid]
+  ang = wp.spatial_top(cvel)
+  return wp.transpose(rot) @ ang
+
+
+@wp.func
 def _joint_vel(m: Model, d: Data, worldid: int, objid: int) -> wp.float32:
   return d.qvel[worldid, m.jnt_dofadr[objid]]
 
@@ -231,7 +242,12 @@ def sensor_vel(m: Model, d: Data):
     objid = m.sensor_objid[veladr]
     adr = m.sensor_adr[veladr]
 
-    if sensortype == int(SensorType.JOINTVEL.value):
+    if sensortype == int(SensorType.GYRO.value):
+      gyro = _gyro(m, d, worldid, objid)
+      d.sensordata[worldid, adr + 0] = gyro[0]
+      d.sensordata[worldid, adr + 1] = gyro[1]
+      d.sensordata[worldid, adr + 2] = gyro[2]
+    elif sensortype == int(SensorType.JOINTVEL.value):
       d.sensordata[worldid, adr] = _joint_vel(m, d, worldid, objid)
 
   if (m.sensor_vel_adr.size == 0) or (m.opt.disableflags & DisableBit.SENSOR):
