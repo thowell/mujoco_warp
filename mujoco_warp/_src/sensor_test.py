@@ -54,6 +54,11 @@ class SensorTest(parameterized.TestCase):
             <geom type="sphere" size="0.1"/>
             <site name="site1" pos=".1 .2 .3"/>                         
           </body>
+          <body name="body2" pos="1 1 1">
+            <freejoint/>
+            <geom type="sphere" size="0.1"/>
+            <site name="site2"/>                         
+          </body>
         </worldbody>
         <actuator>
           <motor name="slide" joint="slide"/>
@@ -87,12 +92,13 @@ class SensorTest(parameterized.TestCase):
           <framequat objtype="xbody" objname="body1"/> 
           <framequat objtype="geom" objname="geom0"/>    
           <framequat objtype="site" objname="site0"/> 
-          <gyro site="site1"/>       
+          <velocimeter site="site2"/>                           
+          <gyro site="site2"/>       
           <jointvel joint="slide"/>
           <actuatorfrc actuator="slide"/>
         </sensor>
         <keyframe>
-          <key qpos="1 .1 .2 .3 .4" qvel="2 .2 -.1 .4" ctrl="3"/>
+          <key qpos="1 .1 .2 .3 .4 1 1 1 1 0 0 0" qvel="2 .2 -.1 .4 .25 .35 .45 -0.1 -0.2 -0.3" ctrl="3"/>
         </keyframe>
       </mujoco>
     """)

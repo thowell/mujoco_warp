@@ -215,6 +215,7 @@ class SensorType(enum.IntEnum):
     FRAMEYAXIS: frame y-axis
     FRAMEZAXIS: frame z-axis
     FRAMEQUAT: frame orientation, represented as quaternion
+    VELOCIMETER: 3D linear velocity, in local frame
     GYRO: 3D angular velocity, in local frame
     JOINTVEL: joint velocity
     ACTUATORFRC: scalar actuator force
@@ -228,6 +229,7 @@ class SensorType(enum.IntEnum):
   FRAMEYAXIS = mujoco.mjtSensor.mjSENS_FRAMEYAXIS
   FRAMEZAXIS = mujoco.mjtSensor.mjSENS_FRAMEZAXIS
   FRAMEQUAT = mujoco.mjtSensor.mjSENS_FRAMEQUAT
+  VELOCIMETER = mujoco.mjtSensor.mjSENS_VELOCIMETER
   GYRO = mujoco.mjtSensor.mjSENS_GYRO
   JOINTVEL = mujoco.mjtSensor.mjSENS_JOINTVEL
   ACTUATORFRC = mujoco.mjtSensor.mjSENS_ACTUATORFRC

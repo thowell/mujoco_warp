@@ -217,6 +217,19 @@ def sensor_pos(m: Model, d: Data):
 
 
 @wp.func
+def _velocimeter(m: Model, d: Data, worldid: int, objid: int) -> wp.vec3:
+  bodyid = m.site_bodyid[objid]
+  pos = d.site_xpos[worldid, objid]
+  rot = d.site_xmat[worldid, objid]
+  cvel = d.cvel[worldid, bodyid]
+  ang = wp.spatial_top(cvel)
+  lin = wp.spatial_bottom(cvel)
+  subtree_com = d.subtree_com[worldid, m.body_rootid[bodyid]]
+  dif = pos - subtree_com
+  return wp.transpose(rot) @ (lin - wp.cross(dif, ang))
+
+
+@wp.func
 def _gyro(m: Model, d: Data, worldid: int, objid: int) -> wp.vec3:
   bodyid = m.site_bodyid[objid]
   rot = d.site_xmat[worldid, objid]
@@ -242,7 +255,12 @@ def sensor_vel(m: Model, d: Data):
     objid = m.sensor_objid[veladr]
     adr = m.sensor_adr[veladr]
 
-    if sensortype == int(SensorType.GYRO.value):
+    if sensortype == int(SensorType.VELOCIMETER.value):
+      vel = _velocimeter(m, d, worldid, objid)
+      d.sensordata[worldid, adr + 0] = vel[0]
+      d.sensordata[worldid, adr + 1] = vel[1]
+      d.sensordata[worldid, adr + 2] = vel[2]
+    elif sensortype == int(SensorType.GYRO.value):
       gyro = _gyro(m, d, worldid, objid)
       d.sensordata[worldid, adr + 0] = gyro[0]
       d.sensordata[worldid, adr + 1] = gyro[1]
