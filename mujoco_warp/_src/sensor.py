@@ -15,6 +15,7 @@
 
 import warp as wp
 
+from . import math
 from .types import Data
 from .types import DisableBit
 from .types import Model
@@ -121,6 +122,37 @@ def _frame_axis(
   return wp.transpose(xmat_ref) @ axis
 
 
+@wp.func
+def _frame_quat(m: Model, d: Data, worldid: int, objid: int, objtype: int, refid: int) -> wp.quat:
+  if objtype == int(ObjType.BODY.value):
+    quat = math.mul_quat(d.xquat[worldid, objid], m.body_iquat[objid])
+    if refid == -1:
+      return quat
+    refquat = math.mul_quat(d.xquat[worldid, refid], m.body_iquat[refid])
+  elif objtype == int(ObjType.XBODY.value):
+    quat = d.xquat[worldid, objid]
+    if refid == -1:
+      return quat
+    refquat = d.xquat[worldid, refid]
+  elif objtype == int(ObjType.GEOM.value):
+    quat = math.mul_quat(d.xquat[worldid, m.geom_bodyid[objid]], m.geom_quat[objid])
+    if refid == -1:
+      return quat
+    refquat = math.mul_quat(d.xquat[worldid, m.geom_bodyid[refid]], m.geom_quat[refid])
+  elif objtype == int(ObjType.SITE.value):
+    quat = math.mul_quat(d.xquat[worldid, m.site_bodyid[objid]], m.site_quat[objid])
+    if refid == -1:
+      return quat
+    refquat = math.mul_quat(d.xquat[worldid, m.site_bodyid[refid]], m.site_quat[refid])
+  
+  # TODO(team): camera
+
+  else:  # UNKNOWN
+    return wp.quat(1.0, 0.0, 0.0, 0.0)
+  
+  return math.mul_quat(math.quat_inv(refquat), quat)
+
+
 @event_scope
 def sensor_pos(m: Model, d: Data):
   """Compute position-dependent sensor values."""
@@ -167,6 +199,14 @@ def sensor_pos(m: Model, d: Data):
       d.sensordata[worldid, adr + 0] = frameaxis[0]
       d.sensordata[worldid, adr + 1] = frameaxis[1]
       d.sensordata[worldid, adr + 2] = frameaxis[2]
+    elif sensortype == int(SensorType.FRAMEQUAT.value):
+      objtype = m.sensor_objtype[posadr]
+      refid = m.sensor_refid[posadr]
+      quat = _frame_quat(m, d, worldid, objid, objtype, refid)
+      d.sensordata[worldid, adr + 0] = quat[0]
+      d.sensordata[worldid, adr + 1] = quat[1]
+      d.sensordata[worldid, adr + 2] = quat[2]
+      d.sensordata[worldid, adr + 3] = quat[3]
 
   if (m.sensor_pos_adr.size == 0) or (m.opt.disableflags & DisableBit.SENSOR):
     return
