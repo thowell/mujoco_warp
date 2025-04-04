@@ -33,6 +33,18 @@ def _actuator_length(m: Model, d: Data, worldid: int, objid: int) -> wp.float32:
   return d.actuator_length[worldid, objid]
 
 
+@wp.func
+def _ball_quat(m: Model, d: Data, worldid: int, objid: int) -> wp.quat:
+  jnt_qposadr = m.jnt_qposadr[objid]
+  quat = wp.quat(
+    d.qpos[worldid, jnt_qposadr + 0],
+    d.qpos[worldid, jnt_qposadr + 1],
+    d.qpos[worldid, jnt_qposadr + 2],
+    d.qpos[worldid, jnt_qposadr + 3],
+  )
+  return wp.normalize(quat)
+
+
 @event_scope
 def sensor_pos(m: Model, d: Data):
   """Compute position-dependent sensor values."""
@@ -49,6 +61,12 @@ def sensor_pos(m: Model, d: Data):
       d.sensordata[worldid, adr] = _joint_pos(m, d, worldid, objid)
     elif sensortype == int(SensorType.ACTUATORPOS.value):
       d.sensordata[worldid, adr] = _actuator_length(m, d, worldid, objid)
+    elif sensortype == int(SensorType.BALLQUAT.value):
+      quat = _ball_quat(m, d, worldid, objid)
+      d.sensordata[worldid, adr + 0] = quat[0]
+      d.sensordata[worldid, adr + 1] = quat[1]
+      d.sensordata[worldid, adr + 2] = quat[2]
+      d.sensordata[worldid, adr + 3] = quat[3]
 
   if (m.sensor_pos_adr.size == 0) or (m.opt.disableflags & DisableBit.SENSOR):
     return

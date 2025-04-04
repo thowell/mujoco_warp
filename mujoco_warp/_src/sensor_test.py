@@ -44,8 +44,12 @@ class SensorTest(parameterized.TestCase):
     mjm = mujoco.MjModel.from_xml_string("""
       <mujoco>
         <worldbody>
-          <body>
+          <body pos="0 0 0">
             <joint name="slide" type="slide"/>
+            <geom type="sphere" size="0.1"/>
+          </body>
+          <body pos="1 0 0">
+            <joint name="ballquat" type="ball"/>
             <geom type="sphere" size="0.1"/>
           </body>
         </worldbody>
@@ -55,11 +59,12 @@ class SensorTest(parameterized.TestCase):
         <sensor>
           <jointpos joint="slide"/>
           <actuatorpos actuator="slide"/>
+          <ballquat joint="ballquat"/>            
           <jointvel joint="slide"/>
           <actuatorfrc actuator="slide"/>
         </sensor>
         <keyframe>
-          <key qpos="1" qvel="2" ctrl="3"/>
+          <key qpos="1 .1 .2 .3 .4" qvel="2 0 0 0" ctrl="3"/>
         </keyframe>
       </mujoco>
     """)

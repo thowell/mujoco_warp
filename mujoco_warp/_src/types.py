@@ -209,12 +209,14 @@ class SensorType(enum.IntEnum):
   Members:
     JOINTPOS: joint position
     ACTUATORPOS: actuator position
+    BALLQUAT: ball joint orientation
     JOINTVEL: joint velocity
     ACTUATORFRC: scalar actuator force
   """
 
   JOINTPOS = mujoco.mjtSensor.mjSENS_JOINTPOS
   ACTUATORPOS = mujoco.mjtSensor.mjSENS_ACTUATORPOS
+  BALLQUAT = mujoco.mjtSensor.mjSENS_BALLQUAT
   JOINTVEL = mujoco.mjtSensor.mjSENS_JOINTVEL
   ACTUATORFRC = mujoco.mjtSensor.mjSENS_ACTUATORFRC
 
