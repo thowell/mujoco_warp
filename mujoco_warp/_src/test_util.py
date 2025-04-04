@@ -34,7 +34,7 @@ def fixture(
   keyframe: int = -1,
   sparse: bool = True,
   cone: int = mujoco.mjtCone.mjCONE_PYRAMIDAL,
-  gravity: bool = True
+  gravity: bool = True,
 ):
   path = epath.resource_path("mujoco_warp") / "test_data" / fname
   mjm = mujoco.MjModel.from_xml_path(path.as_posix())
