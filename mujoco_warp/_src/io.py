@@ -392,7 +392,6 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
   # sensors
   m.sensor_type = wp.array(mjm.sensor_type, dtype=wp.int32, ndim=1)
   m.sensor_datatype = wp.array(mjm.sensor_datatype, dtype=wp.int32, ndim=1)
-  m.sensor_needstage = wp.array(mjm.sensor_needstage, dtype=wp.int32, ndim=1)
   m.sensor_objtype = wp.array(mjm.sensor_objtype, dtype=wp.int32, ndim=1)
   m.sensor_objid = wp.array(mjm.sensor_objid, dtype=wp.int32, ndim=1)
   m.sensor_reftype = wp.array(mjm.sensor_reftype, dtype=wp.int32, ndim=1)
