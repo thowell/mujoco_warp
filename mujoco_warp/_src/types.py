@@ -211,6 +211,9 @@ class SensorType(enum.IntEnum):
     ACTUATORPOS: actuator position
     BALLQUAT: ball joint orientation
     FRAMEPOS: frame position
+    FRAMEXAXIS: frame x-axis
+    FRAMEYAXIS: frame y-axis
+    FRAMEZAXIS: frame z-axis
     JOINTVEL: joint velocity
     ACTUATORFRC: scalar actuator force
   """
@@ -219,6 +222,9 @@ class SensorType(enum.IntEnum):
   ACTUATORPOS = mujoco.mjtSensor.mjSENS_ACTUATORPOS
   BALLQUAT = mujoco.mjtSensor.mjSENS_BALLQUAT
   FRAMEPOS = mujoco.mjtSensor.mjSENS_FRAMEPOS
+  FRAMEXAXIS = mujoco.mjtSensor.mjSENS_FRAMEXAXIS
+  FRAMEYAXIS = mujoco.mjtSensor.mjSENS_FRAMEYAXIS
+  FRAMEZAXIS = mujoco.mjtSensor.mjSENS_FRAMEZAXIS
   JOINTVEL = mujoco.mjtSensor.mjSENS_JOINTVEL
   ACTUATORFRC = mujoco.mjtSensor.mjSENS_ACTUATORFRC
 

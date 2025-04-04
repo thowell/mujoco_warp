@@ -65,7 +65,22 @@ class SensorTest(parameterized.TestCase):
           <framepos objtype="body" objname="body1" reftype="body" refname="body0"/>    
           <framepos objtype="xbody" objname="body1"/> 
           <framepos objtype="geom" objname="geom0"/>    
-          <framepos objtype="site" objname="site0"/>          
+          <framepos objtype="site" objname="site0"/>
+          <framexaxis objtype="body" objname="body1"/>      
+          <framexaxis objtype="body" objname="body1" reftype="body" refname="body0"/>    
+          <framexaxis objtype="xbody" objname="body1"/> 
+          <framexaxis objtype="geom" objname="geom0"/>    
+          <framexaxis objtype="site" objname="site0"/>
+          <frameyaxis objtype="body" objname="body1"/>      
+          <frameyaxis objtype="body" objname="body1" reftype="body" refname="body0"/>    
+          <frameyaxis objtype="xbody" objname="body1"/> 
+          <frameyaxis objtype="geom" objname="geom0"/>    
+          <frameyaxis objtype="site" objname="site0"/> 
+          <framezaxis objtype="body" objname="body1"/>      
+          <framezaxis objtype="body" objname="body1" reftype="body" refname="body0"/>    
+          <framezaxis objtype="xbody" objname="body1"/> 
+          <framezaxis objtype="geom" objname="geom0"/>    
+          <framezaxis objtype="site" objname="site0"/>          
           <jointvel joint="slide"/>
           <actuatorfrc actuator="slide"/>
         </sensor>

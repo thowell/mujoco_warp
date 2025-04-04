@@ -83,6 +83,44 @@ def _frame_pos(
   return wp.transpose(xmat_ref) @ (xpos - xpos_ref)
 
 
+@wp.func
+def _frame_axis(
+  m: Model, d: Data, worldid: int, objid: int, objtype: int, refid: int, frame_axis: int
+) -> wp.vec3:
+  if objtype == int(ObjType.BODY.value):
+    xmat = d.ximat[worldid, objid]
+    axis = wp.vec3(xmat[0, frame_axis], xmat[1, frame_axis], xmat[2, frame_axis])
+    if refid == -1:
+      return axis
+    xmat_ref = d.ximat[worldid, refid]
+  elif objtype == int(ObjType.XBODY.value):
+    xmat = d.xmat[worldid, objid]
+    axis = wp.vec3(xmat[0, frame_axis], xmat[1, frame_axis], xmat[2, frame_axis])
+    if refid == -1:
+      return axis
+    xmat_ref = d.xmat[worldid, refid]
+  elif objtype == int(ObjType.GEOM.value):
+    xmat = d.geom_xmat[worldid, objid]
+    axis = wp.vec3(xmat[0, frame_axis], xmat[1, frame_axis], xmat[2, frame_axis])
+    if refid == -1:
+      return axis
+    xmat_ref = d.geom_xmat[worldid, refid]
+  elif objtype == int(ObjType.SITE.value):
+    xmat = d.site_xmat[worldid, objid]
+    axis = wp.vec3(xmat[0, frame_axis], xmat[1, frame_axis], xmat[2, frame_axis])
+    if refid == -1:
+      return axis
+    xmat_ref = d.site_xmat[worldid, refid]
+
+  # TODO(team): camera
+
+  else:  # UNKNOWN
+    xmat = wp.identity(3, dtype=wp.float32)
+    return wp.vec3(xmat[0, frame_axis], xmat[1, frame_axis], xmat[2, frame_axis])
+
+  return wp.transpose(xmat_ref) @ axis
+
+
 @event_scope
 def sensor_pos(m: Model, d: Data):
   """Compute position-dependent sensor values."""
@@ -112,6 +150,23 @@ def sensor_pos(m: Model, d: Data):
       d.sensordata[worldid, adr + 0] = framepos[0]
       d.sensordata[worldid, adr + 1] = framepos[1]
       d.sensordata[worldid, adr + 2] = framepos[2]
+    elif (
+      sensortype == int(SensorType.FRAMEXAXIS.value)
+      or sensortype == int(SensorType.FRAMEYAXIS.value)
+      or sensortype == int(SensorType.FRAMEZAXIS.value)
+    ):
+      objtype = m.sensor_objtype[posadr]
+      refid = m.sensor_refid[posadr]
+      if sensortype == int(SensorType.FRAMEXAXIS.value):
+        axis = 0
+      elif sensortype == int(SensorType.FRAMEYAXIS.value):
+        axis = 1
+      elif sensortype == int(SensorType.FRAMEZAXIS.value):
+        axis = 2
+      frameaxis = _frame_axis(m, d, worldid, objid, objtype, refid, axis)
+      d.sensordata[worldid, adr + 0] = frameaxis[0]
+      d.sensordata[worldid, adr + 1] = frameaxis[1]
+      d.sensordata[worldid, adr + 2] = frameaxis[2]
 
   if (m.sensor_pos_adr.size == 0) or (m.opt.disableflags & DisableBit.SENSOR):
     return
