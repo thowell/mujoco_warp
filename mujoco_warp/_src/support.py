@@ -200,3 +200,18 @@ def mat33_from_rows(a: wp.vec3, b: wp.vec3, c: wp.vec3):
 @wp.func
 def mat33_from_cols(a: wp.vec3, b: wp.vec3, c: wp.vec3):
   return wp.mat33(a.x, b.x, c.x, a.y, b.y, c.y, a.z, b.z, c.z)
+
+
+@wp.func
+def transform_force(
+  force: wp.vec3, torque: wp.vec3, offset: wp.vec3
+) -> wp.spatial_vector:
+  torque -= wp.cross(offset, force)
+  return wp.spatial_vector(torque, force)
+
+
+@wp.func
+def transform_force(frc: wp.spatial_vector, offset: wp.vec3) -> wp.spatial_vector:
+  force = wp.spatial_top(frc)
+  torque = wp.spatial_bottom(frc)
+  return transform_force(force, torque, offset)

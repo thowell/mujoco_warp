@@ -710,8 +710,6 @@ class Data:
     nworld: number of worlds                                    ()
     nconmax: maximum number of contacts                         ()
     njmax: maximum number of constraints                        ()
-    rne_cacc: arrays used for smooth.rne                        (nworld, nbody, 6)
-    rne_cfrc: arrays used for smooth.rne                        (nworld, nbody, 6)
     qfrc_integration: temporary array for integration           (nworld, nv)
     qacc_integration: temporary array for integration           (nworld, nv)
     act_vel_integration: temporary array for integration        (nworld, nu)
@@ -730,6 +728,9 @@ class Data:
     collision_type: collision types from broadphase             (nconmax,)
     collision_worldid: collision world ids from broadphase      (nconmax,)
     ncollision: collision count from broadphase                 ()
+    cacc: com-based acceleration                                (nworld, nbody, 6)
+    cfrc_int: com-based interaction force with parent           (nworld, nbody, 6)
+    cfrc_ext: com-based external force on body                  (nworld, nbody, 6)
   """
 
   ncon: wp.array(dtype=wp.int32, ndim=1)
@@ -784,8 +785,6 @@ class Data:
   nworld: int
   nconmax: int
   njmax: int
-  rne_cacc: wp.array(dtype=wp.spatial_vector, ndim=2)
-  rne_cfrc: wp.array(dtype=wp.spatial_vector, ndim=2)
   qfrc_integration: wp.array(dtype=wp.float32, ndim=2)
   qacc_integration: wp.array(dtype=wp.float32, ndim=2)
   act_vel_integration: wp.array(dtype=wp.float32, ndim=2)
@@ -806,3 +805,8 @@ class Data:
   collision_pair: wp.array(dtype=wp.vec2i, ndim=1)
   collision_worldid: wp.array(dtype=wp.int32, ndim=1)
   ncollision: wp.array(dtype=wp.int32, ndim=1)
+
+  # rne_postconstraint
+  cacc: wp.array(dtype=wp.spatial_vector, ndim=2)
+  cfrc_int: wp.array(dtype=wp.spatial_vector, ndim=2)
+  cfrc_ext: wp.array(dtype=wp.spatial_vector, ndim=2)
