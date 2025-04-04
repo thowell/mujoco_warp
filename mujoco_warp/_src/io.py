@@ -520,7 +520,7 @@ def make_data(
   d.contact.solimp = wp.zeros((nconmax,), dtype=types.vec5)
   d.contact.dim = wp.zeros((nconmax,), dtype=wp.int32)
   d.contact.geom = wp.zeros((nconmax,), dtype=wp.vec2i)
-  d.contact.efc_address = wp.zeros((nconmax,), dtype=wp.int32)
+  d.contact.efc_address = wp.zeros((nconmax, np.max(mjm.geom_condim)), dtype=wp.int32)
   d.contact.worldid = wp.zeros((nconmax,), dtype=wp.int32)
   d.efc = _constraint(mjm, d.nworld, d.njmax)
   d.qfrc_passive = wp.zeros((nworld, mjm.nv), dtype=wp.float32)
@@ -700,11 +700,16 @@ def put_data(
   )
 
   ncon = mjd.ncon
-  con_efc_address = np.zeros(nconmax, dtype=int)
-  con_worldid = np.zeros(nconmax, dtype=int)
-
+  condim_max = np.max(mjm.geom_condim)
+  con_efc_address = np.zeros((nconmax, condim_max), dtype=int)
   for i in range(nworld):
-    con_efc_address[i * ncon : (i + 1) * ncon] = mjd.contact.efc_address + i * ncon
+    for j in range(ncon):
+      condim = mjd.contact.dim[j]
+      for k in range(condim):
+        con_efc_address[i * ncon + j, k] = mjd.nefc * i + mjd.contact.efc_address[j] + k
+
+  con_worldid = np.zeros(nconmax, dtype=int)
+  for i in range(nworld):
     con_worldid[i * ncon : (i + 1) * ncon] = i
 
   ncon_fill = nconmax - nworld * ncon
@@ -739,6 +744,7 @@ def put_data(
   con_geom_fill = np.vstack(
     [np.repeat(mjd.contact.geom, nworld, axis=0), np.zeros((ncon_fill, 2))]
   )
+  con_efc_address_fill = np.vstack([con_efc_address, np.zeros((ncon_fill, condim_max))])
 
   d.contact.dist = wp.array(con_dist_fill, dtype=wp.float32, ndim=1)
   d.contact.pos = wp.array(con_pos_fill, dtype=wp.vec3f, ndim=1)
@@ -750,7 +756,7 @@ def put_data(
   d.contact.solimp = wp.array(con_solimp_fill, dtype=types.vec5, ndim=1)
   d.contact.dim = wp.array(con_dim_fill, dtype=wp.int32, ndim=1)
   d.contact.geom = wp.array(con_geom_fill, dtype=wp.vec2i, ndim=1)
-  d.contact.efc_address = wp.array(con_efc_address, dtype=wp.int32, ndim=1)
+  d.contact.efc_address = wp.array(con_efc_address_fill, dtype=wp.int32, ndim=2)
   d.contact.worldid = wp.array(con_worldid, dtype=wp.int32, ndim=1)
 
   d.rne_cacc = wp.zeros(shape=(d.nworld, mjm.nbody), dtype=wp.spatial_vector)
@@ -865,7 +871,7 @@ def get_data_into(
   result.contact.solreffriction[:] = d.contact.solreffriction.numpy()[:ncon]
   result.contact.solimp[:] = d.contact.solimp.numpy()[:ncon]
   result.contact.dim[:] = d.contact.dim.numpy()[:ncon]
-  result.contact.efc_address[:] = d.contact.efc_address.numpy()[:ncon]
+  result.contact.efc_address[:] = d.contact.efc_address.numpy()[:ncon, 0]
 
   if support.is_sparse(mjm):
     result.qM[:] = d.qM.numpy()[0, 0]

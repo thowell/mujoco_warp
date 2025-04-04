@@ -79,10 +79,13 @@ class ConstraintTest(parameterized.TestCase):
     _assert_eq(d.efc.pos.numpy()[: mjd.nefc], mjd.efc_pos, "efc_pos")
     _assert_eq(d.efc.margin.numpy()[: mjd.nefc], mjd.efc_margin, "efc_margin")
 
-  def test_constraints(self):
+  @parameterized.parameters(
+    mujoco.mjtCone.mjCONE_PYRAMIDAL,
+    mujoco.mjtCone.mjCONE_ELLIPTIC,
+  )
+  def test_constraints(self, cone):
     """Test constraints."""
-    mjm, mjd, _, _ = test_util.fixture("constraints.xml", sparse=False)
-    mjm.opt.cone = mujoco.mjtCone.mjCONE_PYRAMIDAL
+    mjm, mjd, _, _ = test_util.fixture("constraints.xml", sparse=False, cone=cone)
 
     for key in range(3):
       mujoco.mj_resetDataKeyframe(mjm, mjd, key)
