@@ -154,6 +154,7 @@ def _frame_quat(
 
   return math.mul_quat(math.quat_inv(refquat), quat)
 
+
 @wp.func
 def _subtree_com(m: Model, d: Data, worldid: int, objid: int) -> wp.vec3:
   return d.subtree_com[worldid, objid]
@@ -308,6 +309,7 @@ def sensor_vel(m: Model, d: Data):
 @wp.func
 def _actuator_force(m: Model, d: Data, worldid: int, objid: int) -> wp.float32:
   return d.actuator_force[worldid, objid]
+
 
 @wp.func
 def _joint_actuator_force(m: Model, d: Data, worldid: int, objid: int) -> wp.float32:
