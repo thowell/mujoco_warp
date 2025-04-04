@@ -105,6 +105,7 @@ class SensorTest(parameterized.TestCase):
           <gyro site="site2"/>       
           <jointvel joint="slide"/>
           <actuatorfrc actuator="slide"/>
+          <jointactuatorfrc joint="slide"/>                      
         </sensor>
         <keyframe>
           <key qpos="1 .1 .2 .3 .4 1 1 1 1 0 0 0 .25 .35" qvel="2 .2 -.1 .4 .25 .35 .45 -0.1 -0.2 -0.3 .1 -.2" ctrl="3"/>

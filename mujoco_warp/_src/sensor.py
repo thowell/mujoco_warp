@@ -287,6 +287,10 @@ def sensor_vel(m: Model, d: Data):
 def _actuator_force(m: Model, d: Data, worldid: int, objid: int) -> wp.float32:
   return d.actuator_force[worldid, objid]
 
+@wp.func
+def _joint_actuator_force(m: Model, d: Data, worldid: int, objid: int) -> wp.float32:
+  return d.qfrc_actuator[worldid, m.jnt_dofadr[objid]]
+
 
 @event_scope
 def sensor_acc(m: Model, d: Data):
@@ -302,6 +306,8 @@ def sensor_acc(m: Model, d: Data):
 
     if sensortype == int(SensorType.ACTUATORFRC.value):
       d.sensordata[worldid, adr] = _actuator_force(m, d, worldid, objid)
+    elif sensortype == int(SensorType.JOINTACTFRC.value):
+      d.sensordata[worldid, adr] = _joint_actuator_force(m, d, worldid, objid)
 
   if (m.sensor_acc_adr.size == 0) or (m.opt.disableflags & DisableBit.SENSOR):
     return
