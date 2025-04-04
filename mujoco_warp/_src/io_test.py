@@ -72,23 +72,7 @@ class IOTest(absltest.TestCase):
 
     # TODO(team): flex
 
-  def test_sensor(self):
-    mjm = mujoco.MjModel.from_xml_string("""
-      <mujoco>
-        <worldbody>
-          <body>
-            <geom type="sphere" size=".1"/>
-            <joint name="slide" type="slide"/>
-          </body>
-        </worldbody>   
-        <sensor>
-          <jointpos joint="slide"/>                      
-        </sensor> 
-      </mujoco>
-    """)
-
-    with self.assertRaises(NotImplementedError):
-      mjwarp.put_model(mjm)
+  # TODO(team): sensors
 
   def test_tendon(self):
     mjm = mujoco.MjModel.from_xml_string("""
@@ -112,6 +96,27 @@ class IOTest(absltest.TestCase):
         </tendon>              
       </mujoco>
     """)
+
+    with self.assertRaises(NotImplementedError):
+      mjwarp.put_model(mjm)
+
+  def test_geom_type(self):
+    mjm = mujoco.MjModel.from_xml_string("""
+      <mujoco>
+        <asset>
+          <hfield name="hfield" nrow="1" ncol="1" size="1 1 1 1"/>
+          <mesh name="mesh" vertex="1 0 0  0 1 0  0 0 1  1 1 0  1 0 1  0 1 1  1 1 1  0 0 0"/>
+        </asset>
+        <worldbody>
+          <geom type="hfield" hfield="hfield"/>             
+          <geom type="ellipsoid" size="1 1 1"/>
+          <geom type="cylinder" size="1 1"/>
+          <geom type="mesh" mesh="mesh"/>
+        </worldbody>          
+      </mujoco>
+    """)
+
+    # TODO(team): sdf
 
     with self.assertRaises(NotImplementedError):
       mjwarp.put_model(mjm)
