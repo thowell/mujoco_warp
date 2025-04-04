@@ -210,6 +210,7 @@ class SensorType(enum.IntEnum):
     JOINTPOS: joint position
     ACTUATORPOS: actuator position
     BALLQUAT: ball joint orientation
+    FRAMEPOS: frame position
     JOINTVEL: joint velocity
     ACTUATORFRC: scalar actuator force
   """
@@ -217,8 +218,28 @@ class SensorType(enum.IntEnum):
   JOINTPOS = mujoco.mjtSensor.mjSENS_JOINTPOS
   ACTUATORPOS = mujoco.mjtSensor.mjSENS_ACTUATORPOS
   BALLQUAT = mujoco.mjtSensor.mjSENS_BALLQUAT
+  FRAMEPOS = mujoco.mjtSensor.mjSENS_FRAMEPOS
   JOINTVEL = mujoco.mjtSensor.mjSENS_JOINTVEL
   ACTUATORFRC = mujoco.mjtSensor.mjSENS_ACTUATORFRC
+
+
+class ObjType(enum.IntEnum):
+  """Type of object.
+
+  Members:
+    UNKNOWN: unknown object type
+    BODY: body
+    XBODY: body, used to access regular frame instead of i-frame
+    GEOM: geom
+    SITE: site
+  """
+
+  UNKNOWN = mujoco.mjtObj.mjOBJ_UNKNOWN
+  BODY = mujoco.mjtObj.mjOBJ_BODY
+  XBODY = mujoco.mjtObj.mjOBJ_XBODY
+  GEOM = mujoco.mjtObj.mjOBJ_GEOM
+  SITE = mujoco.mjtObj.mjOBJ_SITE
+  # unsupported: CAMERA
 
 
 class EqType(enum.IntEnum):

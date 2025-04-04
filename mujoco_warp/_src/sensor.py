@@ -18,6 +18,7 @@ import warp as wp
 from .types import Data
 from .types import DisableBit
 from .types import Model
+from .types import ObjType
 from .types import SensorType
 from .warp_util import event_scope
 from .warp_util import kernel
@@ -45,6 +46,43 @@ def _ball_quat(m: Model, d: Data, worldid: int, objid: int) -> wp.quat:
   return wp.normalize(quat)
 
 
+@wp.func
+def _frame_pos(
+  m: Model, d: Data, worldid: int, objid: int, objtype: int, refid: int
+) -> wp.vec3:
+  if objtype == int(ObjType.BODY.value):
+    xpos = d.xipos[worldid, objid]
+    if refid == -1:
+      return xpos
+    xpos_ref = d.xipos[worldid, refid]
+    xmat_ref = d.ximat[worldid, refid]
+  elif objtype == int(ObjType.XBODY.value):
+    xpos = d.xpos[worldid, objid]
+    if refid == -1:
+      return xpos
+    xpos_ref = d.xpos[worldid, refid]
+    xmat_ref = d.xmat[worldid, refid]
+  elif objtype == int(ObjType.GEOM.value):
+    xpos = d.geom_xpos[worldid, objid]
+    if refid == -1:
+      return xpos
+    xpos_ref = d.geom_xpos[worldid, refid]
+    xmat_ref = d.geom_xmat[worldid, refid]
+  elif objtype == int(ObjType.SITE.value):
+    xpos = d.site_xpos[worldid, objid]
+    if refid == -1:
+      return xpos
+    xpos_ref = d.site_xpos[worldid, refid]
+    xmat_ref = d.site_xmat[worldid, refid]
+
+  # TODO(team): camera
+
+  else:  # UNKNOWN
+    return wp.vec3(0.0)
+
+  return wp.transpose(xmat_ref) @ (xpos - xpos_ref)
+
+
 @event_scope
 def sensor_pos(m: Model, d: Data):
   """Compute position-dependent sensor values."""
@@ -67,6 +105,13 @@ def sensor_pos(m: Model, d: Data):
       d.sensordata[worldid, adr + 1] = quat[1]
       d.sensordata[worldid, adr + 2] = quat[2]
       d.sensordata[worldid, adr + 3] = quat[3]
+    elif sensortype == int(SensorType.FRAMEPOS.value):
+      objtype = m.sensor_objtype[posadr]
+      refid = m.sensor_refid[posadr]
+      framepos = _frame_pos(m, d, worldid, objid, objtype, refid)
+      d.sensordata[worldid, adr + 0] = framepos[0]
+      d.sensordata[worldid, adr + 1] = framepos[1]
+      d.sensordata[worldid, adr + 2] = framepos[2]
 
   if (m.sensor_pos_adr.size == 0) or (m.opt.disableflags & DisableBit.SENSOR):
     return
