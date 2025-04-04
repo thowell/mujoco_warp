@@ -28,6 +28,11 @@ def _joint_pos(m: Model, d: Data, worldid: int, objid: int) -> wp.float32:
   return d.qpos[worldid, m.jnt_qposadr[objid]]
 
 
+@wp.func
+def _actuator_length(m: Model, d: Data, worldid: int, objid: int) -> wp.float32:
+  return d.actuator_length[worldid, objid]
+
+
 @event_scope
 def sensor_pos(m: Model, d: Data):
   """Compute position-dependent sensor values."""
@@ -42,6 +47,8 @@ def sensor_pos(m: Model, d: Data):
 
     if sensortype == int(SensorType.JOINTPOS.value):
       d.sensordata[worldid, adr] = _joint_pos(m, d, worldid, objid)
+    elif sensortype == int(SensorType.ACTUATORPOS.value):
+      d.sensordata[worldid, adr] = _actuator_length(m, d, worldid, objid)
 
   if (m.sensor_pos_adr.size == 0) or (m.opt.disableflags & DisableBit.SENSOR):
     return

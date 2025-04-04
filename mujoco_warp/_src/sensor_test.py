@@ -54,6 +54,7 @@ class SensorTest(parameterized.TestCase):
         </actuator>
         <sensor>
           <jointpos joint="slide"/>
+          <actuatorpos actuator="slide"/>
           <jointvel joint="slide"/>
           <actuatorfrc actuator="slide"/>
         </sensor>
