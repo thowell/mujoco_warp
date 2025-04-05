@@ -116,6 +116,7 @@ def _efc_limit_slide_hinge(
   active = pos < 0
 
   if active:
+    wp.atomic_add(d.nl, 0, 1)
     efcid = wp.atomic_add(d.nefc, 0, 1)
     d.efc.worldid[efcid] = worldid
 
@@ -216,6 +217,7 @@ def make_constraint(m: types.Model, d: types.Data):
 
   if not (m.opt.disableflags & types.DisableBit.CONSTRAINT.value):
     d.nefc.zero_()
+    d.nl.zero_()
     d.efc.J.zero_()
 
     refsafe = not m.opt.disableflags & types.DisableBit.REFSAFE.value

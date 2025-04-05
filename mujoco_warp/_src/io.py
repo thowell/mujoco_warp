@@ -354,6 +354,8 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
     or np.any(mjm.actuator_gaintype == types.GainType.AFFINE.value)
   )
 
+  m.condim_max = np.max(mjm.geom_condim)
+
   return m
 
 
@@ -419,6 +421,11 @@ def _constraint(
   efc.dm = wp.empty((nconmax,), dtype=wp.float32)
   efc.u = wp.empty((nconmax, 6), dtype=wp.float32)
   efc.hcone = wp.empty((nconmax, 6, 6), dtype=wp.float32)
+  efc.middle_zone = wp.empty((nconmax,), dtype=bool)
+  efc.uu = wp.empty((nconmax,), dtype=wp.float32)
+  efc.v0 = wp.empty((nconmax,), dtype=wp.float32)
+  efc.uv = wp.empty((nconmax,), dtype=wp.float32)
+  efc.vv = wp.empty((nconmax,), dtype=wp.float32)
 
   return efc
 
@@ -441,7 +448,10 @@ def make_data(
 
   d.ncon = wp.zeros(1, dtype=wp.int32)
   d.nefc = wp.zeros(1, dtype=wp.int32, ndim=1)
-  d.nl = 0
+  # TODO(team): set ne, nf
+  d.ne = 0
+  d.nf = 0
+  d.nl = wp.zeros(1, dtype=wp.int32, ndim=1)
   d.time = 0.0
 
   qpos0 = np.tile(mjm.qpos0, (nworld, 1))
@@ -495,7 +505,7 @@ def make_data(
   d.contact.solimp = wp.zeros((nconmax,), dtype=types.vec5)
   d.contact.dim = wp.zeros((nconmax,), dtype=wp.int32)
   d.contact.geom = wp.zeros((nconmax,), dtype=wp.vec2i)
-  d.contact.efc_address = wp.zeros((nconmax,), dtype=wp.int32)
+  d.contact.efc_address = wp.zeros((nconmax, np.max(mjm.geom_condim)), dtype=wp.int32)
   d.contact.worldid = wp.zeros((nconmax,), dtype=wp.int32)
   d.efc = _constraint(mjm, d.nworld, d.nconmax, d.njmax)
   d.qfrc_passive = wp.zeros((nworld, mjm.nv), dtype=wp.float32)
@@ -573,7 +583,9 @@ def put_data(
   d.njmax = njmax
 
   d.ncon = wp.array([mjd.ncon * nworld], dtype=wp.int32, ndim=1)
-  d.nl = mjd.nl
+  d.ne = mjd.ne * nworld
+  d.nf = mjd.nf * nworld
+  d.nl = wp.array([mjd.nl * nworld], dtype=wp.int32, ndim=1)
   d.nefc = wp.array([mjd.nefc * nworld], dtype=wp.int32, ndim=1)
   d.time = mjd.time
 
@@ -675,11 +687,17 @@ def put_data(
   )
 
   ncon = mjd.ncon
-  con_efc_address = np.zeros(nconmax, dtype=int)
-  con_worldid = np.zeros(nconmax, dtype=int)
+  condim_max = np.max(mjm.geom_condim)
+  con_efc_address = np.zeros((nconmax, condim_max), dtype=int)
 
   for i in range(nworld):
-    con_efc_address[i * ncon : (i + 1) * ncon] = mjd.contact.efc_address + i * ncon
+    for j in range(ncon):
+      condim = mjd.contact.dim[j]
+      for k in range(condim):
+        con_efc_address[ncon * i + j, k] = mjd.nefc * i + mjd.contact.efc_address[j] + k
+
+  con_worldid = np.zeros(nconmax, dtype=int)
+  for i in range(nworld):
     con_worldid[i * ncon : (i + 1) * ncon] = i
 
   ncon_fill = nconmax - nworld * ncon
@@ -715,6 +733,8 @@ def put_data(
     [np.repeat(mjd.contact.geom, nworld, axis=0), np.zeros((ncon_fill, 2))]
   )
 
+  con_efc_address_fill = np.vstack([con_efc_address, np.zeros((ncon_fill, condim_max))])
+
   d.contact.dist = wp.array(con_dist_fill, dtype=wp.float32, ndim=1)
   d.contact.pos = wp.array(con_pos_fill, dtype=wp.vec3f, ndim=1)
   d.contact.frame = wp.array(con_frame_fill, dtype=wp.mat33f, ndim=1)
@@ -725,7 +745,7 @@ def put_data(
   d.contact.solimp = wp.array(con_solimp_fill, dtype=types.vec5, ndim=1)
   d.contact.dim = wp.array(con_dim_fill, dtype=wp.int32, ndim=1)
   d.contact.geom = wp.array(con_geom_fill, dtype=wp.vec2i, ndim=1)
-  d.contact.efc_address = wp.array(con_efc_address, dtype=wp.int32, ndim=1)
+  d.contact.efc_address = wp.array(con_efc_address_fill, dtype=wp.int32, ndim=2)
   d.contact.worldid = wp.array(con_worldid, dtype=wp.int32, ndim=1)
 
   d.rne_cacc = wp.zeros(shape=(d.nworld, mjm.nbody), dtype=wp.spatial_vector)

@@ -135,7 +135,7 @@ class ConeType(enum.IntEnum):
   """
 
   PYRAMIDAL = mujoco.mjtCone.mjCONE_PYRAMIDAL
-  # unsupported: ELLIPTIC
+  ELLIPTIC = mujoco.mjtCone.mjCONE_ELLIPTIC
 
 
 class IntegratorType(enum.IntEnum):
@@ -370,6 +370,11 @@ class Constraint:
   dm: wp.array(dtype=wp.float32, ndim=1)
   u: wp.array(dtype=wp.float32, ndim=2)
   hcone: wp.array(dtype=wp.float32, ndim=3)
+  middle_zone: wp.array(dtype=bool, ndim=1)
+  uu: wp.array(dtype=wp.float32, ndim=1)
+  v0: wp.array(dtype=wp.float32, ndim=1)
+  uv: wp.array(dtype=wp.float32, ndim=1)
+  vv: wp.array(dtype=wp.float32, ndim=1)
 
 
 @wp.struct
@@ -497,6 +502,7 @@ class Model:
     actuator_gear: scale length and transmitted force        (nu, 6)
     exclude_signature: body1 << 16 + body2                   (nexclude,)
     actuator_affine_bias_gain: affine bias/gain present
+    condim_max: maximum condim
   """
 
   nq: int
@@ -619,6 +625,7 @@ class Model:
   actuator_gear: wp.array(dtype=wp.spatial_vector, ndim=1)
   exclude_signature: wp.array(dtype=wp.int32, ndim=1)
   actuator_affine_bias_gain: bool  # warp only
+  condim_max: int  # warp only
 
 
 @wp.struct
@@ -650,7 +657,7 @@ class Contact:
   solimp: wp.array(dtype=vec5, ndim=1)
   dim: wp.array(dtype=wp.int32, ndim=1)
   geom: wp.array(dtype=wp.vec2i, ndim=1)
-  efc_address: wp.array(dtype=wp.int32, ndim=1)
+  efc_address: wp.array(dtype=wp.int32, ndim=2)
   worldid: wp.array(dtype=wp.int32, ndim=1)
 
 
@@ -660,6 +667,8 @@ class Data:
 
   Attributes:
     ncon: number of detected contacts                           ()
+    ne: number of equality constraints                          ()
+    nf: number of friction constraints                          ()
     nl: number of limit constraints                             ()
     nefc: number of constraints                                 (nworld,)
     time: simulation time                                       ()
@@ -734,7 +743,9 @@ class Data:
   """
 
   ncon: wp.array(dtype=wp.int32, ndim=1)
-  nl: int
+  ne: int
+  nf: int
+  nl: wp.array(dtype=wp.int32, ndim=1)
   nefc: wp.array(dtype=wp.int32, ndim=1)
   time: float
   qpos: wp.array(dtype=wp.float32, ndim=2)
