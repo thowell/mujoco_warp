@@ -506,11 +506,11 @@ class Model:
     exclude_signature: body1 << 16 + body2                   (nexclude,)
     actuator_affine_bias_gain: affine bias/gain present
     tendon_adr: address of first object in tendon's path     (ntendon,)
-    tendon_jnt_adr: joint tendon address                     (nwrap,)
     tendon_num: number of objects in tendon's path           (ntendon,)
     wrap_objid: object id: geom, site, joint                 (nwrap,)
     wrap_prm: divisor, joint coef, or site id                (nwrap,)
     wrap_type: wrap object type (mjtWrap)                    (nwrap,)
+    tendon_jnt_adr: joint tendon address                     (<=nwrap,)
     wrap_jnt_adr: addresses for joint tendon wrap object     (<=nwrap,)
   """
 
