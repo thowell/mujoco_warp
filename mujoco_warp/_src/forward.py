@@ -38,17 +38,14 @@ from .types import array3df
 from .warp_util import event_scope
 from .warp_util import kernel
 from .warp_util import kernel_copy
-import numpy as np
 
 # RK4 tableau
-_RK4_A = np.array(
-  [
-    [0.5, 0.0, 0.0],
-    [0.0, 0.5, 0.0],
-    [0.0, 0.0, 1.0],
-  ]
-)
-_RK4_B = np.array([1.0 / 6.0, 1.0 / 3.0, 1.0 / 3.0, 1.0 / 6.0])
+_RK4_A = [
+  [0.5, 0.0, 0.0],
+  [0.0, 0.5, 0.0],
+  [0.0, 0.0, 1.0],
+]
+_RK4_B = [1.0 / 6.0, 1.0 / 3.0, 1.0 / 3.0, 1.0 / 6.0]
 
 
 @wp.func
@@ -65,6 +62,7 @@ def _integrate_pos(
   qpos_adr = m.jnt_qposadr[jntid]
   dof_adr = m.jnt_dofadr[jntid]
   qpos = qpos_in[worldId]
+  qpos_o = qpos_out[worldId]
   qvel = qvel_in[worldId]
 
   if jnt_type == wp.static(JointType.FREE.value):
@@ -85,15 +83,15 @@ def _integrate_pos(
 
     qpos_quat_new = math.quat_integrate(qpos_quat, qvel_ang, m.opt.timestep)
 
-    qpos_out[worldId, qpos_adr] = qpos_new[0]
-    qpos_out[worldId, qpos_adr + 1] = qpos_new[1]
-    qpos_out[worldId, qpos_adr + 2] = qpos_new[2]
-    qpos_out[worldId, qpos_adr + 3] = qpos_quat_new[0]
-    qpos_out[worldId, qpos_adr + 4] = qpos_quat_new[1]
-    qpos_out[worldId, qpos_adr + 5] = qpos_quat_new[2]
-    qpos_out[worldId, qpos_adr + 6] = qpos_quat_new[3]
+    qpos_o[qpos_adr] = qpos_new[0]
+    qpos_o[qpos_adr + 1] = qpos_new[1]
+    qpos_o[qpos_adr + 2] = qpos_new[2]
+    qpos_o[qpos_adr + 3] = qpos_quat_new[0]
+    qpos_o[qpos_adr + 4] = qpos_quat_new[1]
+    qpos_o[qpos_adr + 5] = qpos_quat_new[2]
+    qpos_o[qpos_adr + 6] = qpos_quat_new[3]
 
-  elif jnt_type == wp.static(JointType.BALL.value):  # ball joint
+  elif jnt_type == wp.static(JointType.BALL.value):
     qpos_quat = wp.quat(
       qpos[qpos_adr],
       qpos[qpos_adr + 1],
@@ -104,15 +102,13 @@ def _integrate_pos(
 
     qpos_quat_new = math.quat_integrate(qpos_quat, qvel_ang, m.opt.timestep)
 
-    qpos_out[worldId, qpos_adr] = qpos_quat_new[0]
-    qpos_out[worldId, qpos_adr + 1] = qpos_quat_new[1]
-    qpos_out[worldId, qpos_adr + 2] = qpos_quat_new[2]
-    qpos_out[worldId, qpos_adr + 3] = qpos_quat_new[3]
+    qpos_o[qpos_adr] = qpos_quat_new[0]
+    qpos_o[qpos_adr + 1] = qpos_quat_new[1]
+    qpos_o[qpos_adr + 2] = qpos_quat_new[2]
+    qpos_o[qpos_adr + 3] = qpos_quat_new[3]
 
   else:  # if jnt_type in (JointType.HINGE, JointType.SLIDE):
-    qpos_out[worldId, qpos_adr] = (
-      qpos[qpos_adr] + m.opt.timestep * qvel[dof_adr] * qvel_scale
-    )
+    qpos_o[qpos_adr] = qpos[qpos_adr] + m.opt.timestep * qvel[dof_adr] * qvel_scale
 
 
 def _advance(
@@ -321,7 +317,7 @@ def rungekutta4(m: Model, d: Data):
 
   rk_accumulate(d, B[0])
   for i in range(3):
-    a, b = float(A[i, i]), B[i + 1]
+    a, b = float(A[i][i]), B[i + 1]
     perturb_state(m, d, a)
     forward(m, d)
     rk_accumulate(d, b)
