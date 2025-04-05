@@ -807,6 +807,7 @@ def tendon(m: Model, d: Data):
 
       # add to length
       L = prm * d.qpos[worldid, m.jnt_qposadr[wrap_objid]]
+      # TODO(team): compare atomic_add and for loop
       wp.atomic_add(d.ten_length[worldid], tendon_jnt_adr, L)
 
       # add to moment
