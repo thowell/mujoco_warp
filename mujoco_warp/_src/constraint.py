@@ -126,7 +126,9 @@ def _efc_equality_joint(
 
     # Horner's method for polynomials
     rhs = data[0] + dif * (data[1] + dif * (data[2] + dif * (data[3] + dif * data[4])))
-    deriv_2 = data[1] + dif * (2.0 * data[2] + dif * (3.0 * data[3] + dif * 4.0 * data[4]))
+    deriv_2 = data[1] + dif * (
+      2.0 * data[2] + dif * (3.0 * data[3] + dif * 4.0 * data[4])
+    )
 
     pos = d.qpos[worldid, qposadr1] - m.qpos0[qposadr1] - rhs
     Jqvel = d.qvel[worldid, dofadr1] - d.qvel[worldid, dofadr2] * deriv_2
@@ -139,11 +141,19 @@ def _efc_equality_joint(
     Jqvel = d.qvel[worldid, dofadr1]
     invweight = m.dof_invweight0[dofadr1]
 
-
   # Update constraint parameters
   _update_efc_row(
-    m, d, efcid, pos, pos, invweight, m.eq_solref[i_eq], m.eq_solimp[i_eq],
-    wp.float32(0.0), refsafe, Jqvel
+    m,
+    d,
+    efcid,
+    pos,
+    pos,
+    invweight,
+    m.eq_solref[i_eq],
+    m.eq_solimp[i_eq],
+    wp.float32(0.0),
+    refsafe,
+    Jqvel,
   )
 
 

@@ -391,7 +391,9 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
   m.exclude_signature = wp.array(mjm.exclude_signature, dtype=wp.int32, ndim=1)
 
   # pre-compute indices of joint equalities
-  m.eq_i_joint = wp.array(np.nonzero(mjm.eq_type == types.EqType.JOINT.value)[0], dtype=wp.int32, ndim=1)
+  m.eq_i_joint = wp.array(
+    np.nonzero(mjm.eq_type == types.EqType.JOINT.value)[0], dtype=wp.int32, ndim=1
+  )
 
   # short-circuiting here allows us to skip a lot of code in implicit integration
   m.actuator_affine_bias_gain = bool(

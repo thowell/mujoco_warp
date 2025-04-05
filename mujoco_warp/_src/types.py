@@ -212,7 +212,7 @@ class vec10f(wp.types.vector(length=10, dtype=wp.float32)):
   pass
 
 
-class vec11f(wp.types.vector(length=11, dtype=wp.float32)): 
+class vec11f(wp.types.vector(length=11, dtype=wp.float32)):
   pass
 
 
