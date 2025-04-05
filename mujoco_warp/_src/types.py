@@ -506,7 +506,7 @@ class Model:
     exclude_signature: body1 << 16 + body2                   (nexclude,)
     actuator_affine_bias_gain: affine bias/gain present
     tendon_adr: address of first object in tendon's path     (ntendon,)
-    tendon_jnt_adr: joint tendon address                     (<=ntendon,)
+    tendon_jnt_adr: joint tendon address                     (nwrap,)
     tendon_num: number of objects in tendon's path           (ntendon,)
     wrap_objid: object id: geom, site, joint                 (nwrap,)
     wrap_prm: divisor, joint coef, or site id                (nwrap,)
@@ -759,6 +759,8 @@ class Data:
     collision_type: collision types from broadphase             (nconmax,)
     collision_worldid: collision world ids from broadphase      (nconmax,)
     ncollision: collision count from broadphase                 ()
+    ten_length: tendon lengths                                  (ntendon,)
+    ten_J: tendon Jacobian                                      (ntendon, nv)
   """
 
   ncon: wp.array(dtype=wp.int32, ndim=1)
