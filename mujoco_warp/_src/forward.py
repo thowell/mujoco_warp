@@ -496,6 +496,20 @@ def fwd_velocity(m: Model, d: Data):
           int(actuator_moment_tilesize_nv[i]),
         )
 
+  if m.ntendon > 0:
+    # TODO(team): sparse version
+
+    d.ten_velocity.zero_()
+
+    @kernel
+    def _tendon_velocity(d: Data):
+      worldid, tenid, dofid = wp.tid()
+      moment = d.ten_J[worldid, tenid]
+      qvel = d.qvel[worldid]
+      wp.atomic_add(d.ten_velocity[worldid], tenid, moment[dofid] * qvel[dofid])
+
+    wp.launch(_tendon_velocity, dim=(d.nworld, m.ntendon, m.nv), inputs=[d])
+
   smooth.com_vel(m, d)
   passive.passive(m, d)
   smooth.rne(m, d)
