@@ -21,6 +21,6 @@
     </fixed>
   </tendon>
   <keyframe>
-    <key qpos=".2 .4 .6"/>
+    <key qpos=".2 .4 .6" qvel=".1 .2 .3"/>
   </keyframe>
 </mujoco>
