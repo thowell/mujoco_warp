@@ -28,6 +28,11 @@ def _joint_pos(m: Model, d: Data, worldid: int, objid: int) -> wp.float32:
   return d.qpos[worldid, m.jnt_qposadr[objid]]
 
 
+@wp.func
+def _tendon_pos(m: Model, d: Data, worldid: int, objid: int) -> wp.float32:
+  return d.ten_length[worldid, objid]
+
+
 @event_scope
 def sensor_pos(m: Model, d: Data):
   """Compute position-dependent sensor values."""
@@ -42,6 +47,8 @@ def sensor_pos(m: Model, d: Data):
 
     if sensortype == int(SensorType.JOINTPOS.value):
       d.sensordata[worldid, adr] = _joint_pos(m, d, worldid, objid)
+    elif sensortype == int(SensorType.TENDONPOS.value):
+      d.sensordata[worldid, adr] = _tendon_pos(m, d, worldid, objid)
 
   if (m.sensor_pos_adr.size == 0) or (m.opt.disableflags & DisableBit.SENSOR):
     return
@@ -52,6 +59,11 @@ def sensor_pos(m: Model, d: Data):
 @wp.func
 def _joint_vel(m: Model, d: Data, worldid: int, objid: int) -> wp.float32:
   return d.qvel[worldid, m.jnt_dofadr[objid]]
+
+
+@wp.func
+def _tendon_vel(m: Model, d: Data, worldid: int, objid: int) -> wp.float32:
+  return d.ten_velocity[worldid, objid]
 
 
 @event_scope
@@ -68,6 +80,8 @@ def sensor_vel(m: Model, d: Data):
 
     if sensortype == int(SensorType.JOINTVEL.value):
       d.sensordata[worldid, adr] = _joint_vel(m, d, worldid, objid)
+    elif sensortype == int(SensorType.TENDONVEL.value):
+      d.sensordata[worldid, adr] = _tendon_vel(m, d, worldid, objid)
 
   if (m.sensor_vel_adr.size == 0) or (m.opt.disableflags & DisableBit.SENSOR):
     return
