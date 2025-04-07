@@ -66,7 +66,6 @@ jobs:
           pip install mujoco --pre -f https://py.mujoco.org/
           pip install warp-lang --pre --upgrade -f https://pypi.nvidia.com/warp-lang/
           pip install pytest
-          pip install ruff
           pip install -e .
       - name: Test with pytest
         run: |
