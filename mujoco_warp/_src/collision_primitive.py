@@ -24,6 +24,7 @@ from .types import Model
 
 _TINY_VAL = 1e-6
 
+
 @wp.struct
 class Geom:
   pos: wp.vec3
@@ -273,7 +274,15 @@ def sphere_box(
     contact_dist = dist - sphere.size[0]
 
   contact_pos = box.pos + box.rot @ pos
-  write_contact(d, contact_dist, contact_pos, make_frame(contact_normal), margin, geom_indices, worldid)
+  write_contact(
+    d,
+    contact_dist,
+    contact_pos,
+    make_frame(contact_normal),
+    margin,
+    geom_indices,
+    worldid,
+  )
 
 
 @wp.kernel
