@@ -24,7 +24,6 @@ from absl.testing import parameterized
 import mujoco_warp as mjwarp
 
 from . import test_util
-
 from .support import contact_force_kernel
 
 wp.config.verify_cuda = True
@@ -127,13 +126,11 @@ class SupportTest(parameterized.TestCase):
       val = (g == mjd.contact.geom).sum(axis=1)
       return np.where(val == 2)[0][0]
 
-    contact_id_map = {i: _find(mjd.contact.geom[i]) for i in range(mjd.ncon)}
-
     for i in range(mjd.ncon):
       result = np.zeros(6, dtype=float)
       mujoco.mj_contactForce(mjm, mjd, i, result)
 
-      j = contact_id_map[i]
+      j = i
       force = wp.zeros(1, dtype=wp.spatial_vector)
       wp.launch(
         kernel=contact_force_kernel,

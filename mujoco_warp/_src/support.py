@@ -22,9 +22,9 @@ from .types import Data
 from .types import Model
 from .types import array2df
 from .types import array3df
+from .types import vec5
 from .warp_util import event_scope
 from .warp_util import kernel
-from .types import vec5
 
 
 def is_sparse(m: mujoco.MjModel):
@@ -216,17 +216,12 @@ def _decode_pyramid(
     force[0] = pyramid[efc_address]
     return force
 
-  # force_normal = sum(pyramid0_i + pyramid1_i)
-  normal_force = float(0.0)
+  force[0] = float(0.0)
   for i in range(condim - 1):
-    normal_force += pyramid[2 * i + efc_address] + pyramid[2 * i + 1 + efc_address]
-  force[0] = normal_force
-
-  # force_tangent_i = (pyramid0_i - pyramid1_i) * mu_i
-  for i in range(condim - 1):
-    force[i + 1] = (
-      pyramid[2 * i + efc_address] - pyramid[2 * i + 1 + efc_address]
-    ) * mu[i]
+    dir1 = pyramid[2 * i + efc_address]
+    dir2 = pyramid[2 * i + efc_address + 1]
+    force[0] += dir1 + dir2
+    force[i + 1] = (dir1 - dir2) * mu[i]
 
   return force
 
@@ -247,11 +242,6 @@ def contact_force(
       force = _decode_pyramid(
         d.efc.force, efc_address, d.contact.friction[contact_id], condim
       )
-    # elif m.opt.cone == ConeType.ELLIPTIC.value:
-    #   for i in range(condim):
-    #     force[i] = d.efc_force[efc_address + i]
-    # else:
-    #  wp.printf(f'Unknown cone type: {m.opt.cone}')
 
     if to_world_frame:
       # Transform both top and bottom parts of spatial vector by the full contact frame matrix
