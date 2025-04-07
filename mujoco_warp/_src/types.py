@@ -537,7 +537,7 @@ class Model:
     eq_solref: constraint solver reference                   (neq, mjNREF)
     eq_solimp: constraint solver impedance                   (neq, mjNIMP)
     eq_data: numeric data for constraint                     (neq, mjNEQDATA)
-    eq_joint_indices: which indices of eq_* are type `JOINT`
+    eq_joint_adr: which addresses of eq_* are type `JOINT`
     actuator_trntype: transmission type (mjtTrn)             (nu,)
     actuator_dyntype: dynamics type (mjtDyn)                 (nu,)
     actuator_gaintype: gain type (mjtGain)                   (nu,)
@@ -705,7 +705,7 @@ class Model:
   eq_solref: wp.array(dtype=wp.vec2, ndim=1)
   eq_solimp: wp.array(dtype=vec5, ndim=1)
   eq_data: wp.array(dtype=vec11, ndim=1)
-  eq_joint_indices: wp.array(dtype=wp.int32, ndim=1)
+  eq_joint_adr: wp.array(dtype=wp.int32, ndim=1)
   actuator_trntype: wp.array(dtype=wp.int32, ndim=1)
   actuator_dyntype: wp.array(dtype=wp.int32, ndim=1)
   actuator_gaintype: wp.array(dtype=wp.int32, ndim=1)
