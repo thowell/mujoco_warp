@@ -229,6 +229,17 @@ class EqType(enum.IntEnum):
   # unsupported: CONNECT, WELD, JOINT, TENDON, FLEX, DISTANCE
 
 
+class WrapType(enum.IntEnum):
+  """Type of tendon wrapping object.
+
+  Members:
+    JOINT: constant moment arm
+  """
+
+  JOINT = mujoco.mjtWrap.mjWRAP_JOINT
+  # unsupported: PULLEY, SITE, SPHERE, CYLINDER
+
+
 class vec5f(wp.types.vector(length=5, dtype=wp.float32)):
   pass
 
@@ -409,6 +420,8 @@ class Model:
     nexclude: number of excluded geom pairs                  ()
     nmocap: number of mocap bodies                           ()
     nM: number of non-zeros in sparse inertia matrix         ()
+    ntendon: number of tendons                               ()
+    nwrap: number of wrap objects in all tendon paths        ()
     nsensor: number of sensors                               ()
     nsensordata: number of elements in sensor data vector    ()
     nlsp: number of step sizes for parallel linsearch        ()
@@ -540,6 +553,13 @@ class Model:
     actuator_gear: scale length and transmitted force        (nu, 6)
     exclude_signature: body1 << 16 + body2                   (nexclude,)
     actuator_affine_bias_gain: affine bias/gain present
+    tendon_adr: address of first object in tendon's path     (ntendon,)
+    tendon_num: number of objects in tendon's path           (ntendon,)
+    wrap_objid: object id: geom, site, joint                 (nwrap,)
+    wrap_prm: divisor, joint coef, or site id                (nwrap,)
+    wrap_type: wrap object type (mjtWrap)                    (nwrap,)
+    tendon_jnt_adr: joint tendon address                     (<=nwrap,)
+    wrap_jnt_adr: addresses for joint tendon wrap object     (<=nwrap,)
     sensor_type: sensor type (mjtSensor)                     (nsensor,)
     sensor_datatype: numeric data type (mjtDataType)         (nsensor,)
     sensor_objtype: type of sensorized object (mjtObj)       (nsensor,)
@@ -567,6 +587,8 @@ class Model:
   nexclude: int
   nmocap: int
   nM: int
+  ntendon: int
+  nwrap: int
   nsensor: int
   nsensordata: int
   nlsp: int  # warp only
@@ -698,6 +720,13 @@ class Model:
   actuator_gear: wp.array(dtype=wp.spatial_vector, ndim=1)
   exclude_signature: wp.array(dtype=wp.int32, ndim=1)
   actuator_affine_bias_gain: bool  # warp only
+  tendon_adr: wp.array(dtype=wp.int32, ndim=1)
+  tendon_num: wp.array(dtype=wp.int32, ndim=1)
+  wrap_objid: wp.array(dtype=wp.int32, ndim=1)
+  wrap_prm: wp.array(dtype=wp.float32, ndim=1)
+  wrap_type: wp.array(dtype=wp.int32, ndim=1)
+  tendon_jnt_adr: wp.array(dtype=wp.int32, ndim=1)  # warp only
+  wrap_jnt_adr: wp.array(dtype=wp.int32, ndim=1)  # warp only
   sensor_type: wp.array(dtype=wp.int32, ndim=1)
   sensor_datatype: wp.array(dtype=wp.int32, ndim=1)
   sensor_objtype: wp.array(dtype=wp.int32, ndim=1)
@@ -832,6 +861,8 @@ class Data:
     collision_type: collision types from broadphase             (nconmax,)
     collision_worldid: collision world ids from broadphase      (nconmax,)
     ncollision: collision count from broadphase                 ()
+    ten_length: tendon lengths                                  (ntendon,)
+    ten_J: tendon Jacobian                                      (ntendon, nv)
     sensordata: sensor data array                               (nsensordata,)
   """
 
@@ -919,6 +950,10 @@ class Data:
   collision_pair: wp.array(dtype=wp.vec2i, ndim=1)
   collision_worldid: wp.array(dtype=wp.int32, ndim=1)
   ncollision: wp.array(dtype=wp.int32, ndim=1)
+
+  # tendon
+  ten_length: wp.array(dtype=wp.float32, ndim=2)
+  ten_J: wp.array(dtype=wp.float32, ndim=3)
 
   # sensors
   sensordata: wp.array(dtype=wp.float32, ndim=2)

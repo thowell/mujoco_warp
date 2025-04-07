@@ -34,6 +34,7 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
     (mjm.eq_type, types.EqType, "Equality constraint types"),
     (mjm.geom_type, types.GeomType, "Geom type"),
     (mjm.sensor_type, types.SensorType, "Sensor types"),
+    (mjm.wrap_type, types.WrapType, "Wrap types"),
   ):
     unsupported = ~np.isin(field, list(field_types))
     if unsupported.any():
@@ -43,7 +44,6 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
     raise NotImplementedError("Sensor cutoff is unsupported.")
 
   for n, msg in (
-    (mjm.ntendon, "Tendons"),
     (mjm.nplugin, "Plugins"),
     (mjm.nflex, "Flexes"),
   ):
@@ -84,6 +84,8 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
   m.nlight = mjm.nlight
   m.nmocap = mjm.nmocap
   m.nM = mjm.nM
+  m.ntendon = mjm.ntendon
+  m.nwrap = mjm.nwrap
   m.nsensor = mjm.nsensor
   m.nsensordata = mjm.nsensordata
   m.nlsp = mjm.opt.ls_iterations  # TODO(team): how to set nlsp?
@@ -410,6 +412,26 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
     or np.any(mjm.actuator_gaintype == types.GainType.AFFINE.value)
   )
 
+  # tendon
+  m.tendon_adr = wp.array(mjm.tendon_adr, dtype=wp.int32, ndim=1)
+  m.tendon_num = wp.array(mjm.tendon_num, dtype=wp.int32, ndim=1)
+  m.wrap_objid = wp.array(mjm.wrap_objid, dtype=wp.int32, ndim=1)
+  m.wrap_prm = wp.array(mjm.wrap_prm, dtype=wp.float32, ndim=1)
+  m.wrap_type = wp.array(mjm.wrap_type, dtype=wp.int32, ndim=1)
+
+  tendon_jnt_adr = []
+  wrap_jnt_adr = []
+  for i in range(mjm.ntendon):
+    adr = mjm.tendon_adr[i]
+    if mjm.wrap_type[adr] == mujoco.mjtWrap.mjWRAP_JOINT:
+      tendon_num = mjm.tendon_num[i]
+      for j in range(tendon_num):
+        tendon_jnt_adr.append(i)
+        wrap_jnt_adr.append(adr + j)
+
+  m.tendon_jnt_adr = wp.array(tendon_jnt_adr, dtype=wp.int32, ndim=1)
+  m.wrap_jnt_adr = wp.array(wrap_jnt_adr, dtype=wp.int32, ndim=1)
+
   # sensors
   m.sensor_type = wp.array(mjm.sensor_type, dtype=wp.int32, ndim=1)
   m.sensor_datatype = wp.array(mjm.sensor_datatype, dtype=wp.int32, ndim=1)
@@ -617,6 +639,10 @@ def make_data(
   d.collision_pair = wp.empty(nconmax, dtype=wp.vec2i, ndim=1)
   d.collision_worldid = wp.empty(nconmax, dtype=wp.int32, ndim=1)
   d.ncollision = wp.zeros(1, dtype=wp.int32, ndim=1)
+
+  # tendon
+  d.ten_length = wp.zeros((nworld, mjm.ntendon), dtype=wp.float32, ndim=2)
+  d.ten_J = wp.zeros((nworld, mjm.ntendon, mjm.nv), dtype=wp.float32, ndim=3)
 
   # sensors
   d.sensordata = wp.zeros((nworld, mjm.nsensordata), dtype=wp.float32)
@@ -868,6 +894,19 @@ def put_data(
   d.collision_worldid = wp.empty(nconmax, dtype=wp.int32, ndim=1)
   d.ncollision = wp.zeros(1, dtype=wp.int32, ndim=1)
 
+  # tendon
+  d.ten_length = wp.array(tile(mjd.ten_length), dtype=wp.float32, ndim=2)
+
+  if support.is_sparse(mjm) and mjm.ntendon:
+    ten_J = np.zeros((mjm.ntendon, mjm.nv))
+    mujoco.mju_sparse2dense(
+      ten_J, mjd.ten_J, mjd.ten_J_rownnz, mjd.ten_J_rowadr, mjd.ten_J_colind
+    )
+  else:
+    ten_J = mjd.ten_J.reshape((mjm.ntendon, mjm.nv))
+
+  d.ten_J = wp.array(tile(ten_J), dtype=wp.float32, ndim=3)
+
   # sensors
   d.sensordata = wp.array(tile(mjd.sensordata), dtype=wp.float32, ndim=2)
 
@@ -963,15 +1002,14 @@ def get_data_into(
     # )
   else:
     qM = d.qM.numpy()
-    qLD = d.qLD.numpy()
     adr = 0
     for i in range(mjm.nv):
       j = i
       while j >= 0:
         result.qM[adr] = qM[0, i, j]
-        result.qLD[adr] = qLD[0, i, j]
         j = mjm.dof_parentid[j]
         adr += 1
+    mujoco.mj_factorM(mjm, result)
     # TODO(team): set efc_J after fix to _realloc_con_efc lands
     # if nefc > 0:
     #   result.efc_J[:nefc * mjm.nv] = d.efc_J.numpy()[:nefc].flatten()
