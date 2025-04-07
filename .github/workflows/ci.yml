@@ -1,5 +1,3 @@
-name: Lint and Test
-
 on:
   push:
     branches: [main]
@@ -8,6 +6,7 @@ on:
 
 jobs:
   format:
+    name: Ruff format
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -28,6 +27,7 @@ jobs:
           ruff format --check .
 
   linter:
+    name: Ruff linter
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -48,6 +48,7 @@ jobs:
           ruff check --output-format=github .
 
   build:
+    name: Build and test
     runs-on: ubuntu-latest
     strategy:
       matrix:
