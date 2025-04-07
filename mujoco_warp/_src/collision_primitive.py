@@ -22,7 +22,6 @@ from .types import Data
 from .types import GeomType
 from .types import Model
 
-
 _TINY_VAL = 1e-6
 
 @wp.struct
