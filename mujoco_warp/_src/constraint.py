@@ -18,6 +18,7 @@ import warp as wp
 from . import math
 from . import types
 from .warp_util import event_scope
+from .warp_util import kernel_copy
 
 
 @wp.func
@@ -116,8 +117,7 @@ def _efc_limit_slide_hinge(
   active = pos < 0
 
   if active:
-    wp.atomic_add(d.nl, 0, 1)
-    efcid = wp.atomic_add(d.nefc, 0, 1)
+    efcid = wp.atomic_add(d.nl, 0, 1)
     d.efc.worldid[efcid] = worldid
 
     dofadr = m.jnt_dofadr[jntid]
@@ -152,10 +152,10 @@ def _efc_limit_ball(
   qposadr = m.jnt_qposadr[jntid]
 
   qpos = d.qpos[worldid]
-  quat = wp.quat(
+  jnt_quat = wp.quat(
     qpos[qposadr + 0], qpos[qposadr + 1], qpos[qposadr + 2], qpos[qposadr + 3]
   )
-  axis_angle = math.quat_to_vel(quat)
+  axis_angle = math.quat_to_vel(jnt_quat)
   axis, angle = math.normalize_with_norm(axis_angle)
   jnt_margin = m.jnt_margin[jntid]
   jnt_range = m.jnt_range[jntid]
@@ -164,8 +164,7 @@ def _efc_limit_ball(
   active = pos < 0
 
   if active:
-    wp.atomic_add(d.nl, 0, 1)
-    efcid = wp.atomic_add(d.nefc, 0, 1)
+    efcid = wp.atomic_add(d.nl, 0, 1)
     d.efc.worldid[efcid] = worldid
 
     dofadr = m.jnt_dofadr[jntid]
@@ -405,6 +404,8 @@ def make_constraint(m: types.Model, d: types.Data):
           dim=(d.nworld, m.jnt_limited_ball_adr.size),
           inputs=[m, d, refsafe],
         )
+
+      wp.copy(d.nefc, d.nl)
 
     # contact
     if not (m.opt.disableflags & types.DisableBit.CONTACT.value):
