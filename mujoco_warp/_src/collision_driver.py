@@ -39,11 +39,7 @@ def _geom_filter(m: Model, geom1: int, geom2: int, filterparent: bool) -> bool:
   weld_parentid2 = m.body_weldid[m.body_parentid[weldid2]]
 
   self_collision = weldid1 == weldid2
-  parent_child_collision = (
-    filterparent
-    and (weldid1 != 0)
-    and (weldid2 != 0)
-    and ((weldid1 == weld_parentid2) or (weldid2 == weld_parentid1))
+  parent_child_collision = (filterparent and (weldid1 != 0) and (weldid2 != 0) and ((weldid1 == weld_parentid2) or (weldid2 == weld_parentid1))
   )
   mask = (contype1 & conaffinity2) or (contype2 & conaffinity1)
 
