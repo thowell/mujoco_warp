@@ -162,12 +162,9 @@ def _efc_limit_tendon(
     d.efc.worldid[efcid] = worldid
 
     Jqvel = float(0.0)
+    scl = float(dist_min < dist_max) * 2.0 - 1.0
     for i in range(m.nv):
-      if dist_min < dist_max:
-        J = d.ten_J[worldid, tenid, i]
-      else:
-        J = -d.ten_J[worldid, tenid, i]
-
+      J = scl * d.ten_J[worldid, tenid, i]
       d.efc.J[efcid, i] = J
       Jqvel += J * d.qvel[worldid, i]
 
