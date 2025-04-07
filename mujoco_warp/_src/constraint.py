@@ -105,9 +105,11 @@ def _efc_equality_joint(
   d: types.Data,
   refsafe: bool,
 ):
-  worldid, i_eq_i_joint = wp.tid()
+  worldid, i_eq_joint_indices = wp.tid()
+  i_eq = m.eq_joint_indices[i_eq_joint_indices]
+  if not d.eq_active[worldid, i_eq]:
+    return
 
-  i_eq = m.eq_i_joint[i_eq_i_joint]
   efcid = wp.atomic_add(d.nefc, 0, 1)
   d.efc.worldid[efcid] = worldid
 
@@ -396,7 +398,7 @@ def make_constraint(m: types.Model, d: types.Data):
     if not (m.opt.disableflags & types.DisableBit.EQUALITY.value):
       wp.launch(
         _efc_equality_joint,
-        dim=(d.nworld, m.eq_i_joint.size),
+        dim=(d.nworld, m.eq_joint_indices.size),
         inputs=[m, d, refsafe],
       )
 

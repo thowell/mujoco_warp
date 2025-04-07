@@ -414,7 +414,7 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
   m.exclude_signature = wp.array(mjm.exclude_signature, dtype=wp.int32, ndim=1)
 
   # pre-compute indices of joint equalities
-  m.eq_i_joint = wp.array(
+  m.eq_joint_indices = wp.array(
     np.nonzero(mjm.eq_type == types.EqType.JOINT.value)[0], dtype=wp.int32, ndim=1
   )
 
@@ -602,6 +602,9 @@ def make_data(
   d.rne_cfrc = wp.zeros(shape=(d.nworld, mjm.nbody), dtype=wp.spatial_vector)
 
   d.xfrc_applied = wp.zeros((nworld, mjm.nbody), dtype=wp.spatial_vector)
+  d.eq_active = wp.array(
+    np.tile(np.expand_dims(mjm.eq_active0, axis=0), (nworld, 1)), dtype=wp.bool
+  )
 
   # internal tmp arrays
   d.qfrc_integration = wp.zeros((nworld, mjm.nv), dtype=wp.float32)
@@ -846,6 +849,7 @@ def put_data(
   d.efc.worldid = wp.from_numpy(efc_worldid, dtype=wp.int32)
 
   d.xfrc_applied = wp.array(tile(mjd.xfrc_applied), dtype=wp.spatial_vector, ndim=2)
+  d.eq_active = wp.array(tile(mjm.eq_active0), dtype=wp.bool, ndim=2)
 
   # internal tmp arrays
   d.qfrc_integration = wp.zeros((nworld, mjm.nv), dtype=wp.float32)
@@ -976,6 +980,9 @@ def get_data_into(
     # TODO(team): set efc_J after fix to _realloc_con_efc lands
     # if nefc > 0:
     #   result.efc_J[:nefc * mjm.nv] = d.efc_J.numpy()[:nefc].flatten()
+  result.xfrc_applied[:] = d.xfrc_applied.numpy()[0]
+  result.eq_active[:] = d.eq_active.numpy()[0]
+
   result.efc_D[:] = d.efc.D.numpy()[:nefc]
   result.efc_pos[:] = d.efc.pos.numpy()[:nefc]
   result.efc_aref[:] = d.efc.aref.numpy()[:nefc]
