@@ -528,6 +528,7 @@ def make_data(
   d.njmax = njmax
 
   d.ncon = wp.zeros(1, dtype=wp.int32)
+  d.ne = wp.zeros(1, dtype=wp.int32, ndim=1)
   d.nefc = wp.zeros(1, dtype=wp.int32, ndim=1)
   d.nl = 0
   d.time = 0.0
@@ -602,9 +603,7 @@ def make_data(
   d.rne_cfrc = wp.zeros(shape=(d.nworld, mjm.nbody), dtype=wp.spatial_vector)
 
   d.xfrc_applied = wp.zeros((nworld, mjm.nbody), dtype=wp.spatial_vector)
-  d.eq_active = wp.array(
-    np.tile(np.expand_dims(mjm.eq_active0, axis=0), (nworld, 1)), dtype=wp.bool
-  )
+  d.eq_active = wp.array(mjm.eq_active0, dtype=wp.bool)
 
   # internal tmp arrays
   d.qfrc_integration = wp.zeros((nworld, mjm.nv), dtype=wp.float32)
@@ -671,6 +670,7 @@ def put_data(
   d.njmax = njmax
 
   d.ncon = wp.array([mjd.ncon * nworld], dtype=wp.int32, ndim=1)
+  d.ne = wp.array([mjd.ne * nworld], dtype=wp.int32, ndim=1)
   d.nl = mjd.nl
   d.nefc = wp.array([mjd.nefc * nworld], dtype=wp.int32, ndim=1)
   d.time = mjd.time
@@ -849,7 +849,7 @@ def put_data(
   d.efc.worldid = wp.from_numpy(efc_worldid, dtype=wp.int32)
 
   d.xfrc_applied = wp.array(tile(mjd.xfrc_applied), dtype=wp.spatial_vector, ndim=2)
-  d.eq_active = wp.array(tile(mjm.eq_active0), dtype=wp.bool, ndim=2)
+  d.eq_active = wp.array(mjm.eq_active0, dtype=wp.bool)
 
   # internal tmp arrays
   d.qfrc_integration = wp.zeros((nworld, mjm.nv), dtype=wp.float32)
@@ -896,7 +896,7 @@ def get_data_into(
     mujoco._functions._realloc_con_efc(result, ncon=ncon, nefc=nefc)
 
   result.time = d.time
-
+  result.ne = d.ne.numpy()[0]
   result.qpos[:] = d.qpos.numpy()[0]
   result.qvel[:] = d.qvel.numpy()[0]
   result.qacc_warmstart = d.qacc_warmstart.numpy()[0]
@@ -981,7 +981,7 @@ def get_data_into(
     # if nefc > 0:
     #   result.efc_J[:nefc * mjm.nv] = d.efc_J.numpy()[:nefc].flatten()
   result.xfrc_applied[:] = d.xfrc_applied.numpy()[0]
-  result.eq_active[:] = d.eq_active.numpy()[0]
+  result.eq_active[:] = d.eq_active.numpy()
 
   result.efc_D[:] = d.efc.D.numpy()[:nefc]
   result.efc_pos[:] = d.efc.pos.numpy()[:nefc]

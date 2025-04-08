@@ -777,8 +777,9 @@ class Data:
 
   Attributes:
     ncon: number of detected contacts                           ()
+    ne: number of equality constraints                          (1,)
     nl: number of limit constraints                             ()
-    nefc: number of constraints                                 (nworld,)
+    nefc: number of constraints                                 (1,)
     time: simulation time                                       ()
     qpos: position                                              (nworld, nq)
     qvel: velocity                                              (nworld, nv)
@@ -787,7 +788,7 @@ class Data:
     ctrl: control                                               (nworld, nu)
     qfrc_applied: applied generalized force                     (nworld, nv)
     xfrc_applied: applied Cartesian force/torque                (nworld, nbody, 6)
-    eq_active: enable/disable constraints                       (nworld, neq)
+    eq_active: enable/disable constraints                       (neq,)
     mocap_pos: position of mocap bodies                         (nworld, nmocap, 3)
     mocap_quat: orientation of mocap bodies                     (nworld, nmocap, 4)
     qacc: acceleration                                          (nworld, nv)
@@ -857,6 +858,7 @@ class Data:
   """
 
   ncon: wp.array(dtype=wp.int32, ndim=1)
+  ne: wp.array(dtype=wp.int32, ndim=1)
   nl: int
   nefc: wp.array(dtype=wp.int32, ndim=1)
   time: float
@@ -867,7 +869,7 @@ class Data:
   ctrl: wp.array(dtype=wp.float32, ndim=2)
   qfrc_applied: wp.array(dtype=wp.float32, ndim=2)
   xfrc_applied: wp.array(dtype=wp.spatial_vector, ndim=2)
-  eq_active: wp.array(dtype=wp.bool, ndim=2)
+  eq_active: wp.array(dtype=wp.bool, ndim=1)
   mocap_pos: wp.array(dtype=wp.vec3, ndim=2)
   mocap_quat: wp.array(dtype=wp.quat, ndim=2)
   qacc: wp.array(dtype=wp.float32, ndim=2)

@@ -100,6 +100,7 @@ class ConstraintTest(parameterized.TestCase):
       _assert_eq(d.efc.aref.numpy()[: mjd.nefc], mjd.efc_aref, "efc_aref")
       _assert_eq(d.efc.pos.numpy()[: mjd.nefc], mjd.efc_pos, "efc_pos")
       _assert_eq(d.efc.margin.numpy()[: mjd.nefc], mjd.efc_margin, "efc_margin")
+      _assert_eq(d.ne.numpy()[0], mjd.ne, "ne")
 
 
 if __name__ == "__main__":

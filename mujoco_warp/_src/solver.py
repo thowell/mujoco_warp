@@ -102,7 +102,7 @@ def _update_constraint(m: types.Model, d: types.Data):
     efc_D = d.efc.D[efcid]
 
     # TODO(team): active and conditionally active constraints
-    active = int(Jaref < 0.0)
+    active = int(Jaref < 0.0 or efcid < d.ne[0])
     d.efc.active[efcid] = active
 
     if active:
