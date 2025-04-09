@@ -196,6 +196,32 @@ def bisection(x: wp.array(dtype=int), v: int, a_: int, b_: int) -> int:
 
 
 @wp.func
+def all_same(v0: wp.vec3, v1: wp.vec3) -> wp.bool:
+  dx = abs(v0[0] - v1[0])
+  dy = abs(v0[1] - v1[1])
+  dz = abs(v0[2] - v1[2])
+
+  return (
+    (dx <= 1.0e-9 or dx <= max(abs(v0[0]), abs(v1[0])) * 1.0e-9)
+    and (dy <= 1.0e-9 or dy <= max(abs(v0[1]), abs(v1[1])) * 1.0e-9)
+    and (dz <= 1.0e-9 or dz <= max(abs(v0[2]), abs(v1[2])) * 1.0e-9)
+  )
+
+
+@wp.func
+def any_different(v0: wp.vec3, v1: wp.vec3) -> wp.bool:
+  dx = abs(v0[0] - v1[0])
+  dy = abs(v0[1] - v1[1])
+  dz = abs(v0[2] - v1[2])
+
+  return (
+    (dx > 1.0e-9 and dx > max(abs(v0[0]), abs(v1[0])) * 1.0e-9)
+    or (dy > 1.0e-9 and dy > max(abs(v0[1]), abs(v1[1])) * 1.0e-9)
+    or (dz > 1.0e-9 and dz > max(abs(v0[2]), abs(v1[2])) * 1.0e-9)
+  )
+
+
+@wp.func
 def mat33_from_rows(a: wp.vec3, b: wp.vec3, c: wp.vec3):
   return wp.mat33(a, b, c)
 
@@ -231,7 +257,9 @@ def contact_force(
   m: Model, d: Data, contact_id: int, to_world_frame: bool = False
 ) -> wp.spatial_vector:
   """Extract 6D force:torque for one contact, in contact frame by default."""
-  efc_address = d.contact.efc_address[contact_id]
+  efc_address = d.contact.efc_address[
+    contact_id, 0
+  ]  # 0 in second dimension to get the normal force
   force = wp.spatial_vector(0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
 
   if efc_address >= 0:
