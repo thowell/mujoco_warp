@@ -166,12 +166,14 @@ class IntegratorType(enum.IntEnum):
 
   Members:
     EULER: semi-implicit Euler
+    RK4: 4th-order Runge Kutta
     IMPLICITFAST: implicit in velocity, no rne derivative
   """
 
   EULER = mujoco.mjtIntegrator.mjINT_EULER
+  RK4 = mujoco.mjtIntegrator.mjINT_RK4
   IMPLICITFAST = mujoco.mjtIntegrator.mjINT_IMPLICITFAST
-  # unsupported: RK4, IMPLICIT
+  # unsupported: IMPLICIT
 
 
 class GeomType(enum.IntEnum):
@@ -181,15 +183,24 @@ class GeomType(enum.IntEnum):
     PLANE: plane
     SPHERE: sphere
     CAPSULE: capsule
+    ELLIPSOID: ellipsoid
+    CYLINDER: cylinder
     BOX: box
+    MESH: mesh
   """
 
   PLANE = mujoco.mjtGeom.mjGEOM_PLANE
   SPHERE = mujoco.mjtGeom.mjGEOM_SPHERE
   CAPSULE = mujoco.mjtGeom.mjGEOM_CAPSULE
+  ELLIPSOID = mujoco.mjtGeom.mjGEOM_ELLIPSOID
+  CYLINDER = mujoco.mjtGeom.mjGEOM_CYLINDER
   BOX = mujoco.mjtGeom.mjGEOM_BOX
-  # unsupported: HFIELD, ELLIPSOID, CYLINDER, MESH, SDF
-  # ARROW*, LINE, LINEBOX, FLEX, SKIN, LABEL, TRIANGLE
+  MESH = mujoco.mjtGeom.mjGEOM_MESH
+  # unsupported: HFIELD,
+  # NGEOMTYPES, ARROW*, LINE, SKIN, LABEL, NONE
+
+
+NUM_GEOM_TYPES = 8
 
 
 class SolverType(enum.IntEnum):
@@ -210,13 +221,58 @@ class SensorType(enum.IntEnum):
 
   Members:
     JOINTPOS: joint position
+    ACTUATORPOS: actuator position
+    BALLQUAT: ball joint orientation
+    FRAMEPOS: frame position
+    FRAMEXAXIS: frame x-axis
+    FRAMEYAXIS: frame y-axis
+    FRAMEZAXIS: frame z-axis
+    FRAMEQUAT: frame orientation, represented as quaternion
+    SUBTREECOM: subtree center of mass
+    VELOCIMETER: 3D linear velocity, in local frame
+    GYRO: 3D angular velocity, in local frame
     JOINTVEL: joint velocity
+    ACTUATORVEL: actuator velocity
+    BALLANGVEL: ball joint angular velocity
     ACTUATORFRC: scalar actuator force
+    JOINTACTFRC: scalar actuator force, measured at the joint
   """
 
   JOINTPOS = mujoco.mjtSensor.mjSENS_JOINTPOS
+  ACTUATORPOS = mujoco.mjtSensor.mjSENS_ACTUATORPOS
+  BALLQUAT = mujoco.mjtSensor.mjSENS_BALLQUAT
+  FRAMEPOS = mujoco.mjtSensor.mjSENS_FRAMEPOS
+  FRAMEXAXIS = mujoco.mjtSensor.mjSENS_FRAMEXAXIS
+  FRAMEYAXIS = mujoco.mjtSensor.mjSENS_FRAMEYAXIS
+  FRAMEZAXIS = mujoco.mjtSensor.mjSENS_FRAMEZAXIS
+  FRAMEQUAT = mujoco.mjtSensor.mjSENS_FRAMEQUAT
+  SUBTREECOM = mujoco.mjtSensor.mjSENS_SUBTREECOM
+  VELOCIMETER = mujoco.mjtSensor.mjSENS_VELOCIMETER
+  GYRO = mujoco.mjtSensor.mjSENS_GYRO
   JOINTVEL = mujoco.mjtSensor.mjSENS_JOINTVEL
+  ACTUATORVEL = mujoco.mjtSensor.mjSENS_ACTUATORVEL
+  BALLANGVEL = mujoco.mjtSensor.mjSENS_BALLANGVEL
   ACTUATORFRC = mujoco.mjtSensor.mjSENS_ACTUATORFRC
+  JOINTACTFRC = mujoco.mjtSensor.mjSENS_JOINTACTFRC
+
+
+class ObjType(enum.IntEnum):
+  """Type of object.
+
+  Members:
+    UNKNOWN: unknown object type
+    BODY: body
+    XBODY: body, used to access regular frame instead of i-frame
+    GEOM: geom
+    SITE: site
+  """
+
+  UNKNOWN = mujoco.mjtObj.mjOBJ_UNKNOWN
+  BODY = mujoco.mjtObj.mjOBJ_BODY
+  XBODY = mujoco.mjtObj.mjOBJ_XBODY
+  GEOM = mujoco.mjtObj.mjOBJ_GEOM
+  SITE = mujoco.mjtObj.mjOBJ_SITE
+  # unsupported: CAMERA
 
 
 class EqType(enum.IntEnum):
@@ -228,6 +284,17 @@ class EqType(enum.IntEnum):
 
   JOINT = mujoco.mjtEq.mjEQ_JOINT
   # unsupported: CONNECT, WELD, TENDON, FLEX, DISTANCE
+
+
+class WrapType(enum.IntEnum):
+  """Type of tendon wrapping object.
+
+  Members:
+    JOINT: constant moment arm
+  """
+
+  JOINT = mujoco.mjtWrap.mjWRAP_JOINT
+  # unsupported: PULLEY, SITE, SPHERE, CYLINDER
 
 
 class vec5f(wp.types.vector(length=5, dtype=wp.float32)):
@@ -266,6 +333,10 @@ class Option:
     ls_iterations: maximum number of CG/Newton linesearch iterations
     disableflags: bit flags for disabling standard features
     is_sparse: whether to use sparse representations
+    gjk_iteration_count: number of Gjk iterations in the convex narrowphase
+    epa_iteration_count: number of Epa iterations in the convex narrowphase
+    epa_exact_neg_distance: flag for enabling the distance calculation for non-intersecting case in the convex narrowphase
+    depth_extension: distance for which the closest point is not calculated for non-intersecting case in the convex narrowphase
     ls_parallel: evaluate engine solver step sizes in parallel
   """
 
@@ -281,6 +352,10 @@ class Option:
   ls_iterations: int
   disableflags: int
   is_sparse: bool
+  gjk_iteration_count: int  # warp only
+  epa_iteration_count: int  # warp only
+  epa_exact_neg_distance: bool  # warp only
+  depth_extension: float  # warp only
   ls_parallel: bool
 
 
@@ -416,6 +491,8 @@ class Model:
     neq: number of equality constraints                      ()
     nmocap: number of mocap bodies                           ()
     nM: number of non-zeros in sparse inertia matrix         ()
+    ntendon: number of tendons                               ()
+    nwrap: number of wrap objects in all tendon paths        ()
     nsensor: number of sensors                               ()
     nsensordata: number of elements in sensor data vector    ()
     nlsp: number of step sizes for parallel linsearch        ()
@@ -556,6 +633,14 @@ class Model:
     actuator_gear: scale length and transmitted force        (nu, 6)
     exclude_signature: body1 << 16 + body2                   (nexclude,)
     actuator_affine_bias_gain: affine bias/gain present
+    condim_max: maximum condim for geoms
+    tendon_adr: address of first object in tendon's path     (ntendon,)
+    tendon_num: number of objects in tendon's path           (ntendon,)
+    wrap_objid: object id: geom, site, joint                 (nwrap,)
+    wrap_prm: divisor, joint coef, or site id                (nwrap,)
+    wrap_type: wrap object type (mjtWrap)                    (nwrap,)
+    tendon_jnt_adr: joint tendon address                     (<=nwrap,)
+    wrap_jnt_adr: addresses for joint tendon wrap object     (<=nwrap,)
     sensor_type: sensor type (mjtSensor)                     (nsensor,)
     sensor_datatype: numeric data type (mjtDataType)         (nsensor,)
     sensor_objtype: type of sensorized object (mjtObj)       (nsensor,)
@@ -584,6 +669,8 @@ class Model:
   neq: int
   nmocap: int
   nM: int
+  ntendon: int
+  nwrap: int
   nsensor: int
   nsensordata: int
   nlsp: int  # warp only
@@ -724,6 +811,14 @@ class Model:
   actuator_gear: wp.array(dtype=wp.spatial_vector, ndim=1)
   exclude_signature: wp.array(dtype=wp.int32, ndim=1)
   actuator_affine_bias_gain: bool  # warp only
+  condim_max: int  # warp only
+  tendon_adr: wp.array(dtype=wp.int32, ndim=1)
+  tendon_num: wp.array(dtype=wp.int32, ndim=1)
+  wrap_objid: wp.array(dtype=wp.int32, ndim=1)
+  wrap_prm: wp.array(dtype=wp.float32, ndim=1)
+  wrap_type: wp.array(dtype=wp.int32, ndim=1)
+  tendon_jnt_adr: wp.array(dtype=wp.int32, ndim=1)  # warp only
+  wrap_jnt_adr: wp.array(dtype=wp.int32, ndim=1)  # warp only
   sensor_type: wp.array(dtype=wp.int32, ndim=1)
   sensor_datatype: wp.array(dtype=wp.int32, ndim=1)
   sensor_objtype: wp.array(dtype=wp.int32, ndim=1)
@@ -836,6 +931,12 @@ class Data:
     njmax: maximum number of constraints                        ()
     rne_cacc: arrays used for smooth.rne                        (nworld, nbody, 6)
     rne_cfrc: arrays used for smooth.rne                        (nworld, nbody, 6)
+    qpos_t0: temporary array for rk4                            (nworld, nq)
+    qvel_t0: temporary array for rk4                            (nworld, nv)
+    act_t0: temporary array for rk4                             (nworld, na)
+    qvel_rk: temporary array for rk4                            (nworld, nv)
+    qacc_rk: temporary array for rk4                            (nworld, nv)
+    act_dot_rk: temporary array for rk4                         (nworld, na)
     qfrc_integration: temporary array for integration           (nworld, nv)
     qacc_integration: temporary array for integration           (nworld, nv)
     act_vel_integration: temporary array for integration        (nworld, nu)
@@ -851,9 +952,13 @@ class Data:
     segment_indices: broadphase context                         (nworld+1,)
     dyn_geom_aabb: dynamic geometry axis-aligned bounding boxes (nworld, ngeom, 2)
     collision_pair: collision pairs from broadphase             (nconmax,)
-    collision_type: collision types from broadphase             (nconmax,)
     collision_worldid: collision world ids from broadphase      (nconmax,)
     ncollision: collision count from broadphase                 ()
+    cacc: com-based acceleration                                (nworld, nbody, 6)
+    cfrc_int: com-based interaction force with parent           (nworld, nbody, 6)
+    cfrc_ext: com-based external force on body                  (nworld, nbody, 6)
+    ten_length: tendon lengths                                  (ntendon,)
+    ten_J: tendon Jacobian                                      (ntendon, nv)
     sensordata: sensor data array                               (nsensordata,)
   """
 
@@ -917,6 +1022,12 @@ class Data:
   njmax: int
   rne_cacc: wp.array(dtype=wp.spatial_vector, ndim=2)
   rne_cfrc: wp.array(dtype=wp.spatial_vector, ndim=2)
+  qpos_t0: wp.array(dtype=wp.float32, ndim=2)
+  qvel_t0: wp.array(dtype=wp.float32, ndim=2)
+  act_t0: wp.array(dtype=wp.float32, ndim=2)
+  qvel_rk: wp.array(dtype=wp.float32, ndim=2)
+  qacc_rk: wp.array(dtype=wp.float32, ndim=2)
+  act_dot_rk: wp.array(dtype=wp.float32, ndim=2)
   qfrc_integration: wp.array(dtype=wp.float32, ndim=2)
   qacc_integration: wp.array(dtype=wp.float32, ndim=2)
   act_vel_integration: wp.array(dtype=wp.float32, ndim=2)
@@ -937,6 +1048,15 @@ class Data:
   collision_pair: wp.array(dtype=wp.vec2i, ndim=1)
   collision_worldid: wp.array(dtype=wp.int32, ndim=1)
   ncollision: wp.array(dtype=wp.int32, ndim=1)
+
+  # rne_postconstraint
+  cacc: wp.array(dtype=wp.spatial_vector, ndim=2)
+  cfrc_int: wp.array(dtype=wp.spatial_vector, ndim=2)
+  cfrc_ext: wp.array(dtype=wp.spatial_vector, ndim=2)
+
+  # tendon
+  ten_length: wp.array(dtype=wp.float32, ndim=2)
+  ten_J: wp.array(dtype=wp.float32, ndim=3)
 
   # sensors
   sensordata: wp.array(dtype=wp.float32, ndim=2)
