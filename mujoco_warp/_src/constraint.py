@@ -106,8 +106,8 @@ def _efc_equality_joint(
   refsafe: bool,
 ):
   worldid, i_eq_joint_adr = wp.tid()
-  i_eq = m.eq_joint_adr[i_eq_joint_adr]
-  if not d.eq_active[i_eq]:
+  i_eq = m.eq_jnt_adr[i_eq_joint_adr]
+  if not d.eq_active[worldid, i_eq]:
     return
 
   efcid = wp.atomic_add(d.nefc, 0, 1)
@@ -400,7 +400,7 @@ def make_constraint(m: types.Model, d: types.Data):
       d.ne.zero_()
       wp.launch(
         _efc_equality_joint,
-        dim=(d.nworld, m.eq_joint_adr.size),
+        dim=(d.nworld, m.eq_jnt_adr.size),
         inputs=[m, d, refsafe],
       )
 

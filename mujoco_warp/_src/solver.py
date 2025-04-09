@@ -543,19 +543,20 @@ def _linesearch_iterative(m: types.Model, d: types.Data):
     jaref = d.efc.Jaref[efcid]
     jv = d.efc.jv[efcid]
 
-    alpha = lo_next_alpha[worldid]
     # TODO(team): active and conditionally active constraints
-    if efcid < d.ne[0] or jaref + alpha * jv < 0.0:
+    ne = d.ne[0]
+    alpha = lo_next_alpha[worldid]
+    if efcid < ne or jaref + alpha * jv < 0.0:
       wp.atomic_add(lo_next, worldid, _eval_pt(quad, alpha))
 
     alpha = hi_next_alpha[worldid]
     # TODO(team): active and conditionally active constraints
-    if efcid < d.ne[0] or jaref + alpha * jv < 0.0:
+    if efcid < ne or jaref + alpha * jv < 0.0:
       wp.atomic_add(hi_next, worldid, _eval_pt(quad, alpha))
 
     alpha = mid_alpha[worldid]
     # TODO(team): active and conditionally active constraints
-    if efcid < d.ne[0] or jaref + alpha * jv < 0.0:
+    if efcid < ne or jaref + alpha * jv < 0.0:
       wp.atomic_add(mid, worldid, _eval_pt(quad, alpha))
 
   @kernel
