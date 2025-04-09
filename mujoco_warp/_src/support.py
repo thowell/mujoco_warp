@@ -232,7 +232,7 @@ def contact_force(
 ) -> wp.spatial_vector:
   """Extract 6D force:torque for one contact, in contact frame by default."""
   efc_address = d.contact.efc_address[contact_id]
-  force = wp.spatial_vector()
+  force = wp.spatial_vector(0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
 
   if efc_address >= 0:
     condim = d.contact.dim[contact_id]
@@ -249,10 +249,7 @@ def contact_force(
       b = wp.spatial_bottom(force) @ d.contact.frame[contact_id]
       force = wp.spatial_vector(t, b)
 
-    valid_contact = 1.0
-  else:
-    valid_contact = 0.0
-  return force * valid_contact
+  return force
 
 
 @wp.kernel
