@@ -298,6 +298,7 @@ def contact_force_kernel(
   force[tid] = contact_force(m, d, contact_id, to_world_frame)
 
 
+@wp.func
 def transform_force(
   force: wp.vec3, torque: wp.vec3, offset: wp.vec3
 ) -> wp.spatial_vector:
