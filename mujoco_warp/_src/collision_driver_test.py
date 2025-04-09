@@ -123,6 +123,39 @@ class CollisionTest(parameterized.TestCase):
           </worldbody>
         </mujoco>
         """
+  _PLANE_CYLINDER_1 = """
+        <mujoco>
+          <worldbody>
+            <geom size="40 40 40" type="plane" euler="3 0 0"/>
+            <body pos="0 0 0.1" euler="30 30 0">
+              <freejoint/>
+              <geom size="0.05 0.1" type="cylinder"/>
+            </body>           
+          </worldbody>
+        </mujoco>
+        """
+  _PLANE_CYLINDER_2 = """
+        <mujoco>
+          <worldbody>
+            <geom size="40 40 40" type="plane" euler="3 0 0"/>            
+            <body pos="0.2 0 0.04" euler="90 0 0">
+              <freejoint/>
+              <geom size="0.05 0.1" type="cylinder"/>
+            </body>            
+          </worldbody>
+        </mujoco>
+        """
+  _PLANE_CYLINDER_3 = """
+        <mujoco>
+          <worldbody>
+            <geom size="40 40 40" type="plane" euler="3 0 0"/>            
+            <body pos="0.5 0 0.1" euler="3 0 0">
+              <freejoint/>
+              <geom size="0.05 0.1" type="cylinder"/>
+            </body>
+          </worldbody>
+        </mujoco>
+        """
 
   @parameterized.parameters(
     (_BOX_PLANE),
@@ -132,6 +165,9 @@ class CollisionTest(parameterized.TestCase):
     (_SPHERE_SPHERE),
     (_SPHERE_CAPSULE),
     (_CAPSULE_CAPSULE),
+    (_PLANE_CYLINDER_1),
+    (_PLANE_CYLINDER_2),
+    (_PLANE_CYLINDER_3),
   )
   def test_collision(self, xml_string):
     """Tests convex collision with different geometries."""
