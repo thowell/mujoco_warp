@@ -105,8 +105,12 @@ class PrimitiveTest(parameterized.TestCase):
         <mujoco>
           <worldbody>
             <geom type="box" pos="0 0 0" size=".5 .5 .5" />
-            <body pos="0 0 2">
+            <body pos="0.2 0.2 0.4">
               <geom type="sphere" size="0.5"/>
+              <freejoint/>
+            </body>
+            <body pos="-0.6 -0.6 0.7">
+              <geom type="sphere" size="0.5 0.8"/>
               <freejoint/>
             </body>
           </worldbody>
