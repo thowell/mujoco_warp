@@ -487,7 +487,7 @@ def _rne_cfrc(m: Model, d: Data, flg_cfrc_ext: bool = False):
   @kernel
   def _cfrc(d: Data):
     worldid, bodyid = wp.tid()
-    bodyid += 1
+    bodyid += 1  # skip world body
     cacc = d.cacc[worldid, bodyid]
     cinert = d.cinert[worldid, bodyid]
     cvel = d.cvel[worldid, bodyid]
