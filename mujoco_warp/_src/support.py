@@ -265,7 +265,7 @@ def contact_force(
   if efc_address >= 0:
     condim = d.contact.dim[contact_id]
 
-    # TODO: add support for elliptical cone type
+    # TODO(team): add support for elliptical cone type
     if m.opt.cone == int(mujoco.mjtCone.mjCONE_PYRAMIDAL.value):
       force = _decode_pyramid(
         d.efc.force, efc_address, d.contact.friction[contact_id], condim
@@ -296,3 +296,17 @@ def contact_force_kernel(
     return
 
   force[tid] = contact_force(m, d, contact_id, to_world_frame)
+
+
+def transform_force(
+  force: wp.vec3, torque: wp.vec3, offset: wp.vec3
+) -> wp.spatial_vector:
+  torque -= wp.cross(offset, force)
+  return wp.spatial_vector(torque, force)
+
+
+@wp.func
+def transform_force(frc: wp.spatial_vector, offset: wp.vec3) -> wp.spatial_vector:
+  force = wp.spatial_top(frc)
+  torque = wp.spatial_bottom(frc)
+  return transform_force(force, torque, offset)
