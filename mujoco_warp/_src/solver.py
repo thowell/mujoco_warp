@@ -102,7 +102,7 @@ def _update_constraint(m: types.Model, d: types.Data):
     efc_D = d.efc.D[efcid]
 
     # TODO(team): active and conditionally active constraints
-    active = int(Jaref < 0.0 or efcid < d.ne[0])
+    active = int(efcid < d.ne[0] or Jaref < 0.0)
     d.efc.active[efcid] = active
 
     if active:
@@ -401,7 +401,7 @@ def _linesearch_iterative(m: types.Model, d: types.Data):
         return
 
     # TODO(team): active and conditionally active constraints:
-    if d.efc.Jaref[efcid] >= 0.0:
+    if efcid >= d.ne[0] and d.efc.Jaref[efcid] >= 0.0:
       return
 
     quad = d.efc.quad[efcid]
@@ -445,7 +445,7 @@ def _linesearch_iterative(m: types.Model, d: types.Data):
     alpha = lo_alpha[worldid]
 
     # TODO(team): active and conditionally active constraints
-    if d.efc.Jaref[efcid] + alpha * d.efc.jv[efcid] < 0.0:
+    if efcid < d.ne[0] or d.efc.Jaref[efcid] + alpha * d.efc.jv[efcid] < 0.0:
       wp.atomic_add(lo, worldid, _eval_pt(d.efc.quad[efcid], alpha))
 
   @kernel
@@ -545,17 +545,17 @@ def _linesearch_iterative(m: types.Model, d: types.Data):
 
     alpha = lo_next_alpha[worldid]
     # TODO(team): active and conditionally active constraints
-    if jaref + alpha * jv < 0.0:
+    if efcid < d.ne[0] or jaref + alpha * jv < 0.0:
       wp.atomic_add(lo_next, worldid, _eval_pt(quad, alpha))
 
     alpha = hi_next_alpha[worldid]
     # TODO(team): active and conditionally active constraints
-    if jaref + alpha * jv < 0.0:
+    if efcid < d.ne[0] or jaref + alpha * jv < 0.0:
       wp.atomic_add(hi_next, worldid, _eval_pt(quad, alpha))
 
     alpha = mid_alpha[worldid]
     # TODO(team): active and conditionally active constraints
-    if jaref + alpha * jv < 0.0:
+    if efcid < d.ne[0] or jaref + alpha * jv < 0.0:
       wp.atomic_add(mid, worldid, _eval_pt(quad, alpha))
 
   @kernel
@@ -718,7 +718,7 @@ def _linesearch_parallel(m: types.Model, d: types.Data):
 
     x = d.efc.Jaref[efcid] + m.alpha_candidate[alphaid] * d.efc.jv[efcid]
     # TODO(team): active and conditionally active constraints
-    if x < 0.0:
+    if efcid < d.ne[0] or x < 0.0:
       wp.atomic_add(d.efc.quad_total_candidate[worldid], alphaid, d.efc.quad[efcid])
 
   @kernel
