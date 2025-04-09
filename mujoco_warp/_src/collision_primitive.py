@@ -18,9 +18,11 @@ import warp as wp
 from .math import closest_segment_to_segment_points
 from .math import make_frame
 from .math import normalize_with_norm
+from .types import MJ_MINVAL
 from .types import Data
 from .types import GeomType
 from .types import Model
+from .types import vec5
 
 
 @wp.struct
@@ -56,18 +58,30 @@ def write_contact(
   pos: wp.vec3,
   frame: wp.mat33,
   margin: float,
+  gap: float,
+  condim: int,
+  friction: vec5,
+  solref: wp.vec2f,
+  solreffriction: wp.vec2f,
+  solimp: vec5,
   geoms: wp.vec2i,
   worldid: int,
 ):
   active = (dist - margin) < 0
   if active:
-    index = wp.atomic_add(d.ncon, 0, 1)
-    if index < d.nconmax:
-      d.contact.dist[index] = dist
-      d.contact.pos[index] = pos
-      d.contact.frame[index] = frame
-      d.contact.geom[index] = geoms
-      d.contact.worldid[index] = worldid
+    cid = wp.atomic_add(d.ncon, 0, 1)
+    if cid < d.nconmax:
+      d.contact.dist[cid] = dist
+      d.contact.pos[cid] = pos
+      d.contact.frame[cid] = frame
+      d.contact.geom[cid] = geoms
+      d.contact.worldid[cid] = worldid
+      d.contact.includemargin[cid] = margin - gap
+      d.contact.dim[cid] = condim
+      d.contact.friction[cid] = friction
+      d.contact.solref[cid] = solref
+      d.contact.solreffriction[cid] = solreffriction
+      d.contact.solimp[cid] = solimp
 
 
 @wp.func
@@ -86,11 +100,31 @@ def plane_sphere(
   worldid: int,
   d: Data,
   margin: float,
-  geom_indices: wp.vec2i,
+  gap: float,
+  condim: int,
+  friction: vec5,
+  solref: wp.vec2f,
+  solreffriction: wp.vec2f,
+  solimp: vec5,
+  geoms: wp.vec2i,
 ):
   dist, pos = _plane_sphere(plane.normal, plane.pos, sphere.pos, sphere.size[0])
 
-  write_contact(d, dist, pos, make_frame(plane.normal), margin, geom_indices, worldid)
+  write_contact(
+    d,
+    dist,
+    pos,
+    make_frame(plane.normal),
+    margin,
+    gap,
+    condim,
+    friction,
+    solref,
+    solreffriction,
+    solimp,
+    geoms,
+    worldid,
+  )
 
 
 @wp.func
@@ -102,7 +136,13 @@ def _sphere_sphere(
   worldid: int,
   d: Data,
   margin: float,
-  geom_indices: wp.vec2i,
+  gap: float,
+  condim: int,
+  friction: vec5,
+  solref: wp.vec2f,
+  solreffriction: wp.vec2f,
+  solimp: vec5,
+  geoms: wp.vec2i,
 ):
   dir = pos2 - pos1
   dist = wp.length(dir)
@@ -113,7 +153,21 @@ def _sphere_sphere(
   dist = dist - (radius1 + radius2)
   pos = pos1 + n * (radius1 + 0.5 * dist)
 
-  write_contact(d, dist, pos, make_frame(n), margin, geom_indices, worldid)
+  write_contact(
+    d,
+    dist,
+    pos,
+    make_frame(n),
+    margin,
+    gap,
+    condim,
+    friction,
+    solref,
+    solreffriction,
+    solimp,
+    geoms,
+    worldid,
+  )
 
 
 @wp.func
@@ -123,7 +177,13 @@ def sphere_sphere(
   worldid: int,
   d: Data,
   margin: float,
-  geom_indices: wp.vec2i,
+  gap: float,
+  condim: int,
+  friction: vec5,
+  solref: wp.vec2f,
+  solreffriction: wp.vec2f,
+  solimp: vec5,
+  geoms: wp.vec2i,
 ):
   _sphere_sphere(
     sphere1.pos,
@@ -133,7 +193,13 @@ def sphere_sphere(
     worldid,
     d,
     margin,
-    geom_indices,
+    gap,
+    condim,
+    friction,
+    solref,
+    solreffriction,
+    solimp,
+    geoms,
   )
 
 
@@ -144,7 +210,13 @@ def capsule_capsule(
   worldid: int,
   d: Data,
   margin: float,
-  geom_indices: wp.vec2i,
+  gap: float,
+  condim: int,
+  friction: vec5,
+  solref: wp.vec2f,
+  solreffriction: wp.vec2f,
+  solimp: vec5,
+  geoms: wp.vec2i,
 ):
   axis1 = wp.vec3(cap1.rot[0, 2], cap1.rot[1, 2], cap1.rot[2, 2])
   axis2 = wp.vec3(cap2.rot[0, 2], cap2.rot[1, 2], cap2.rot[2, 2])
@@ -160,7 +232,22 @@ def capsule_capsule(
     cap2.pos + seg2,
   )
 
-  _sphere_sphere(pt1, cap1.size[0], pt2, cap2.size[0], worldid, d, margin, geom_indices)
+  _sphere_sphere(
+    pt1,
+    cap1.size[0],
+    pt2,
+    cap2.size[0],
+    worldid,
+    d,
+    margin,
+    gap,
+    condim,
+    friction,
+    solref,
+    solreffriction,
+    solimp,
+    geoms,
+  )
 
 
 @wp.func
@@ -170,7 +257,13 @@ def plane_capsule(
   worldid: int,
   d: Data,
   margin: float,
-  geom_indices: wp.vec2i,
+  gap: float,
+  condim: int,
+  friction: vec5,
+  solref: wp.vec2f,
+  solreffriction: wp.vec2f,
+  solimp: vec5,
+  geoms: wp.vec2i,
 ):
   """Calculates two contacts between a capsule and a plane."""
   n = plane.normal
@@ -189,10 +282,38 @@ def plane_capsule(
   segment = axis * cap.size[1]
 
   dist1, pos1 = _plane_sphere(n, plane.pos, cap.pos + segment, cap.size[0])
-  write_contact(d, dist1, pos1, frame, margin, geom_indices, worldid)
+  write_contact(
+    d,
+    dist1,
+    pos1,
+    frame,
+    margin,
+    gap,
+    condim,
+    friction,
+    solref,
+    solreffriction,
+    solimp,
+    geoms,
+    worldid,
+  )
 
   dist2, pos2 = _plane_sphere(n, plane.pos, cap.pos - segment, cap.size[0])
-  write_contact(d, dist2, pos2, frame, margin, geom_indices, worldid)
+  write_contact(
+    d,
+    dist2,
+    pos2,
+    frame,
+    margin,
+    gap,
+    condim,
+    friction,
+    solref,
+    solreffriction,
+    solimp,
+    geoms,
+    worldid,
+  )
 
 
 @wp.func
@@ -202,7 +323,13 @@ def plane_box(
   worldid: int,
   d: Data,
   margin: float,
-  geom_indices: wp.vec2i,
+  gap: float,
+  condim: int,
+  friction: vec5,
+  solref: wp.vec2f,
+  solreffriction: wp.vec2f,
+  solimp: vec5,
+  geoms: wp.vec2i,
 ):
   count = int(0)
   corner = wp.vec3()
@@ -226,7 +353,21 @@ def plane_box(
     cdist = dist + ldist
     frame = make_frame(plane.normal)
     pos = corner + box.pos + (plane.normal * cdist / -2.0)
-    write_contact(d, cdist, pos, frame, margin, geom_indices, worldid)
+    write_contact(
+      d,
+      cdist,
+      pos,
+      frame,
+      margin,
+      gap,
+      condim,
+      friction,
+      solref,
+      solreffriction,
+      solimp,
+      geoms,
+      worldid,
+    )
     count += 1
     if count >= 4:
       break
@@ -243,29 +384,142 @@ def _primitive_narrowphase(
     return
 
   geoms = d.collision_pair[tid]
+  pairid = d.collision_pairid[tid]
   worldid = d.collision_worldid[tid]
 
   g1 = geoms[0]
   g2 = geoms[1]
-  type1 = m.geom_type[g1]
-  type2 = m.geom_type[g2]
+
+  if pairid > -1:
+    margin = m.pair_margin[pairid]
+    gap = m.pair_gap[pairid]
+    condim = m.pair_dim[pairid]
+    friction = m.pair_friction[pairid]
+    solref = m.pair_solref[pairid]
+    solreffriction = m.pair_solreffriction[pairid]
+    solimp = m.pair_solimp[pairid]
+  else:
+    p1 = m.geom_priority[g1]
+    p2 = m.geom_priority[g2]
+
+    solmix1 = m.geom_solmix[g1]
+    solmix2 = m.geom_solmix[g2]
+
+    mix = solmix1 / (solmix1 + solmix2)
+    mix = wp.where((solmix1 < MJ_MINVAL) and (solmix2 < MJ_MINVAL), 0.5, mix)
+    mix = wp.where((solmix1 < MJ_MINVAL) and (solmix2 >= MJ_MINVAL), 0.0, mix)
+    mix = wp.where((solmix1 >= MJ_MINVAL) and (solmix2 < MJ_MINVAL), 1.0, mix)
+    mix = wp.where(p1 == p2, mix, wp.where(p1 > p2, 1.0, 0.0))
+
+    margin = wp.max(m.geom_margin[g1], m.geom_margin[g2])
+    gap = wp.max(m.geom_gap[g1], m.geom_gap[g2])
+
+    condim1 = m.geom_condim[g1]
+    condim2 = m.geom_condim[g2]
+    condim = wp.where(
+      p1 == p2, wp.max(condim1, condim2), wp.where(p1 > p2, condim1, condim2)
+    )
+
+    geom_friction = wp.max(m.geom_friction[g1], m.geom_friction[g2])
+    friction = vec5(
+      geom_friction[0],
+      geom_friction[0],
+      geom_friction[1],
+      geom_friction[2],
+      geom_friction[2],
+    )
+
+    if m.geom_solref[g1].x > 0.0 and m.geom_solref[g2].x > 0.0:
+      solref = mix * m.geom_solref[g1] + (1.0 - mix) * m.geom_solref[g2]
+    else:
+      solref = wp.min(m.geom_solref[g1], m.geom_solref[g2])
+
+    solreffriction = wp.vec2(0.0, 0.0)
+
+    solimp = mix * m.geom_solimp[g1] + (1.0 - mix) * m.geom_solimp[g2]
 
   geom1 = _geom(g1, m, d.geom_xpos[worldid], d.geom_xmat[worldid])
   geom2 = _geom(g2, m, d.geom_xpos[worldid], d.geom_xmat[worldid])
 
-  margin = wp.max(m.geom_margin[g1], m.geom_margin[g2])
+  type1 = m.geom_type[g1]
+  type2 = m.geom_type[g2]
 
   # TODO(team): static loop unrolling to remove unnecessary branching
   if type1 == int(GeomType.PLANE.value) and type2 == int(GeomType.SPHERE.value):
-    plane_sphere(geom1, geom2, worldid, d, margin, geoms)
+    plane_sphere(
+      geom1,
+      geom2,
+      worldid,
+      d,
+      margin,
+      gap,
+      condim,
+      friction,
+      solref,
+      solreffriction,
+      solimp,
+      geoms,
+    )
   elif type1 == int(GeomType.SPHERE.value) and type2 == int(GeomType.SPHERE.value):
-    sphere_sphere(geom1, geom2, worldid, d, margin, geoms)
+    sphere_sphere(
+      geom1,
+      geom2,
+      worldid,
+      d,
+      margin,
+      gap,
+      condim,
+      friction,
+      solref,
+      solreffriction,
+      solimp,
+      geoms,
+    )
   elif type1 == int(GeomType.PLANE.value) and type2 == int(GeomType.CAPSULE.value):
-    plane_capsule(geom1, geom2, worldid, d, margin, geoms)
+    plane_capsule(
+      geom1,
+      geom2,
+      worldid,
+      d,
+      margin,
+      gap,
+      condim,
+      friction,
+      solref,
+      solreffriction,
+      solimp,
+      geoms,
+    )
   elif type1 == int(GeomType.PLANE.value) and type2 == int(GeomType.BOX.value):
-    plane_box(geom1, geom2, worldid, d, margin, geoms)
+    plane_box(
+      geom1,
+      geom2,
+      worldid,
+      d,
+      margin,
+      gap,
+      condim,
+      friction,
+      solref,
+      solreffriction,
+      solimp,
+      geoms,
+    )
   elif type1 == int(GeomType.CAPSULE.value) and type2 == int(GeomType.CAPSULE.value):
-    capsule_capsule(geom1, geom2, worldid, d, margin, geoms)
+    capsule_capsule(
+      geom1,
+      geom2,
+      worldid,
+      d,
+      margin,
+      gap,
+      condim,
+      friction,
+      solref,
+      solreffriction,
+      solimp,
+      geoms,
+    )
 
 
 def primitive_narrowphase(m: Model, d: Data):

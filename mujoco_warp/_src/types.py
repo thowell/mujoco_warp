@@ -380,6 +380,7 @@ class Model:
     nmocap: number of mocap bodies                           ()
     nM: number of non-zeros in sparse inertia matrix         ()
     nlsp: number of step sizes for parallel linsearch        ()
+    npair: number of predefined geom pairs                   ()
     opt: physics options
     stat: model statistics
     qpos0: qpos values at default pose                       (nq,)
@@ -489,6 +490,16 @@ class Model:
     exclude_signature: body1 << 16 + body2                   (nexclude,)
     actuator_affine_bias_gain: affine bias/gain present
     nxn_geom_pair: valid collision pair geom ids             (<= ngeom * (ngeom - 1) // 2,)
+    nxn_pairid: predefined pair id, -1 if not predefined     (<= ngeom * (ngeom - 1) // 2,)
+    pair_dim: contact dimensionality                         (npair,)
+    pair_geom1: id of geom1                                  (npair,)
+    pair_geom2: id of geom2                                  (npair,)
+    pair_solref: solver reference: contact normal            (npair, mjNREF)
+    pair_solreffriction: solver reference: contact friction  (npair, mjNREF)
+    pair_solimp: solver impedance: contact                   (npair, mjNIMP)
+    pair_margin: detect contact if dist<margin               (npair,)
+    pair_gap: include in solver if dist<margin-gap           (npair,)
+    pair_friction: tangent1, 2, spin, roll1, 2               (npair,)
   """
 
   nq: int
@@ -503,6 +514,7 @@ class Model:
   nmocap: int
   nM: int
   nlsp: int  # warp only
+  npair: int
   opt: Option
   stat: Statistic
   qpos0: wp.array(dtype=wp.float32, ndim=1)
@@ -612,6 +624,18 @@ class Model:
   exclude_signature: wp.array(dtype=wp.int32, ndim=1)
   actuator_affine_bias_gain: bool  # warp only
   nxn_geom_pair: wp.array(dtype=wp.vec2i, ndim=1)  # warp only
+  nxn_pairid: wp.array(dtype=wp.int32, ndim=1)  # warp only
+
+  # predefined geom pairs for collision detection
+  pair_dim: wp.array(dtype=wp.int32, ndim=1)
+  pair_geom1: wp.array(dtype=wp.int32, ndim=1)
+  pair_geom2: wp.array(dtype=wp.int32, ndim=1)
+  pair_solref: wp.array(dtype=wp.vec2, ndim=1)
+  pair_solreffriction: wp.array(dtype=wp.vec2, ndim=1)
+  pair_solimp: wp.array(dtype=vec5, ndim=1)
+  pair_margin: wp.array(dtype=wp.float32, ndim=1)
+  pair_gap: wp.array(dtype=wp.float32, ndim=1)
+  pair_friction: wp.array(dtype=vec5, ndim=1)
 
 
 @wp.struct
@@ -798,5 +822,6 @@ class Data:
 
   # collision driver
   collision_pair: wp.array(dtype=wp.vec2i, ndim=1)
+  collision_pairid: wp.array(dtype=wp.int32, ndim=1)
   collision_worldid: wp.array(dtype=wp.int32, ndim=1)
   ncollision: wp.array(dtype=wp.int32, ndim=1)

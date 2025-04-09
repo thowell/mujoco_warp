@@ -154,8 +154,182 @@ class PrimitiveTest(parameterized.TestCase):
         </contact>
       </mujoco>
     """)
-    pairs = collision_driver.geom_pair(mjm)
+    pairs = collision_driver.geom_pair(mjm)[0]
     self.assertEqual(pairs.shape[0], 2)
+
+  def test_contact_pair(self):
+    """Tests contact pair."""
+    # no pairs
+    mjm = mujoco.MjModel.from_xml_string("""
+      <mujoco>
+        <worldbody>
+          <body>
+            <freejoint/>
+            <geom type="sphere" size=".1"/>
+          </body>
+        </worldbody>
+      </mujoco>
+    """)
+    _, pairid = collision_driver.geom_pair(mjm)
+    self.assertTrue((pairid == -1).all())
+
+    # 1 pair
+    mjm = mujoco.MjModel.from_xml_string("""
+      <mujoco>
+        <worldbody>
+          <body>
+            <freejoint/>
+            <geom name="geom1" type="sphere" size=".1"/>
+          </body>
+          <body>
+            <freejoint/>
+            <geom name="geom2" type="sphere" size=".1"/>
+          </body>
+        </worldbody>
+        <contact>
+          <pair geom1="geom1" geom2="geom2" margin="2" gap="3" condim="6" friction="5 4 3 2 1" solref="-.25 -.5" solreffriction="2 4" solimp=".1 .2 .3 .4 .5"/>
+        </contact>
+      </mujoco>
+    """)
+    _, pairid = collision_driver.geom_pair(mjm)
+    self.assertTrue((pairid == 0).all())
+
+    # generate contact
+    m = mjwarp.put_model(mjm)
+    d = mjwarp.make_data(mjm)
+    mjwarp.forward(m, d)
+
+    self.assertEqual(d.ncon.numpy()[0], 1)
+    self.assertEqual(d.contact.includemargin.numpy()[0], -1)
+    self.assertEqual(d.contact.dim.numpy()[0], 6)
+    np.testing.assert_allclose(d.contact.friction.numpy()[0], np.array([5, 4, 3, 2, 1]))
+    np.testing.assert_allclose(d.contact.solref.numpy()[0], np.array([-0.25, -0.5]))
+    np.testing.assert_allclose(
+      d.contact.solreffriction.numpy()[0], np.array([2.0, 4.0])
+    )
+    np.testing.assert_allclose(
+      d.contact.solimp.numpy()[0], np.array([0.1, 0.2, 0.3, 0.4, 0.5])
+    )
+
+    # 1 pair: override contype and conaffinity
+    mjm = mujoco.MjModel.from_xml_string("""
+      <mujoco>
+        <worldbody>
+          <body name="body1">
+            <freejoint/>
+            <geom name="geom1" type="sphere" size=".1" contype="0" conaffinity="0"/>
+          </body>
+          <body name="body2">
+            <freejoint/>
+            <geom name="geom2" type="sphere" size=".1" contype="0" conaffinity="0"/>
+          </body>
+        </worldbody>
+        <contact>
+          <pair geom1="geom1" geom2="geom2" margin="2" gap="3" condim="6" friction="5 4 3 2 1" solref="-.25 -.5" solreffriction="2 4" solimp=".1 .2 .3 .4 .5"/>
+        </contact>
+      </mujoco>
+    """)
+    _, pairid = collision_driver.geom_pair(mjm)
+    self.assertTrue((pairid == 0).all())
+
+    # generate contact
+    m = mjwarp.put_model(mjm)
+    d = mjwarp.make_data(mjm)
+    mjwarp.forward(m, d)
+
+    self.assertEqual(d.ncon.numpy()[0], 1)
+    self.assertEqual(d.contact.includemargin.numpy()[0], -1)
+    self.assertEqual(d.contact.dim.numpy()[0], 6)
+    np.testing.assert_allclose(d.contact.friction.numpy()[0], np.array([5, 4, 3, 2, 1]))
+    np.testing.assert_allclose(d.contact.solref.numpy()[0], np.array([-0.25, -0.5]))
+    np.testing.assert_allclose(
+      d.contact.solreffriction.numpy()[0], np.array([2.0, 4.0])
+    )
+    np.testing.assert_allclose(
+      d.contact.solimp.numpy()[0], np.array([0.1, 0.2, 0.3, 0.4, 0.5])
+    )
+
+    # 1 pair: override exclude
+    mjm = mujoco.MjModel.from_xml_string("""
+      <mujoco>
+        <worldbody>
+          <body name="body1">
+            <freejoint/>
+            <geom name="geom1" type="sphere" size=".1"/>
+          </body>
+          <body name="body2">
+            <freejoint/>
+            <geom name="geom2" type="sphere" size=".1"/>
+          </body>
+        </worldbody>
+        <contact>
+          <exclude body1="body1" body2="body2"/>
+          <pair geom1="geom1" geom2="geom2" margin="2" gap="3" condim="6" friction="5 4 3 2 1" solref="-.25 -.5" solreffriction="2 4" solimp=".1 .2 .3 .4 .5"/>
+        </contact>
+      </mujoco>
+    """)
+    _, pairid = collision_driver.geom_pair(mjm)
+    self.assertTrue((pairid == 0).all())
+
+    # generate contact
+    m = mjwarp.put_model(mjm)
+    d = mjwarp.make_data(mjm)
+    mjwarp.forward(m, d)
+
+    self.assertEqual(d.ncon.numpy()[0], 1)
+    self.assertEqual(d.contact.includemargin.numpy()[0], -1)
+    self.assertEqual(d.contact.dim.numpy()[0], 6)
+    np.testing.assert_allclose(d.contact.friction.numpy()[0], np.array([5, 4, 3, 2, 1]))
+    np.testing.assert_allclose(d.contact.solref.numpy()[0], np.array([-0.25, -0.5]))
+    np.testing.assert_allclose(
+      d.contact.solreffriction.numpy()[0], np.array([2.0, 4.0])
+    )
+    np.testing.assert_allclose(
+      d.contact.solimp.numpy()[0], np.array([0.1, 0.2, 0.3, 0.4, 0.5])
+    )
+
+    # 1 pair 1 exclude
+    mjm = mujoco.MjModel.from_xml_string("""
+      <mujoco>
+        <worldbody>
+          <body name="body1">
+            <freejoint/>
+            <geom name="geom1" type="sphere" size=".1"/>
+          </body>
+          <body name="body2">
+            <freejoint/>
+            <geom name="geom2" type="sphere" size=".1"/>
+          </body>
+          <body name="body3">
+            <freejoint/>
+            <geom name="geom3" type="sphere" size=".1"/>
+          </body>
+        </worldbody>
+        <contact>
+          <exclude body1="body1" body2="body2"/>
+          <pair geom1="geom2" geom2="geom3" margin="2" gap="3" condim="6" friction="5 4 3 2 1" solref="-.25 -.5" solreffriction="2 4" solimp=".1 .2 .3 .4 .5"/>
+        </contact>
+      </mujoco>
+    """)
+    _, pairid = collision_driver.geom_pair(mjm)
+    np.testing.assert_equal(pairid, np.array([-1, 0]))
+
+    # generate contact
+    m = mjwarp.put_model(mjm)
+    d = mjwarp.make_data(mjm)
+    mjwarp.forward(m, d)
+
+    self.assertEqual(d.ncon.numpy()[0], 2)
+    self.assertEqual(d.contact.includemargin.numpy()[1], -1)
+    self.assertEqual(d.contact.dim.numpy()[1], 6)
+    np.testing.assert_allclose(d.contact.friction.numpy()[1], np.array([5, 4, 3, 2, 1]))
+    np.testing.assert_allclose(d.contact.solref.numpy()[1], np.array([-0.25, -0.5]))
+    np.testing.assert_allclose(
+      d.contact.solreffriction.numpy()[1], np.array([2.0, 4.0])
+    )
+    np.testing.assert_allclose(
+      d.contact.solimp.numpy()[1], np.array([0.1, 0.2, 0.3, 0.4, 0.5])
+    )
 
   @parameterized.parameters(
     (True, True),
@@ -182,6 +356,8 @@ class PrimitiveTest(parameterized.TestCase):
     mjwarp.collision(m, d)
 
     self.assertEqual(d.ncon.numpy()[0], mjd.ncon)
+
+  # TODO(team): test contact parameter mixing
 
 
 if __name__ == "__main__":

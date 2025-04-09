@@ -55,6 +55,7 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
   m.nmocap = mjm.nmocap
   m.nM = mjm.nM
   m.nlsp = mjm.opt.ls_iterations  # TODO(team): how to set nlsp?
+  m.npair = mjm.npair
   m.nexclude = mjm.nexclude
   m.opt.timestep = mjm.opt.timestep
   m.opt.tolerance = mjm.opt.tolerance
@@ -332,7 +333,20 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
     or np.any(mjm.actuator_gaintype == types.GainType.AFFINE.value)
   )
 
-  m.nxn_geom_pair = wp.array(collision_driver.geom_pair(mjm), dtype=wp.vec2i, ndim=1)
+  geom_pair, pairid = collision_driver.geom_pair(mjm)
+  m.nxn_geom_pair = wp.array(geom_pair, dtype=wp.vec2i, ndim=1)
+  m.nxn_pairid = wp.array(pairid, dtype=wp.int32, ndim=1)
+
+  # predefined collision pairs
+  m.pair_dim = wp.array(mjm.pair_dim, dtype=wp.int32, ndim=1)
+  m.pair_geom1 = wp.array(mjm.pair_geom1, dtype=wp.int32, ndim=1)
+  m.pair_geom2 = wp.array(mjm.pair_geom2, dtype=wp.int32, ndim=1)
+  m.pair_solref = wp.array(mjm.pair_solref, dtype=wp.vec2, ndim=1)
+  m.pair_solreffriction = wp.array(mjm.pair_solreffriction, dtype=wp.vec2, ndim=1)
+  m.pair_solimp = wp.array(mjm.pair_solimp, dtype=types.vec5, ndim=1)
+  m.pair_margin = wp.array(mjm.pair_margin, dtype=wp.float32, ndim=1)
+  m.pair_gap = wp.array(mjm.pair_gap, dtype=wp.float32, ndim=1)
+  m.pair_friction = wp.array(mjm.pair_friction, dtype=types.vec5, ndim=1)
 
   return m
 
@@ -503,6 +517,7 @@ def make_data(
 
   # collision driver
   d.collision_pair = wp.empty(nconmax, dtype=wp.vec2i, ndim=1)
+  d.collision_pairid = wp.empty(nconmax, dtype=wp.int32, ndim=1)
   d.collision_worldid = wp.empty(nconmax, dtype=wp.int32, ndim=1)
   d.ncollision = wp.zeros(1, dtype=wp.int32, ndim=1)
 
@@ -722,6 +737,7 @@ def put_data(
 
   # collision driver
   d.collision_pair = wp.empty(nconmax, dtype=wp.vec2i, ndim=1)
+  d.collision_pairid = wp.empty(nconmax, dtype=wp.int32, ndim=1)
   d.collision_worldid = wp.empty(nconmax, dtype=wp.int32, ndim=1)
   d.ncollision = wp.zeros(1, dtype=wp.int32, ndim=1)
 

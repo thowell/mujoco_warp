@@ -13,6 +13,8 @@
 # limitations under the License.
 # ==============================================================================
 
+from typing import Tuple
+
 import mujoco
 import numpy as np
 import warp as wp
@@ -22,18 +24,19 @@ from .types import MJ_MINVAL
 from .types import Data
 from .types import DisableBit
 from .types import Model
-from .types import vec5
 from .warp_util import event_scope
 
 
-def geom_pair(m: mujoco.MjModel) -> np.array:
+def geom_pair(m: mujoco.MjModel) -> Tuple[np.array, np.array]:
   filterparent = not (m.opt.disableflags & DisableBit.FILTERPARENT.value)
   exclude_signature = set(m.exclude_signature)
+  predefined_pairs = [(g1, g2) for g1, g2 in zip(m.pair_geom1, m.pair_geom2)]
 
   tri = np.triu_indices(m.ngeom)
   ntri = tri[0].size
 
   pairs = []
+  pairids = []
   for i in range(ntri):
     geom1 = tri[0][i]
     geom2 = tri[1][i]
@@ -59,10 +62,20 @@ def geom_pair(m: mujoco.MjModel) -> np.array:
     mask = (contype1 & conaffinity2) or (contype2 & conaffinity1)
     exclude = (bodyid1 << 16) + (bodyid2) in exclude_signature
 
-    if mask and (not self_collision) and (not parent_child_collision) and (not exclude):
-      pairs.append([geom1, geom2])
+    # check for predefined geom pair
+    pairid = -1
+    for i, pair in enumerate(predefined_pairs):
+      if (geom1, geom2) == pair or (geom2, geom1) == pair:
+        pairid = i
+        break
 
-  return np.array(pairs)
+    if pairid > -1 or (
+      mask and (not self_collision) and (not parent_child_collision) and (not exclude)
+    ):
+      pairs.append([geom1, geom2])
+      pairids.append(pairid)
+
+  return np.array(pairs), np.array(pairids)
 
 
 @wp.func
@@ -91,7 +104,7 @@ def _geom_filter(m: Model, geom1: int, geom2: int, filterparent: bool) -> bool:
 
 
 @wp.func
-def _add_geom_pair(m: Model, d: Data, geom1: int, geom2: int, worldid: int):
+def _add_geom_pair(m: Model, d: Data, geom1: int, geom2: int, worldid: int, nxnid: int):
   pairid = wp.atomic_add(d.ncollision, 0, 1)
 
   if pairid >= d.nconmax:
@@ -106,6 +119,7 @@ def _add_geom_pair(m: Model, d: Data, geom1: int, geom2: int, worldid: int):
     pair = wp.vec2i(geom1, geom2)
 
   d.collision_pair[pairid] = pair
+  d.collision_pairid[pairid] = m.nxn_pairid[nxnid]
   d.collision_worldid[pairid] = worldid
 
 
@@ -337,55 +351,9 @@ def sap_broadphase_kernel(m: Model, d: Data, num_threads: int, filter_parent: bo
 
     # Check if the boxes overlap
     if overlap(worldId, i, j, d.sap_geom_sort):
-      _add_geom_pair(m, d, idx1, idx2, worldId)
+      _add_geom_pair(m, d, idx1, idx2, worldId, -1)  # TODO(team): nxnid
 
     threadId += num_threads
-
-
-@wp.kernel
-def get_contact_solver_params_kernel(
-  m: Model,
-  d: Data,
-):
-  tid = wp.tid()
-
-  n_contact_pts = d.ncon[0]
-  if tid >= n_contact_pts:
-    return
-
-  geoms = d.contact.geom[tid]
-  g1 = geoms.x
-  g2 = geoms.y
-
-  margin = wp.max(m.geom_margin[g1], m.geom_margin[g2])
-  gap = wp.max(m.geom_gap[g1], m.geom_gap[g2])
-  solmix1 = m.geom_solmix[g1]
-  solmix2 = m.geom_solmix[g2]
-  mix = solmix1 / (solmix1 + solmix2)
-  mix = wp.where((solmix1 < MJ_MINVAL) and (solmix2 < MJ_MINVAL), 0.5, mix)
-  mix = wp.where((solmix1 < MJ_MINVAL) and (solmix2 >= MJ_MINVAL), 0.0, mix)
-  mix = wp.where((solmix1 >= MJ_MINVAL) and (solmix2 < MJ_MINVAL), 1.0, mix)
-
-  p1 = m.geom_priority[g1]
-  p2 = m.geom_priority[g2]
-  mix = wp.where(p1 == p2, mix, wp.where(p1 > p2, 1.0, 0.0))
-
-  condim1 = m.geom_condim[g1]
-  condim2 = m.geom_condim[g2]
-  condim = wp.where(
-    p1 == p2, wp.max(condim1, condim2), wp.where(p1 > p2, condim1, condim2)
-  )
-  d.contact.dim[tid] = condim
-
-  if m.geom_solref[g1].x > 0.0 and m.geom_solref[g2].x > 0.0:
-    d.contact.solref[tid] = mix * m.geom_solref[g1] + (1.0 - mix) * m.geom_solref[g2]
-  else:
-    d.contact.solref[tid] = wp.min(m.geom_solref[g1], m.geom_solref[g2])
-  d.contact.includemargin[tid] = margin - gap
-  friction_ = wp.max(m.geom_friction[g1], m.geom_friction[g2])
-  friction5 = vec5(friction_[0], friction_[0], friction_[1], friction_[2], friction_[2])
-  d.contact.friction[tid] = friction5
-  d.contact.solimp[tid] = mix * m.geom_solimp[g1] + (1.0 - mix) * m.geom_solimp[g2]
 
 
 def sap_broadphase(m: Model, d: Data):
@@ -532,20 +500,10 @@ def nxn_broadphase(m: Model, d: Data):
       bounds_filter = dist <= bound
 
     if bounds_filter:
-      _add_geom_pair(m, d, geom1, geom2, worldid)
+      _add_geom_pair(m, d, geom1, geom2, worldid, elementid)
 
   if m.nxn_geom_pair.shape[0]:
     wp.launch(_nxn_broadphase, dim=(d.nworld, m.nxn_geom_pair.shape[0]), inputs=[m, d])
-
-
-def get_contact_solver_params(m: Model, d: Data):
-  wp.launch(
-    get_contact_solver_params_kernel,
-    dim=[d.nconmax],
-    inputs=[m, d],
-  )
-
-  # TODO(team): do we need condim sorting, deepest penetrating contact here?
 
 
 @event_scope
@@ -576,5 +534,3 @@ def collision(m: Model, d: Data):
   #             partitioning because we can move some pressure of the atomics
   primitive_narrowphase(m, d)
   # TODO(team) switch between collision functions and GJK/EPA here
-
-  get_contact_solver_params(m, d)
