@@ -610,10 +610,6 @@ def make_data(
   d.qfrc_smooth = wp.zeros((nworld, mjm.nv), dtype=wp.float32)
   d.qfrc_constraint = wp.zeros((nworld, mjm.nv), dtype=wp.float32)
   d.qacc_smooth = wp.zeros((nworld, mjm.nv), dtype=wp.float32)
-
-  d.rne_cacc = wp.zeros(shape=(d.nworld, mjm.nbody), dtype=wp.spatial_vector)
-  d.rne_cfrc = wp.zeros(shape=(d.nworld, mjm.nbody), dtype=wp.spatial_vector)
-
   d.xfrc_applied = wp.zeros((nworld, mjm.nbody), dtype=wp.spatial_vector)
 
   # internal tmp arrays
@@ -644,6 +640,11 @@ def make_data(
   d.collision_pair = wp.empty(nconmax, dtype=wp.vec2i, ndim=1)
   d.collision_worldid = wp.empty(nconmax, dtype=wp.int32, ndim=1)
   d.ncollision = wp.zeros(1, dtype=wp.int32, ndim=1)
+
+  # rne_postconstraint
+  d.cacc = wp.zeros((nworld, mjm.nbody), dtype=wp.spatial_vector, ndim=2)
+  d.cfrc_int = wp.zeros((nworld, mjm.nbody), dtype=wp.spatial_vector, ndim=2)
+  d.cfrc_ext = wp.zeros((nworld, mjm.nbody), dtype=wp.spatial_vector, ndim=2)
 
   # tendon
   d.ten_length = wp.zeros((nworld, mjm.ntendon), dtype=wp.float32, ndim=2)
@@ -856,9 +857,6 @@ def put_data(
   d.contact.efc_address = wp.array(con_efc_address_fill, dtype=wp.int32, ndim=2)
   d.contact.worldid = wp.array(con_worldid, dtype=wp.int32, ndim=1)
 
-  d.rne_cacc = wp.zeros(shape=(d.nworld, mjm.nbody), dtype=wp.spatial_vector)
-  d.rne_cfrc = wp.zeros(shape=(d.nworld, mjm.nbody), dtype=wp.spatial_vector)
-
   d.efc = _constraint(mjm, d.nworld, d.njmax)
   d.efc.J = wp.array(efc_J_fill, dtype=wp.float32, ndim=2)
   d.efc.D = wp.array(efc_D_fill, dtype=wp.float32, ndim=1)
@@ -898,6 +896,11 @@ def put_data(
   d.collision_pair = wp.empty(nconmax, dtype=wp.vec2i, ndim=1)
   d.collision_worldid = wp.empty(nconmax, dtype=wp.int32, ndim=1)
   d.ncollision = wp.zeros(1, dtype=wp.int32, ndim=1)
+
+  # rne_postconstraint
+  d.cacc = wp.array(tile(mjd.cacc), dtype=wp.spatial_vector, ndim=2)
+  d.cfrc_int = wp.array(tile(mjd.cfrc_int), dtype=wp.spatial_vector, ndim=2)
+  d.cfrc_ext = wp.array(tile(mjd.cfrc_ext), dtype=wp.spatial_vector, ndim=2)
 
   # tendon
   d.ten_length = wp.array(tile(mjd.ten_length), dtype=wp.float32, ndim=2)
@@ -1023,6 +1026,10 @@ def get_data_into(
   result.efc_aref[:] = d.efc.aref.numpy()[:nefc]
   result.efc_force[:] = d.efc.force.numpy()[:nefc]
   result.efc_margin[:] = d.efc.margin.numpy()[:nefc]
+
+  result.cacc[:] = d.cacc.numpy()[0]
+  result.cfrc_int[:] = d.cfrc_int.numpy()[0]
+  result.cfrc_ext[:] = d.cfrc_ext.numpy()[0]
 
   # TODO: other efc_ fields, anything else missing
 
