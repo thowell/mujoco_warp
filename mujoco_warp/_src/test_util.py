@@ -34,6 +34,7 @@ def fixture(
   keyframe: int = -1,
   sparse: bool = True,
   contact: bool = True,
+  cone: int = mujoco.mjtCone.mjCONE_PYRAMIDAL,
   gravity: bool = True,
 ):
   path = epath.resource_path("mujoco_warp") / "test_data" / fname
@@ -42,7 +43,10 @@ def fixture(
     mjm.opt.disableflags |= mujoco.mjtDisableBit.mjDSBL_CONTACT
   if not gravity:
     mjm.opt.disableflags |= mujoco.mjtDisableBit.mjDSBL_GRAVITY
+  mjm.opt.cone = cone
   mjm.opt.jacobian = sparse
+  if not gravity:
+    mjm.opt.disableflags |= mujoco.mjtDisableBit.mjDSBL_GRAVITY
   mjd = mujoco.MjData(mjm)
   if keyframe > -1:
     mujoco.mj_resetDataKeyframe(mjm, mjd, keyframe)
