@@ -417,6 +417,8 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
     or np.any(mjm.actuator_gaintype == types.GainType.AFFINE.value)
   )
 
+  m.condim_max = np.max(mjm.geom_condim)  # TODO(team): get max after filtering
+
   # tendon
   m.tendon_adr = wp.array(mjm.tendon_adr, dtype=wp.int32, ndim=1)
   m.tendon_num = wp.array(mjm.tendon_num, dtype=wp.int32, ndim=1)
