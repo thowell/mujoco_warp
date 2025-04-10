@@ -116,8 +116,8 @@ def _efc_equality_connect(
   """Calculates constraint rows for connect equality constraints."""
 
   worldid, i_eq_connect_adr = wp.tid()
-  i_eq = m.eq_connect_adr[i_eq_connect_adr]  # TODO
-  if not d.eq_active[worldid, i_eq]:  # TODO: not there.
+  i_eq = m.eq_connect_adr[i_eq_connect_adr]
+  if not d.eq_active[worldid, i_eq]:
     return
 
   efcid = wp.atomic_add(d.nefc, 0, 3)
