@@ -72,6 +72,22 @@ class SmoothTest(parameterized.TestCase):
     _assert_eq(d.cinert.numpy()[0], mjd.cinert, "cinert")
     _assert_eq(d.cdof.numpy()[0], mjd.cdof, "cdof")
 
+  def test_camlight(self):
+    """Tests camlight."""
+    _, mjd, m, d = test_util.fixture("pendula.xml")
+
+    d.cam_xpos.zero_()
+    d.cam_xmat.zero_()
+    d.light_xpos.zero_()
+    d.light_xdir.zero_()
+
+    mjwarp.camlight(m, d)
+    _assert_eq(d.cam_xpos.numpy()[0], mjd.cam_xpos, "cam_xpos")
+    # import ipdb; ipdb.set_trace()
+    _assert_eq(d.cam_xmat.numpy()[0], mjd.cam_xmat.reshape((-1, 3, 3)), "cam_xmat")
+    _assert_eq(d.light_xpos.numpy()[0], mjd.light_xpos, "light_xpos")
+    _assert_eq(d.light_xdir.numpy()[0], mjd.light_xdir, "light_xdir")
+
   @parameterized.parameters(True, False)
   def test_crb(self, sparse: bool):
     """Tests crb."""
@@ -126,9 +142,10 @@ class SmoothTest(parameterized.TestCase):
     mjwarp.solve_m(m, d, d.qacc_smooth, d.qfrc_smooth)
     _assert_eq(d.qacc_smooth.numpy()[0], qacc_smooth[0], "qacc_smooth")
 
-  def test_rne(self):
+  @parameterized.parameters(True, False)
+  def test_rne(self, gravity):
     """Tests rne."""
-    _, mjd, m, d = test_util.fixture("pendula.xml")
+    _, mjd, m, d = test_util.fixture("pendula.xml", gravity=gravity)
 
     d.qfrc_bias.zero_()
 
@@ -136,6 +153,30 @@ class SmoothTest(parameterized.TestCase):
     _assert_eq(d.qfrc_bias.numpy()[0], mjd.qfrc_bias, "qfrc_bias")
 
     # TODO(team): test DisableBit.GRAVITY
+
+  @parameterized.parameters(True, False)
+  def test_rne_postconstraint(self, gravity):
+    """Tests rne_postconstraint."""
+    # TODO(team): test: contact, equality constraints
+    mjm, mjd, m, d = test_util.fixture("pendula.xml", gravity=gravity)
+
+    mjd.xfrc_applied = np.random.uniform(
+      low=-0.01, high=0.01, size=mjd.xfrc_applied.shape
+    )
+    d.xfrc_applied = wp.array(
+      np.expand_dims(mjd.xfrc_applied, axis=0), dtype=wp.spatial_vector
+    )
+
+    mujoco.mj_rnePostConstraint(mjm, mjd)
+
+    for arr in (d.cacc, d.cfrc_int, d.cfrc_ext):
+      arr.zero_()
+
+    mjwarp.rne_postconstraint(m, d)
+
+    _assert_eq(d.cacc.numpy()[0], mjd.cacc, "cacc")
+    _assert_eq(d.cfrc_int.numpy()[0][1:], mjd.cfrc_int[1:], "cfrc_int")
+    _assert_eq(d.cfrc_ext.numpy()[0], mjd.cfrc_ext, "cfrc_ext")
 
   def test_com_vel(self):
     """Tests com_vel."""
@@ -180,6 +221,48 @@ class SmoothTest(parameterized.TestCase):
 
     _assert_eq(d.subtree_linvel.numpy()[0], mjd.subtree_linvel, "subtree_linvel")
     _assert_eq(d.subtree_angmom.numpy()[0], mjd.subtree_angmom, "subtree_angmom")
+
+  def test_fixed_tendon(self):
+    """Tests fixed tendon."""
+    mjm, mjd, m, d = test_util.fixture(
+      xml="""
+      <mujoco>
+        <worldbody>
+          <body>
+            <joint name="joint0" type="hinge"/>
+            <geom type="sphere" size="0.1"/>
+            <body>
+              <joint name="joint1" type="hinge"/>
+              <geom type="sphere" size="0.1"/>
+              <body>
+                <joint name="joint2" type="hinge"/>
+                <geom type="sphere" size="0.1"/>
+              </body>
+            </body>
+          </body>
+        </worldbody>
+        <tendon>
+          <fixed>
+            <joint joint="joint0" coef=".25"/>
+            <joint joint="joint1" coef=".5"/>
+            <joint joint="joint2" coef=".75"/>
+          </fixed>
+        </tendon>
+        <keyframe>
+          <key qpos=".2 .4 .6"/>
+        </keyframe>
+      </mujoco>
+    """,
+      keyframe=0,
+    )
+
+    for arr in (d.ten_length, d.ten_J):
+      arr.zero_()
+
+    mjwarp.tendon(m, d)
+
+    _assert_eq(d.ten_length.numpy()[0], mjd.ten_length, "ten_length")
+    _assert_eq(d.ten_J.numpy()[0], mjd.ten_J.reshape((mjm.ntendon, mjm.nv)), "ten_J")
 
 
 if __name__ == "__main__":

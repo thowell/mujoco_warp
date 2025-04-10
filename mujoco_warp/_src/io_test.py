@@ -19,9 +19,10 @@ import mujoco
 import numpy as np
 import warp as wp
 from absl.testing import absltest
-from etils import epath
 
 import mujoco_warp as mjwarp
+
+from . import test_util
 
 
 class IOTest(absltest.TestCase):
@@ -72,23 +73,7 @@ class IOTest(absltest.TestCase):
 
     # TODO(team): flex
 
-  def test_sensor(self):
-    mjm = mujoco.MjModel.from_xml_string("""
-      <mujoco>
-        <worldbody>
-          <body>
-            <geom type="sphere" size=".1"/>
-            <joint name="slide" type="slide"/>
-          </body>
-        </worldbody>   
-        <sensor>
-          <jointpos joint="slide"/>                      
-        </sensor> 
-      </mujoco>
-    """)
-
-    with self.assertRaises(NotImplementedError):
-      mjwarp.put_model(mjm)
+  # TODO(team): sensors
 
   def test_tendon(self):
     mjm = mujoco.MjModel.from_xml_string("""
@@ -138,11 +123,9 @@ class IOTest(absltest.TestCase):
       mjwarp.put_model(mjm)
 
   def test_dense(self):
-    path = epath.resource_path("mujoco_warp") / "test_data/humanoid/n_humanoids.xml"
-    mjm = mujoco.MjModel.from_xml_path(path.as_posix())
-
     with self.assertRaises(ValueError):
-      mjwarp.put_model(mjm)
+      # dense not supported yet for large nv
+      test_util.fixture("humanoid/n_humanoids.xml")
 
   def test_actuator_trntype(self):
     mjm = mujoco.MjModel.from_xml_string("""
@@ -244,6 +227,38 @@ class IOTest(absltest.TestCase):
 
     with self.assertRaises(NotImplementedError):
       mjwarp.put_model(mjm)
+
+  def test_get_data_into_m(self):
+    mjm = mujoco.MjModel.from_xml_string("""
+      <mujoco>
+        <worldbody>
+          <body pos="0 0 0" >
+            <geom type="box" pos="0 0 0" size=".5 .5 .5" />
+            <joint type="hinge" />
+          </body>
+          <body pos="0 0 0.1">
+            <geom type="sphere" size="0.5"/>
+            <freejoint/>
+          </body>
+        </worldbody>
+      </mujoco>
+    """)
+
+    mjd = mujoco.MjData(mjm)
+    mujoco.mj_forward(mjm, mjd)
+
+    mjd_ref = mujoco.MjData(mjm)
+    mujoco.mj_forward(mjm, mjd_ref)
+
+    m = mjwarp.put_model(mjm)
+    d = mjwarp.put_data(mjm, mjd)
+
+    mjd.qLD.fill(-123)
+    mjd.qM.fill(-123)
+
+    mjwarp.get_data_into(mjd, mjm, d)
+    np.testing.assert_allclose(mjd.qLD, mjd_ref.qLD)
+    np.testing.assert_allclose(mjd.qM, mjd_ref.qM)
 
   def test_option_physical_constants(self):
     mjm = mujoco.MjModel.from_xml_string("""

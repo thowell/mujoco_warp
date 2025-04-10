@@ -13,6 +13,8 @@
 # limitations under the License.
 # ==============================================================================
 
+from typing import Tuple
+
 import warp as wp
 
 from . import types
@@ -81,7 +83,7 @@ def _jac(
   bodyid: wp.int32,
   dofid: wp.int32,
   worldid: wp.int32,
-):
+) -> Tuple[wp.float32, wp.float32]:
   dof_bodyid = m.dof_bodyid[dofid]
   in_tree = int(dof_bodyid == 0)
   parentid = bodyid
@@ -91,12 +93,19 @@ def _jac(
       break
     parentid = m.body_parentid[parentid]
 
+  if not in_tree:
+    return 0.0, 0.0
+
   offset = point - wp.vec3(d.subtree_com[worldid, m.body_rootid[bodyid]])
 
   cdof = d.cdof[worldid, dofid]
-  jac = wp.spatial_bottom(cdof) + wp.cross(wp.spatial_top(cdof), offset)
+  cdof_ang = wp.spatial_top(cdof)
+  cdof_lin = wp.spatial_bottom(cdof)
 
-  return jac[xyz] * float(in_tree)
+  jacp_xyz = (cdof_lin + wp.cross(cdof_ang, offset))[xyz]
+  jacr_xyz = cdof_ang[xyz]
+
+  return jacp_xyz, jacr_xyz
 
 
 @wp.kernel
@@ -152,14 +161,9 @@ def _efc_contact_pyramidal(
 
   condim = d.contact.dim[conid]
 
-  # TODO(team): condim=4, condim=6
-  if condim != 1 and condim != 3:
-    return
-
   if condim == 1 and dimid > 0:
     return
-
-  if condim == 3 and dimid > 3:
+  elif dimid >= 2 * (condim - 1):
     return
 
   includemargin = d.contact.includemargin[conid]
@@ -195,14 +199,18 @@ def _efc_contact_pyramidal(
       J = float(0.0)
       Ji = float(0.0)
       for xyz in range(3):
-        jac1p = _jac(m, d, con_pos, xyz, body1, i, worldid)
-        jac2p = _jac(m, d, con_pos, xyz, body2, i, worldid)
-        jac_dif = jac2p - jac1p
+        jac1p, jac1r = _jac(m, d, con_pos, xyz, body1, i, worldid)
+        jac2p, jac2r = _jac(m, d, con_pos, xyz, body2, i, worldid)
+        jacp_dif = jac2p - jac1p
 
-        J += frame[0, xyz] * jac_dif
+        J += frame[0, xyz] * jacp_dif
 
         if condim > 1:
-          Ji += frame[dimid2, xyz] * jac_dif
+          if dimid2 < 3:
+            Ji += frame[dimid2, xyz] * jacp_dif
+          else:
+            jacr_dif = jac2r - jac1r
+            Ji += frame[dimid2 - 3, xyz] * jacr_dif
 
       if condim > 1:
         if dimid % 2 == 0:
@@ -221,6 +229,102 @@ def _efc_contact_pyramidal(
       pos,
       invweight,
       d.contact.solref[conid],
+      d.contact.solimp[conid],
+      includemargin,
+      refsafe,
+      Jqvel,
+    )
+
+
+@wp.kernel
+def _efc_contact_elliptic(
+  m: types.Model,
+  d: types.Data,
+  refsafe: bool,
+):
+  conid, dimid = wp.tid()
+
+  if conid >= d.ncon[0]:
+    return
+
+  condim = d.contact.dim[conid]
+
+  if condim == 1 and dimid > 0:
+    return
+
+  if condim == 3 and dimid > 2:
+    return
+
+  # TODO(team): condim=4
+  if condim == 4:
+    return
+
+  # TODO(team): condim=6
+  if condim == 6:
+    return
+
+  includemargin = d.contact.includemargin[conid]
+  pos = d.contact.dist[conid] - includemargin
+  active = pos < 0.0
+
+  if active:
+    efcid = wp.atomic_add(d.nefc, 0, 1)
+    worldid = d.contact.worldid[conid]
+    d.efc.worldid[efcid] = worldid
+    d.contact.efc_address[conid, dimid] = efcid
+
+    geom = d.contact.geom[conid]
+    body1 = m.geom_bodyid[geom[0]]
+    body2 = m.geom_bodyid[geom[1]]
+
+    cpos = d.contact.pos[conid]
+    frame = d.contact.frame[conid]
+
+    # TODO(team): parallelize J and Jqvel computation?
+    Jqvel = float(0.0)
+    for i in range(m.nv):
+      J = float(0.0)
+      for xyz in range(3):
+        jac1p, _ = _jac(m, d, cpos, xyz, body1, i, worldid)
+        jac2p, _ = _jac(m, d, cpos, xyz, body2, i, worldid)
+        jac_dif = jac2p - jac1p
+        J += frame[dimid, xyz] * jac_dif
+
+      d.efc.J[efcid, i] = J
+      Jqvel += J * d.qvel[worldid, i]
+
+    invweight = m.body_invweight0[body1, 0] + m.body_invweight0[body2, 0]
+
+    ref = d.contact.solref[conid]
+    pos_aref = pos
+
+    if dimid > 0:
+      solreffriction = d.contact.solreffriction[conid]
+
+      # non-normal directions use solreffriction (if non-zero)
+      if solreffriction[0] or solreffriction[1]:
+        ref = solreffriction
+
+      # TODO(team): precompute 1 / impratio
+      invweight = invweight / m.opt.impratio
+      friction = d.contact.friction[conid]
+
+      if dimid > 1:
+        fri0 = friction[0]
+        frii = friction[dimid - 1]
+        fri = fri0 * fri0 / (frii * frii)
+        invweight *= fri
+
+      pos_aref = 0.0
+
+    _update_efc_row(
+      m,
+      d,
+      efcid,
+      pos_aref,
+      pos,
+      invweight,
+      ref,
       d.contact.solimp[conid],
       includemargin,
       refsafe,
@@ -253,9 +357,11 @@ def make_constraint(m: types.Model, d: types.Data):
       if m.opt.cone == types.ConeType.PYRAMIDAL.value:
         wp.launch(
           _efc_contact_pyramidal,
-          dim=(d.nconmax, 4),
+          dim=(d.nconmax, 2 * (m.condim_max - 1)),
           inputs=[m, d, refsafe],
         )
+      elif m.opt.cone == types.ConeType.ELLIPTIC.value:
+        wp.launch(_efc_contact_elliptic, dim=(d.nconmax, 3), inputs=[m, d, refsafe])
 
         # TODO(team): condim=4
         # TODO(team): condim=6
