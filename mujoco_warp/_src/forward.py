@@ -509,7 +509,9 @@ def fwd_velocity(m: Model, d: Data):
       ten_velocity_tile = wp.tile_reduce(wp.add, ten_J_qvel_tile)
       wp.tile_store(d.ten_velocity[worldid], ten_velocity_tile)
 
-    wp.launch_tiled(_tendon_velocity, dim=(d.nworld, m.ntendon), inputs=[d], block_dim=32)
+    wp.launch_tiled(
+      _tendon_velocity, dim=(d.nworld, m.ntendon), inputs=[d], block_dim=32
+    )
 
   smooth.com_vel(m, d)
   passive.passive(m, d)
