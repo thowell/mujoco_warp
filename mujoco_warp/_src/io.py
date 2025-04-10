@@ -226,10 +226,15 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
       tile_beg = tile_corners[i]
       tile_end = mjm.nv if i == len(tile_corners) - 1 else tile_corners[i + 1]
       tiles.setdefault(tile_end - tile_beg, []).append(tile_beg)
-    qLD_tile = np.concatenate([tiles[sz] for sz in sorted(tiles.keys())])
-    tile_off = [0] + [len(tiles[sz]) for sz in sorted(tiles.keys())]
-    qLD_tileadr = np.cumsum(tile_off)[:-1]
-    qLD_tilesize = np.array(sorted(tiles.keys()))
+    if tiles:
+      qLD_tile = np.concatenate([tiles[sz] for sz in sorted(tiles.keys())])
+      tile_off = [0] + [len(tiles[sz]) for sz in sorted(tiles.keys())]
+      qLD_tileadr = np.cumsum(tile_off)[:-1]
+      qLD_tilesize = np.array(sorted(tiles.keys()))
+    else:
+      qLD_tile = np.array([], dtype=int)
+      qLD_tileadr = np.array([], dtype=int) 
+      qLD_tilesize = np.array([], dtype=int)
 
   # tiles for actuator_moment - needs nu + nv tile size and offset
   actuator_moment_offset_nv = np.empty(shape=(0,), dtype=int)
