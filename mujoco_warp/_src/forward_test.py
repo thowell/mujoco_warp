@@ -51,6 +51,14 @@ class ForwardTest(parameterized.TestCase):
     )
     _assert_eq(d.qfrc_bias.numpy()[0], mjd.qfrc_bias, "qfrc_bias")
 
+  def test_fwd_velocity_tendon(self):
+    _, mjd, m, d = test_util.fixture("tendon.xml", sparse=False)
+
+    d.ten_velocity.zero_()
+    mjwarp.fwd_velocity(m, d)
+
+    _assert_eq(d.ten_velocity.numpy()[0], mjd.ten_velocity, "ten_velocity")
+
   @parameterized.parameters(True, False)
   def test_fwd_actuation(self, is_sparse):
     mjm, mjd, m, d = test_util.fixture("actuation.xml", kick=True)

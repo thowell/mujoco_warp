@@ -582,6 +582,23 @@ def fwd_velocity(m: Model, d: Data):
           int(actuator_moment_tilesize_nv[i]),
         )
 
+  if m.ntendon > 0:
+    # TODO(team): sparse version
+    NV = m.nv
+
+    @kernel
+    def _tendon_velocity(d: Data):
+      worldid, tenid = wp.tid()
+      ten_J_tile = wp.tile_load(d.ten_J[worldid, tenid], shape=NV)
+      qvel_tile = wp.tile_load(d.qvel[worldid], shape=NV)
+      ten_J_qvel_tile = wp.tile_map(wp.mul, ten_J_tile, qvel_tile)
+      ten_velocity_tile = wp.tile_reduce(wp.add, ten_J_qvel_tile)
+      wp.tile_store(d.ten_velocity[worldid], ten_velocity_tile)
+
+    wp.launch_tiled(
+      _tendon_velocity, dim=(d.nworld, m.ntendon), inputs=[d], block_dim=32
+    )
+
   smooth.com_vel(m, d)
   passive.passive(m, d)
   smooth.rne(m, d)

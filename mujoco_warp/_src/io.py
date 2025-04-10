@@ -574,6 +574,7 @@ def make_data(
   d.cinert = wp.zeros((nworld, mjm.nbody), dtype=types.vec10)
   d.cdof = wp.zeros((nworld, mjm.nv), dtype=wp.spatial_vector)
   d.ctrl = wp.zeros((nworld, mjm.nu), dtype=wp.float32)
+  d.ten_velocity = wp.zeros((nworld, mjm.ntendon), dtype=wp.float32)
   d.actuator_velocity = wp.zeros((nworld, mjm.nu), dtype=wp.float32)
   d.actuator_force = wp.zeros((nworld, mjm.nu), dtype=wp.float32)
   d.actuator_length = wp.zeros((nworld, mjm.nu), dtype=wp.float32)
@@ -755,6 +756,7 @@ def put_data(
   d.qLD = wp.array(tile(qLD), dtype=wp.float32, ndim=3)
   d.qLDiagInv = wp.array(tile(mjd.qLDiagInv), dtype=wp.float32, ndim=2)
   d.ctrl = wp.array(tile(mjd.ctrl), dtype=wp.float32, ndim=2)
+  d.ten_velocity = wp.array(tile(mjd.ten_velocity), dtype=wp.float32, ndim=2)
   d.actuator_velocity = wp.array(tile(mjd.actuator_velocity), dtype=wp.float32, ndim=2)
   d.actuator_force = wp.array(tile(mjd.actuator_force), dtype=wp.float32, ndim=2)
   d.actuator_length = wp.array(tile(mjd.actuator_length), dtype=wp.float32, ndim=2)
@@ -968,6 +970,7 @@ def get_data_into(
   result.crb = d.crb.numpy()[0]
   result.qLDiagInv = d.qLDiagInv.numpy()[0]
   result.ctrl = d.ctrl.numpy()[0]
+  result.ten_velocity = d.ten_velocity.numpy()[0]
   result.actuator_velocity = d.actuator_velocity.numpy()[0]
   result.actuator_force = d.actuator_force.numpy()[0]
   result.actuator_length = d.actuator_length.numpy()[0]
