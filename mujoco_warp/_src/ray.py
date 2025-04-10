@@ -368,54 +368,8 @@ def _ray_geom(
 
 
 @wp.func
-def _ray_filter(
-    m: Model,
-    geom_id: int,
-    geomgroup: wp.vec6,
-    flg_static: bool,
-    bodyexclude: int,
-) -> bool:
-    """Returns whether a geom should be included in ray collision detection.
-
-    Args:
-        m: MuJoCo model
-        geom_id: ID of geom to test
-        geomgroup: 6-element array of bits that determines which geom groups to include
-        flg_static: whether to include static geoms
-        bodyexclude: which body's geoms to exclude
-
-    Returns:
-        bool: whether the geom should be included
-    """
-    # Check geomgroup
-    if geomgroup[0] != 0 or geomgroup[1] != 0 or geomgroup[2] != 0 or \
-       geomgroup[3] != 0 or geomgroup[4] != 0 or geomgroup[5] != 0:
-        # At least one group is enabled, check if geom belongs to any enabled group
-        contype = m.geom_contype[geom_id]
-        conaffinity = m.geom_conaffinity[geom_id]
-        mask = False
-        for i in range(6):
-            mask = mask or (((contype >> i) & 1) and geomgroup[i] != 0)
-            mask = mask or (((conaffinity >> i) & 1) and geomgroup[i] != 0)
-        if not mask:
-            return False
-
-    # Check flg_static
-    if not flg_static:
-        bodyid = m.geom_bodyid[geom_id]
-        if bodyid == 0:  # World body is static
-            return False
-
-    # Check bodyexclude
-    if bodyexclude >= 0:
-        bodyid = m.geom_bodyid[geom_id]
-        if bodyid == bodyexclude:
-            return False
-
-    return True
-
-@wp.func
 def _ray_all_geom(
+    worldid: int,
     m: Model, 
     d: Data,
     pnt: wp.vec3,
@@ -424,26 +378,19 @@ def _ray_all_geom(
     dist: wp.array(dtype=float),
     closest_hit_geom_id: wp.array(dtype=int),
     num_threads: int,
-    geomgroup: wp.vec6,
-    flg_static: bool,
-    bodyexclude: int,
+    tid: int,
 ):
     ngeom = m.ngeom
-    tid = wp.tid()
     
     min_val = wp.float32(wp.inf)
     min_idx = wp.int32(-1)
 
     for geom_id in range(tid, ngeom, num_threads):
-        # Apply filtering
-        if not _ray_filter(m, geom_id, geomgroup, flg_static, bodyexclude):
-            continue
-
         # Get ray in local coordinates
-        pos = d.geom_xpos[geom_id]
-        rot = d.geom_xmat[geom_id]
-        local_pnt = wp.transform_point(wp.inverse(rot), pnt - pos)
-        local_vec = wp.transform_vector(wp.inverse(rot), vec)
+        pos = d.geom_xpos[worldid, geom_id]
+        rot = d.geom_xmat[worldid, geom_id]
+        local_pnt = wp.transform_point(wp.transpose(rot), pnt - pos)
+        local_vec = wp.transform_vector(wp.transpose(rot), vec)
 
         # Calculate intersection distance
         cur_dist = _ray_geom(m, d, geom_id, local_pnt, local_vec)
@@ -468,21 +415,16 @@ def _ray_all_geom_kernel(
     intersection_id: int,
     dist: wp.array(dtype=float),
     closest_hit_geom_id: wp.array(dtype=int),
-    num_threads: int,
-    geomgroup: wp.vec6,
-    flg_static: bool,
-    bodyexclude: int,
+    num_threads: int,    
 ):
-    _ray_all_geom(m, d, pnt, vec, intersection_id, dist, closest_hit_geom_id, num_threads, geomgroup, flg_static, bodyexclude)
+    tid = wp.tid()
+    _ray_all_geom(m, d, pnt, vec, intersection_id, dist, closest_hit_geom_id, num_threads, tid)
 
 def ray_geom(
     m: Model,
     d: Data,
     pnt: wp.vec3,
     vec: wp.vec3,
-    geomgroup: wp.vec6 = wp.vec6(0, 0, 0, 0, 0, 0),
-    flg_static: bool = True,
-    bodyexclude: int = -1,
 ) -> tuple[float, int]:
     """Returns the distance at which a ray intersects with a primitive geom.
 
@@ -491,9 +433,6 @@ def ray_geom(
         d: MuJoCo data
         pnt: ray origin point
         vec: ray direction
-        geomgroup: 6-element array of bits that determines which geom groups to include
-        flg_static: whether to include static geoms
-        bodyexclude: which body's geoms to exclude (-1 for none)
 
     Returns:
         dist: distance from ray origin to geom surface
@@ -505,7 +444,7 @@ def ray_geom(
     wp.launch_tiled(
         _ray_all_geom_kernel,
         dim=num_threads,
-        inputs=[m, d, pnt, vec, 0, dist, closest_hit_geom_id, num_threads, geomgroup, flg_static, bodyexclude],
+        inputs=[m, d, pnt, vec, 0, dist, closest_hit_geom_id, num_threads],
         block_dim=num_threads
     )
     return dist.numpy()[0], closest_hit_geom_id.numpy()[0]
