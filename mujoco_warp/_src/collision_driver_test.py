@@ -124,6 +124,51 @@ class CollisionTest(parameterized.TestCase):
           </worldbody>
         </mujoco>
         """,
+    "sphere_cylinder_corner": """
+        <mujoco>
+          <worldbody>
+            <body>
+              <joint type="slide" axis="1 0 0"/>
+              <joint type="slide" axis="0 1 0"/>
+              <joint type="slide" axis="0 0 1"/>
+              <geom size="0.1" type="sphere" pos=".33 0 0"/>
+            </body>
+            <body>
+              <geom size="0.15 0.2" type="cylinder" euler="30 45 0"/>
+            </body>
+          </worldbody>
+        </mujoco>
+        """,
+    "sphere_cylinder_cap": """
+        <mujoco>
+          <worldbody>
+            <body>
+              <joint type="slide" axis="1 0 0"/>
+              <joint type="slide" axis="0 1 0"/>
+              <joint type="slide" axis="0 0 1"/>
+              <geom size="0.1" type="sphere" pos=".26 -.14 .1"/>
+            </body>
+            <body>
+              <geom size="0.15 0.2" type="cylinder" euler="30 45 0"/>
+            </body>
+          </worldbody>
+        </mujoco>
+        """,
+    "sphere_cylinder_side": """
+        <mujoco>
+          <worldbody>
+            <body>
+              <joint type="slide" axis="1 0 0"/>
+              <joint type="slide" axis="0 1 0"/>
+              <joint type="slide" axis="0 0 1"/>
+              <geom size="0.1" type="sphere" pos="0 -.26 0"/>
+            </body>
+            <body>
+              <geom size="0.15 0.2" type="cylinder" euler="30 45 0"/>
+            </body>
+          </worldbody>
+        </mujoco>
+        """,
     "plane_cylinder_1": """
         <mujoco>
           <worldbody>
