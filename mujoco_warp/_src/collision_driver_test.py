@@ -165,7 +165,7 @@ class CollisionTest(parameterized.TestCase):
               <freejoint/>
             </body>
             <body pos="-0.6 -0.6 0.7">
-              <geom type="sphere" size="0.5 0.8"/>
+              <geom type="sphere" size="0.5"/>
               <freejoint/>
             </body>
           </worldbody>
