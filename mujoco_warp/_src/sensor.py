@@ -31,6 +31,11 @@ def _joint_pos(m: Model, d: Data, worldid: int, objid: int) -> wp.float32:
 
 
 @wp.func
+def _tendon_pos(m: Model, d: Data, worldid: int, objid: int) -> wp.float32:
+  return d.ten_length[worldid, objid]
+
+
+@wp.func
 def _actuator_length(m: Model, d: Data, worldid: int, objid: int) -> wp.float32:
   return d.actuator_length[worldid, objid]
 
@@ -174,6 +179,8 @@ def sensor_pos(m: Model, d: Data):
 
     if sensortype == int(SensorType.JOINTPOS.value):
       d.sensordata[worldid, adr] = _joint_pos(m, d, worldid, objid)
+    elif sensortype == int(SensorType.TENDONPOS.value):
+      d.sensordata[worldid, adr] = _tendon_pos(m, d, worldid, objid)
     elif sensortype == int(SensorType.ACTUATORPOS.value):
       d.sensordata[worldid, adr] = _actuator_length(m, d, worldid, objid)
     elif sensortype == int(SensorType.BALLQUAT.value):
@@ -254,6 +261,11 @@ def _joint_vel(m: Model, d: Data, worldid: int, objid: int) -> wp.float32:
 
 
 @wp.func
+def _tendon_vel(m: Model, d: Data, worldid: int, objid: int) -> wp.float32:
+  return d.ten_velocity[worldid, objid]
+
+
+@wp.func
 def _actuator_vel(m: Model, d: Data, worldid: int, objid: int) -> wp.float32:
   return d.actuator_velocity[worldid, objid]
 
@@ -292,6 +304,8 @@ def sensor_vel(m: Model, d: Data):
       d.sensordata[worldid, adr + 2] = gyro[2]
     elif sensortype == int(SensorType.JOINTVEL.value):
       d.sensordata[worldid, adr] = _joint_vel(m, d, worldid, objid)
+    elif sensortype == int(SensorType.TENDONVEL.value):
+      d.sensordata[worldid, adr] = _tendon_vel(m, d, worldid, objid)
     elif sensortype == int(SensorType.ACTUATORVEL.value):
       d.sensordata[worldid, adr] = _actuator_vel(m, d, worldid, objid)
     elif sensortype == int(SensorType.BALLANGVEL.value):

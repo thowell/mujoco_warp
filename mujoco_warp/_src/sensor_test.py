@@ -125,6 +125,17 @@ class SensorTest(parameterized.TestCase):
 
     _assert_eq(d.sensordata.numpy()[0], mjd.sensordata, "sensordata")
 
+  def test_tendon_sensor(self):
+    """Test tendon sensors."""
+    _, mjd, m, d = test_util.fixture("tendon.xml", keyframe=0, sparse=False)
+
+    d.sensordata.zero_()
+
+    mjwarp.sensor_pos(m, d)
+    mjwarp.sensor_vel(m, d)
+
+    _assert_eq(d.sensordata.numpy()[0], mjd.sensordata, "sensordata")
+
 
 if __name__ == "__main__":
   wp.init()

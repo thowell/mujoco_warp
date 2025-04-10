@@ -221,6 +221,7 @@ class SensorType(enum.IntEnum):
 
   Members:
     JOINTPOS: joint position
+    TENDONPOS: scalar tendon position
     ACTUATORPOS: actuator position
     BALLQUAT: ball joint orientation
     FRAMEPOS: frame position
@@ -232,6 +233,7 @@ class SensorType(enum.IntEnum):
     VELOCIMETER: 3D linear velocity, in local frame
     GYRO: 3D angular velocity, in local frame
     JOINTVEL: joint velocity
+    TENDONVEL: scalar tendon velocity
     ACTUATORVEL: actuator velocity
     BALLANGVEL: ball joint angular velocity
     ACTUATORFRC: scalar actuator force
@@ -239,6 +241,7 @@ class SensorType(enum.IntEnum):
   """
 
   JOINTPOS = mujoco.mjtSensor.mjSENS_JOINTPOS
+  TENDONPOS = mujoco.mjtSensor.mjSENS_TENDONPOS
   ACTUATORPOS = mujoco.mjtSensor.mjSENS_ACTUATORPOS
   BALLQUAT = mujoco.mjtSensor.mjSENS_BALLQUAT
   FRAMEPOS = mujoco.mjtSensor.mjSENS_FRAMEPOS
@@ -250,6 +253,7 @@ class SensorType(enum.IntEnum):
   VELOCIMETER = mujoco.mjtSensor.mjSENS_VELOCIMETER
   GYRO = mujoco.mjtSensor.mjSENS_GYRO
   JOINTVEL = mujoco.mjtSensor.mjSENS_JOINTVEL
+  TENDONVEL = mujoco.mjtSensor.mjSENS_TENDONVEL
   ACTUATORVEL = mujoco.mjtSensor.mjSENS_ACTUATORVEL
   BALLANGVEL = mujoco.mjtSensor.mjSENS_BALLANGVEL
   ACTUATORFRC = mujoco.mjtSensor.mjSENS_ACTUATORFRC
