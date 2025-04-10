@@ -101,7 +101,7 @@ def _jac(
   cdof_ang = wp.spatial_top(cdof)
   cdof_lin = wp.spatial_bottom(cdof)
 
-  jacp = (cdof_lin + wp.cross(cdof_ang, offset))
+  jacp = cdof_lin + wp.cross(cdof_ang, offset)
   jacr = cdof_ang
 
   return jacp, jacr
