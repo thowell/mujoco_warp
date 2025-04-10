@@ -60,8 +60,8 @@ class ForwardTest(parameterized.TestCase):
     _assert_eq(d.ten_velocity.numpy()[0], mjd.ten_velocity, "ten_velocity")
 
   @parameterized.parameters(True, False)
-  def test_fwd_actuation(self, is_sparse):
-    mjm, mjd, m, d = test_util.fixture("actuation.xml", kick=True)
+  def test_fwd_actuation(self, sparse):
+    mjm, mjd, m, d = test_util.fixture("actuation.xml", kick=True, sparse=sparse)
 
     mujoco.mj_fwdActuation(mjm, mjd)
 
