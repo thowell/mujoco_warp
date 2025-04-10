@@ -22,8 +22,8 @@ from absl.testing import parameterized
 
 import mujoco_warp as mjwarp
 
-from .types import ConeType
 from . import test_util
+from .types import ConeType
 
 # tolerance for difference between MuJoCo and MJWarp constraint calculations,
 # mostly due to float precision
