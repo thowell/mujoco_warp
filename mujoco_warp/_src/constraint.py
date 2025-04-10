@@ -110,8 +110,10 @@ def _efc_friction(
   refsafe: bool,
 ):
   # TODO(team): tendon
-  worldid, frictionid = wp.tid()
-  dofid = m.dof_frictionloss_adr[frictionid]
+  worldid, dofid = wp.tid()
+
+  if m.dof_frictionloss[dofid] <= 0.0:
+    return
 
   efcid = wp.atomic_add(d.nefc, 0, 1)
   wp.atomic_add(d.nf, 0, 1)
@@ -259,12 +261,10 @@ def make_constraint(m: types.Model, d: types.Data):
 
     refsafe = not m.opt.disableflags & types.DisableBit.REFSAFE.value
 
-    if not (m.opt.disableflags & types.DisableBit.FRICTIONLOSS.value) and (
-      m.dof_frictionloss_adr.size > 0
-    ):
+    if not (m.opt.disableflags & types.DisableBit.FRICTIONLOSS.value):
       wp.launch(
         _efc_friction,
-        dim=(d.nworld, m.dof_frictionloss_adr.size),
+        dim=(d.nworld, m.nv),
         inputs=[m, d, refsafe],
       )
 

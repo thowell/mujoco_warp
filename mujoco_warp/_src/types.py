@@ -449,7 +449,6 @@ class Model:
     dof_damping: damping coefficient                         (nv,)
     dof_invweight0: diag. inverse inertia in qpos0           (nv,)
     dof_frictionloss: dof friction loss                      (nv,)
-    dof_frictionloss_adr: address for active friction loss   (nv,)
     dof_solimp: constraint solver impedance: frictionloss    (nv, NIMP)
     dof_solref: constraint solver reference: frictionloss    (nv, NREF)
     dof_tri_row: np.tril_indices                             (mjm.nv)[0]
@@ -575,7 +574,6 @@ class Model:
   dof_damping: wp.array(dtype=wp.float32, ndim=1)
   dof_invweight0: wp.array(dtype=wp.float32, ndim=1)
   dof_frictionloss: wp.array(dtype=wp.float32, ndim=1)
-  dof_frictionloss_adr: wp.array(dtype=wp.int32, ndim=1)
   dof_solimp: wp.array(dtype=vec5, ndim=1)
   dof_solref: wp.array(dtype=wp.vec2, ndim=1)
   dof_tri_row: wp.array(dtype=wp.int32, ndim=1)  # warp only
