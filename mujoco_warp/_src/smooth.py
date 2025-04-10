@@ -19,11 +19,11 @@ from packaging import version
 
 from . import math
 from . import support
+from .types import MJ_MINVAL
 from .types import CamLightType
 from .types import Data
 from .types import DisableBit
 from .types import JointType
-from .types import MJ_MINVAL
 from .types import Model
 from .types import TrnType
 from .types import array2df
