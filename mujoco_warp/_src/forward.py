@@ -513,16 +513,18 @@ def fwd_velocity(m: Model, d: Data):
 
   if m.opt.is_sparse:
     # TODO(team): sparse version
-    d.actuator_velocity.zero_()
+    NV = m.nv
 
     @kernel
     def _actuator_velocity(d: Data):
-      worldid, actid, dofid = wp.tid()
-      moment = d.actuator_moment[worldid, actid]
-      qvel = d.qvel[worldid]
-      wp.atomic_add(d.actuator_velocity[worldid], actid, moment[dofid] * qvel[dofid])
+      worldid, actid = wp.tid()
+      moment_tile = wp.tile_load(d.actuator_moment[worldid, actid], shape=NV)
+      qvel_tile = wp.tile_load(d.qvel[worldid], shape=NV)
+      moment_qvel_tile = wp.tile_map(wp.mul, moment_tile, qvel_tile)
+      actuator_velocity_tile = wp.tile_reduce(wp.add, moment_qvel_tile)
+      wp.tile_store(d.actuator_velocity[worldid], actuator_velocity_tile)
 
-    wp.launch(_actuator_velocity, dim=(d.nworld, m.nu, m.nv), inputs=[d])
+    wp.launch_tiled(_actuator_velocity, dim=(d.nworld, m.nu), inputs=[d], block_dim=32)
   else:
 
     def actuator_velocity(
