@@ -33,6 +33,7 @@ def _update_efc_row(
   margin: wp.float32,
   refsafe: bool,
   Jqvel: float,
+  frictionloss: float,
 ):
   # Calculate kbi
   timeconst = solref[0]
@@ -71,6 +72,7 @@ def _update_efc_row(
   d.efc.aref[efcid] = -k * imp * pos_aref - b * Jqvel
   d.efc.pos[efcid] = pos_aref + margin
   d.efc.margin[efcid] = margin
+  d.efc.frictionloss[efcid] = frictionloss
 
 
 @wp.func
@@ -99,6 +101,40 @@ def _jac(
   )
 
   return jac[xyz] * float(in_tree)
+
+
+@wp.kernel
+def _efc_friction(
+  m: types.Model,
+  d: types.Data,
+  refsafe: bool,
+):
+  # TODO(team): tendon
+  worldid, frictionid = wp.tid()
+  dofid = m.dof_frictionloss_adr[frictionid]
+
+  efcid = wp.atomic_add(d.nefc, 0, 1)
+  wp.atomic_add(d.nf, 0, 1)
+  d.efc.worldid[efcid] = worldid
+
+  d.efc.J[efcid, dofid] = 1.0
+  Jqvel = d.qvel[worldid, dofid]
+
+  _update_efc_row(
+    m,
+    d,
+    worldid,
+    efcid,
+    0.0,
+    0.0,
+    m.dof_invweight0[dofid],
+    m.dof_solref[dofid],
+    m.dof_solimp[dofid],
+    0.0,
+    refsafe,
+    Jqvel,
+    m.dof_frictionloss[dofid],
+  )
 
 
 @wp.kernel
@@ -138,6 +174,7 @@ def _efc_limit_slide_hinge(
       m.jnt_margin[jntid],
       refsafe,
       Jqvel,
+      0.0,
     )
 
 
@@ -207,6 +244,7 @@ def _efc_contact_pyramidal(
       d.contact.includemargin[conid],
       refsafe,
       Jqvel,
+      0.0,
     )
 
 
@@ -216,9 +254,19 @@ def make_constraint(m: types.Model, d: types.Data):
 
   if not (m.opt.disableflags & types.DisableBit.CONSTRAINT.value):
     d.nefc.zero_()
+    d.nf.zero_()
     d.efc.J.zero_()
 
     refsafe = not m.opt.disableflags & types.DisableBit.REFSAFE.value
+
+    if not (m.opt.disableflags & types.DisableBit.FRICTIONLOSS.value) and (
+      m.dof_frictionloss_adr.size > 0
+    ):
+      wp.launch(
+        _efc_friction,
+        dim=(d.nworld, m.dof_frictionloss_adr.size),
+        inputs=[m, d, refsafe],
+      )
 
     if not (m.opt.disableflags & types.DisableBit.LIMIT.value) and (
       m.jnt_limited_slide_hinge_adr.size != 0

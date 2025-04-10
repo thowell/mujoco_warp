@@ -103,50 +103,40 @@ def _update_constraint(m: types.Model, d: types.Data):
     Jaref = d.efc.Jaref[efcid]
     efc_D = d.efc.D[efcid]
 
+    cost = 0.5 * efc_D * Jaref * Jaref
+    efc_force = -efc_D * Jaref
+
     ne = d.ne[0]
     nf = d.nf[0]
 
     if efcid < ne:
       # equality
-      active = True
-    elif efcid < ne + nf:
+      pass
+    elif efcid < ne + nf and wp.static(not DSBL_FLOSS):
       # friction
-      active = True
-    else:
-      # limits, contact
-      active = Jaref < 0.0
-
-    cost = 0.0
-    force = 0.0
-
-    if wp.static(m.dof_frictionloss_adr.size > 0 and (not DSBL_FLOSS)):
       f = d.efc.frictionloss[efcid]
-
       if f > 0.0:
-        r = _safe_div(1.0, efc_D)
-        rf = r * f
-
+        rf = _safe_div(f, efc_D)
         if Jaref <= -rf:
-          cost = -0.5 * rf - Jaref
-          force = f
-          active = False
+          d.efc.force[efcid] = f
+          d.efc.active[efcid] = False
+          wp.atomic_add(d.efc.cost, worldid, -0.5 * rf - Jaref)
+          return
         elif Jaref >= rf:
-          cost = -0.5 * rf + Jaref
-          force = -f
-          active = False
-
-    if active:
-      DJ = efc_D * Jaref
-      cost += 0.5 * DJ * Jaref
-      force -= DJ
-      d.efc.active[efcid] = True
+          d.efc.force[efcid] = -f
+          d.efc.active[efcid] = False
+          wp.atomic_add(d.efc.cost, worldid, -0.5 * rf + Jaref)
+          return
     else:
-      d.efc.active[efcid] = False
+      # limit, contact
+      if Jaref >= 0.0:
+        d.efc.force[efcid] = 0.0
+        d.efc.active[efcid] = False
+        return
 
-    d.efc.force[efcid] = force
-
-    if cost:
-      wp.atomic_add(d.efc.cost, worldid, cost)
+    d.efc.force[efcid] = efc_force
+    d.efc.active[efcid] = True
+    wp.atomic_add(d.efc.cost, worldid, cost)
 
   @kernel
   def _zero_qfrc_constraint(d: types.Data):
@@ -366,28 +356,12 @@ def _eval_pt(quad: wp.vec3, alpha: wp.float32) -> wp.vec3:
 
 
 @wp.func
-def _quad_floss(
-  quad: wp.vec3, floss: float, efc_D: float, Jaref: float, jv: float
-) -> wp.vec3:
-  if floss > 0.0:
-    r = _safe_div(1.0, efc_D)
-    rf = r * floss
-    if Jaref <= -rf:
-      return wp.vec3(floss * (-0.5 * rf - Jaref), -floss * jv, 0.0)
-    elif Jaref >= rf:
-      return wp.vec3(floss * (-0.5 * rf + Jaref), floss * jv, 0.0)
-
-  return quad
-
-
-@wp.func
 def _safe_div(x: wp.float32, y: wp.float32) -> wp.float32:
   return x / wp.where(y != 0.0, y, types.MJ_MINVAL)
 
 
 def _linesearch_iterative(m: types.Model, d: types.Data):
   ITERATIONS = m.opt.iterations
-  DSBL_FLOSS = m.opt.disableflags & types.DisableBit.FRICTIONLOSS
 
   @kernel
   def _gtol(m: types.Model, d: types.Data):
@@ -433,11 +407,6 @@ def _linesearch_iterative(m: types.Model, d: types.Data):
     quad = d.efc.quad[efcid]
     jv = d.efc.jv[efcid]
 
-    if wp.static(m.dof_frictionloss_adr.size > 0 and (not DSBL_FLOSS)):
-      floss = d.efc.frictionloss[efcid]
-      efc_D = d.efc.D[efcid]
-      quad = _quad_floss(quad, floss, efc_D, Jaref, jv)
-
     wp.atomic_add(p0, worldid, wp.vec3(quad[0], quad[1], 2.0 * quad[2]))
 
   @kernel
@@ -480,11 +449,6 @@ def _linesearch_iterative(m: types.Model, d: types.Data):
     quad = d.efc.quad[efcid]
     Jaref = d.efc.Jaref[efcid]
     jv = d.efc.jv[efcid]
-
-    if wp.static(m.dof_frictionloss_adr.size > 0 and (not DSBL_FLOSS)):
-      floss = d.efc.frictionloss[efcid]
-      efc_D = d.efc.D[efcid]
-      quad = _quad_floss(quad, floss, efc_D, Jaref, jv)
 
     if (Jaref + alpha * jv < 0.0) or (efcid < d.ne[0] + d.nf[0]):
       wp.atomic_add(lo, worldid, _eval_pt(quad, alpha))
@@ -585,11 +549,6 @@ def _linesearch_iterative(m: types.Model, d: types.Data):
     jv = d.efc.jv[efcid]
 
     nef_active = efcid < d.ne[0] + d.nf[0]
-
-    if wp.static(m.dof_frictionloss_adr.size > 0 and (not DSBL_FLOSS)):
-      floss = d.efc.frictionloss[efcid]
-      efc_D = d.efc.D[efcid]
-      quad = _quad_floss(quad, floss, efc_D, jaref, jv)
 
     alpha = lo_next_alpha[worldid]
     if (jaref + alpha * jv < 0.0) or nef_active:
@@ -735,7 +694,6 @@ def _linesearch_iterative(m: types.Model, d: types.Data):
 
 def _linesearch_parallel(m: types.Model, d: types.Data):
   ITERATIONS = m.opt.iterations
-  DSBL_FLOSS = m.opt.disableflags & types.DisableBit.FRICTIONLOSS
 
   @wp.kernel
   def _quad_total(m: types.Model, d: types.Data):
@@ -765,11 +723,6 @@ def _linesearch_parallel(m: types.Model, d: types.Data):
     Jaref = d.efc.Jaref[efcid]
     jv = d.efc.jv[efcid]
     quad = d.efc.quad[efcid]
-
-    if wp.static(m.dof_frictionloss_adr.size > 0 and (not DSBL_FLOSS)):
-      floss = d.efc.frictionloss[efcid]
-      efc_D = d.efc.D[efcid]
-      quad = _quad_floss(quad, floss, efc_D, Jaref, jv)
 
     alpha = m.alpha_candidate[alphaid]
 
@@ -818,6 +771,7 @@ def _linesearch_parallel(m: types.Model, d: types.Data):
 @event_scope
 def _linesearch(m: types.Model, d: types.Data):
   ITERATIONS = m.opt.iterations
+  DSBL_FLOSS = m.opt.disableflags & types.DisableBit.FRICTIONLOSS
 
   @kernel
   def _zero_jv(d: types.Data):
@@ -888,11 +842,20 @@ def _linesearch(m: types.Model, d: types.Data):
     Jaref = d.efc.Jaref[efcid]
     jv = d.efc.jv[efcid]
     efc_D = d.efc.D[efcid]
-    quad = wp.vec3()
-    quad[0] = 0.5 * Jaref * Jaref * efc_D
-    quad[1] = jv * Jaref * efc_D
-    quad[2] = 0.5 * jv * jv * efc_D
-    d.efc.quad[efcid] = quad
+    floss = d.efc.frictionloss[efcid]
+
+    if floss > 0.0 and wp.static(not DSBL_FLOSS):
+      rf = _safe_div(floss, efc_D)
+      if Jaref <= -rf:
+        d.efc.quad[efcid] = wp.vec3(floss * (-0.5 * rf - Jaref), -floss * jv, 0.0)
+        return
+      elif Jaref >= rf:
+        d.efc.quad[efcid] = wp.vec3(floss * (-0.5 * rf + Jaref), floss * jv, 0.0)
+        return
+
+    d.efc.quad[efcid] = wp.vec3(
+      0.5 * Jaref * Jaref * efc_D, jv * Jaref * efc_D, 0.5 * jv * jv * efc_D
+    )
 
   @kernel
   def _qacc_ma(d: types.Data):

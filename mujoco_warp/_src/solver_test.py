@@ -58,7 +58,6 @@ class SolverTest(parameterized.TestCase):
     mjm.opt.ls_iterations = ls_iterations
     mjm.opt.cone = cone
     mjm.opt.solver = solver_
-    mjm.opt.disableflags |= mujoco.mjtDisableBit.mjDSBL_FRICTIONLOSS
     mjd = mujoco.MjData(mjm)
     mujoco.mj_resetDataKeyframe(mjm, mjd, keyframe)
     mujoco.mj_step(mjm, mjd)
@@ -327,30 +326,24 @@ class SolverTest(parameterized.TestCase):
 
   def test_frictionloss(self):
     """Tests solver with frictionloss."""
-    mjm = mujoco.MjModel.from_xml_string(""""
-      <mujoco>
-        <worldbody>
-          <body>
-            <joint type="slide" axis="0 0 1" frictionloss=".2"/>
-            <geom type="sphere" size=".1"/>
-          </body>
-        </worldbody>
-        <keyframe>
-          <key qpos="1" qvel="1"/>
-        </keyframe>
-      </mujoco>
-    """)
-    mjd = mujoco.MjData(mjm)
-    mujoco.mj_resetDataKeyframe(mjm, mjd, 0)
-    mujoco.mj_forward(mjm, mjd)
+    # TODO(team): test tendon frictionloss
+    # TODO(team): test keyframe 2
+    for keyframe in range(2):
+      mjm, mjd, m, d = self._load(
+        "constraints.xml",
+      )
+      mjd = mujoco.MjData(mjm)
+      mujoco.mj_resetDataKeyframe(mjm, mjd, keyframe)
+      mujoco.mj_forward(mjm, mjd)
 
-    m = mjwarp.put_model(mjm)
-    d = mjwarp.put_data(mjm, mjd)
-    mjwarp.solve(m, d)
+      m = mjwarp.put_model(mjm)
+      d = mjwarp.put_data(mjm, mjd)
+      mjwarp.solve(m, d)
 
-    _assert_eq(d.qacc.numpy()[0], mjd.qacc, "qacc")
-    _assert_eq(d.qfrc_constraint.numpy()[0], mjd.qfrc_constraint, "qfrc_constraint")
-    _assert_eq(d.efc.force.numpy()[: mjd.nefc], mjd.efc_force, "efc_force")
+      _assert_eq(d.nf.numpy()[0], mjd.nf, "nf")
+      _assert_eq(d.qacc.numpy()[0], mjd.qacc, "qacc")
+      _assert_eq(d.qfrc_constraint.numpy()[0], mjd.qfrc_constraint, "qfrc_constraint")
+      _assert_eq(d.efc.force.numpy()[: mjd.nefc], mjd.efc_force, "efc_force")
 
 
 if __name__ == "__main__":
