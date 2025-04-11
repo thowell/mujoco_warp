@@ -380,6 +380,10 @@ def _ray_geom(
     return _ray_mesh(m, geom_id, size, pnt, vec)
   return wp.inf
 
+@wp.struct
+class RayIntersection:  
+  dist: wp.float32
+  geom_id: wp.int32
 
 @wp.func
 def _ray_all_geom(
@@ -388,12 +392,9 @@ def _ray_all_geom(
   d: Data,
   pnt: wp.vec3,
   vec: wp.vec3,
-  intersection_id: int,
-  dist: wp.array(dtype=float),
-  closest_hit_geom_id: wp.array(dtype=int),
   num_threads: int,
   tid: int,
-):
+) -> RayIntersection:
   ngeom = m.ngeom
 
   min_val = wp.float32(wp.inf)
@@ -411,14 +412,15 @@ def _ray_all_geom(
 
     t = wp.tile(cur_dist)
     local_min_idx = wp.tile_argmin(t)
-    local_min_val = wp.tile_min(t)
+    local_min_val = t[local_min_idx[0]]  # wp.tile_min(t)
 
-    if local_min_val[0] < min_val:
-      min_val = local_min_val[0]
+    if local_min_val < min_val:
+      min_val = local_min_val
       min_idx = local_min_idx[0]
+      
+  min_val = wp.where(min_val == wp.inf, wp.float32(-1.0), min_val)
 
-  dist[intersection_id] = min_val
-  closest_hit_geom_id[intersection_id] = min_idx
+  return RayIntersection(min_val, min_idx)
 
 
 # One thread block/tile per ray query
@@ -426,53 +428,54 @@ def _ray_all_geom(
 def _ray_all_geom_kernel(
   m: Model,
   d: Data,
-  pnt: wp.vec3,
-  vec: wp.vec3,
-  intersection_id: int,
-  dist: wp.array(dtype=float),
-  closest_hit_geom_id: wp.array(dtype=int),
+  pnt: wp.array(dtype=wp.vec3),
+  vec: wp.array(dtype=wp.vec3),
+  dist: wp.array(dtype=float, ndim=2),
+  closest_hit_geom_id: wp.array(dtype=int, ndim=2),
   num_threads: int,
 ):
-  worldid, tid = wp.tid()
-  _ray_all_geom(
+  worldid, rayid, tid = wp.tid()
+  intersection = _ray_all_geom(
     worldid,
     m,
     d,
-    pnt,
-    vec,
-    intersection_id,
-    dist,
-    closest_hit_geom_id,
+    pnt[rayid],
+    vec[rayid],
     num_threads,
     tid,
   )
+  
+  # Write intersection results to output arrays
+  dist[worldid, rayid] = intersection.dist
+  closest_hit_geom_id[worldid, rayid] = intersection.geom_id
 
 
 def ray_geom(
   m: Model,
   d: Data,
-  pnt: wp.vec3,
-  vec: wp.vec3,
-) -> tuple[float, int]:
-  """Returns the distance at which a ray intersects with a primitive geom.
+  pnt: wp.array(dtype=wp.vec3),
+  vec: wp.array(dtype=wp.vec3),
+) -> tuple[wp.array, wp.array]:
+  """Returns the distance at which rays intersect with primitive geoms.
 
   Args:
       m: MuJoCo model
       d: MuJoCo data
-      pnt: ray origin point
-      vec: ray direction
+      pnt: ray origin points
+      vec: ray directions
 
   Returns:
-      dist: distance from ray origin to geom surface
-      geom_id: ID of intersected geom (-1 if none)
+      dist: distances from ray origins to geom surfaces
+      geom_id: IDs of intersected geoms (-1 if none)
   """
-  dist = wp.zeros(1, dtype=float)
-  closest_hit_geom_id = wp.zeros(1, dtype=int)
+  nrays = pnt.shape[0]
+  dist = wp.zeros((d.nworld, nrays), dtype=float)
+  closest_hit_geom_id = wp.zeros((d.nworld, nrays), dtype=int)
   num_threads = 64
   wp.launch_tiled(
     _ray_all_geom_kernel,
-    dim=[1, num_threads],
-    inputs=[m, d, pnt, vec, 0, dist, closest_hit_geom_id, num_threads],
+    dim=(d.nworld, nrays),
+    inputs=[m, d, pnt, vec, dist, closest_hit_geom_id, num_threads],
     block_dim=num_threads,
   )
-  return dist.numpy()[0], closest_hit_geom_id.numpy()[0]
+  return dist, closest_hit_geom_id
