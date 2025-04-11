@@ -22,17 +22,9 @@ from .types import Data
 from .types import GeomType
 from .types import MJ_MINVAL
 from .types import Model
-from .types import array2df
-from .types import array3df
-from .types import vec5
-from .warp_util import event_scope
-from .warp_util import kernel
 
-from .types import array2df
-from .types import array3df
-from .types import vec5
-from .warp_util import event_scope
-from .warp_util import kernel
+from .types import MJ_MINVAL
+
 
 
 @wp.struct
@@ -260,7 +252,6 @@ class Basis:
   b0: wp.vec3
   b1: wp.vec3
 
-
 @wp.func
 def _ray_triangle(
   triangle: Triangle,
@@ -269,40 +260,58 @@ def _ray_triangle(
   basis: Basis,
 ) -> wp.float32:
   """Returns the distance at which a ray intersects with a triangle."""
-  # project difference vectors in ray normal plane
-  # Unrolled loops with scalar variables for planar
-  planar_0_0 = wp.dot(triangle.v0 - pnt, basis.b0)
-  planar_0_1 = wp.dot(triangle.v0 - pnt, basis.b1)
-  planar_1_0 = wp.dot(triangle.v1 - pnt, basis.b0)
-  planar_1_1 = wp.dot(triangle.v1 - pnt, basis.b1)
-  planar_2_0 = wp.dot(triangle.v2 - pnt, basis.b0)
-  planar_2_1 = wp.dot(triangle.v2 - pnt, basis.b1)
+  # dif = v[i] - lpnt
+  dif0 = triangle.v0 - pnt
+  dif1 = triangle.v1 - pnt
+  dif2 = triangle.v2 - pnt
+
+  # project difference vectors in normal plane
+  planar_0_0 = wp.dot(dif0, basis.b0)
+  planar_0_1 = wp.dot(dif0, basis.b1)
+  planar_1_0 = wp.dot(dif1, basis.b0)
+  planar_1_1 = wp.dot(dif1, basis.b1)
+  planar_2_0 = wp.dot(dif2, basis.b0)
+  planar_2_1 = wp.dot(dif2, basis.b1)
+
+  # reject if on the same side of any coordinate axis
+  if ((planar_0_0 > 0.0 and planar_1_0 > 0.0 and planar_2_0 > 0.0) or
+      (planar_0_0 < 0.0 and planar_1_0 < 0.0 and planar_2_0 < 0.0) or
+      (planar_0_1 > 0.0 and planar_1_1 > 0.0 and planar_2_1 > 0.0) or
+      (planar_0_1 < 0.0 and planar_1_1 < 0.0 and planar_2_1 < 0.0)):
+    return wp.float32(wp.inf)
 
   # determine if origin is inside planar projection of triangle
   # A = (p0-p2, p1-p2), b = -p2, solve A*t = b
   A00 = planar_0_0 - planar_2_0
-  A01 = planar_0_1 - planar_2_1
   A10 = planar_1_0 - planar_2_0
+  A01 = planar_0_1 - planar_2_1
   A11 = planar_1_1 - planar_2_1
 
   b0 = -planar_2_0
   b1 = -planar_2_1
 
   det = A00 * A11 - A10 * A01
+  if wp.abs(det) < MJ_MINVAL:
+    return wp.float32(wp.inf)
 
   t0 = (A11 * b0 - A10 * b1) / det
   t1 = (-A01 * b0 + A00 * b1) / det
-  valid = (t0 >= 0.0) and (t1 >= 0.0) and (t0 + t1 <= 1.0)
-  if not valid:
+
+  # check if outside
+  if t0 < 0.0 or t1 < 0.0 or t0 + t1 > 1.0:
     return wp.float32(wp.inf)
 
   # intersect ray with plane of triangle
-  nrm = wp.cross(triangle.v0 - triangle.v2, triangle.v1 - triangle.v2)
-  dist = wp.dot(triangle.v2 - pnt, nrm) / wp.dot(vec, nrm)
-  valid = dist >= 0.0
-  dist = wp.where(valid, dist, wp.float32(wp.inf))
+  dif0 = triangle.v0 - triangle.v2  # v0-v2
+  dif1 = triangle.v1 - triangle.v2  # v1-v2
+  dif2 = pnt - triangle.v2          # lpnt-v2
+  nrm = wp.cross(dif0, dif1)        # normal to triangle plane
+  denom = wp.dot(vec, nrm)
+  if wp.abs(denom) < MJ_MINVAL:    
+    return wp.float32(wp.inf)
 
-  return dist
+  dist = -wp.dot(dif2, nrm) / denom
+  return wp.where(dist >= 0.0, dist, wp.float32(wp.inf))
 
 
 @wp.func
@@ -341,6 +350,13 @@ def _ray_mesh(
   min_dist = wp.float32(wp.inf)
   hit_found = int(0)
 
+  # Get mesh vertex data range
+  vert_start = m.mesh_vertadr[data_id]
+  # vert_end = wp.where(
+  #   data_id + 1 < m.mesh_vertadr.shape[0], m.mesh_vertadr[data_id + 1], m.nmeshvert
+  # )
+
+
   # Get mesh face and vertex data
   face_start = m.mesh_faceadr[data_id]
   face_end = wp.where(
@@ -356,9 +372,9 @@ def _ray_mesh(
 
     # Create triangle struct
     triangle = Triangle()
-    triangle.v0 = m.mesh_vert[v0_idx]
-    triangle.v1 = m.mesh_vert[v1_idx]
-    triangle.v2 = m.mesh_vert[v2_idx]
+    triangle.v0 = m.mesh_vert[vert_start + v0_idx]
+    triangle.v1 = m.mesh_vert[vert_start + v1_idx]
+    triangle.v2 = m.mesh_vert[vert_start + v2_idx]
 
     # Calculate intersection
     dist = _ray_triangle(triangle, pnt, vec, basis)
@@ -368,6 +384,9 @@ def _ray_mesh(
 
   # Return the geom_id if we found a hit, otherwise -1
   return_id = wp.where(hit_found == 1, geom_id, -1)
+
+  print(min_dist)
+  
   return DistanceWithId(min_dist, return_id)
 
 
