@@ -23,7 +23,6 @@ from absl.testing import parameterized
 
 import mujoco_warp as mjwarp
 
-from . import forward
 from . import test_util
 
 wp.config.verify_cuda = True
