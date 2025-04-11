@@ -35,6 +35,12 @@ from .warp_util import event_scope
 from .warp_util import kernel
 
 
+@wp.struct
+class DistanceWithId:
+  dist: wp.float32
+  geom_id: wp.int32
+
+
 @wp.func
 def _ray_quad(a: float, b: float, c: float) -> wp.vec2:
   """Returns two solutions for quadratic: a*x^2 + 2*b*x + c = 0."""
@@ -54,7 +60,8 @@ def _ray_plane(
   size: wp.vec3,
   pnt: wp.vec3,
   vec: wp.vec3,
-) -> float:
+  geom_id: int,
+) -> DistanceWithId:
   """Returns the distance at which a ray intersects with a plane."""
   x = -pnt[2] / vec[2]
 
@@ -66,7 +73,8 @@ def _ray_plane(
   valid = valid and ((size[0] <= 0.0) or (wp.abs(p_x) <= size[0]))
   valid = valid and ((size[1] <= 0.0) or (wp.abs(p_y) <= size[1]))
 
-  return wp.where(valid, x, wp.inf)
+  return_id = wp.where(valid, geom_id, -1)
+  return DistanceWithId(wp.where(valid, x, wp.inf), return_id)
 
 
 @wp.func
@@ -74,7 +82,8 @@ def _ray_sphere(
   size: wp.vec3,
   pnt: wp.vec3,
   vec: wp.vec3,
-) -> float:
+  geom_id: int,
+) -> DistanceWithId:
   """Returns the distance at which a ray intersects with a sphere."""
   a = wp.dot(vec, vec)
   b = wp.dot(vec, pnt)
@@ -85,7 +94,8 @@ def _ray_sphere(
   x1 = solutions[1]
   x = wp.where(wp.isinf(x0), x1, x0)
 
-  return x
+  return_id = wp.where(wp.isinf(x), -1, geom_id)
+  return DistanceWithId(x, return_id)
 
 
 @wp.func
@@ -93,7 +103,8 @@ def _ray_capsule(
   size: wp.vec3,
   pnt: wp.vec3,
   vec: wp.vec3,
-) -> float:
+  geom_id: int,
+) -> DistanceWithId:
   """Returns the distance at which a ray intersects with a capsule."""
 
   # cylinder round side: (x*lvec+lpnt)'*(x*lvec+lpnt) = size[0]*size[0]
@@ -134,7 +145,8 @@ def _ray_capsule(
   x = wp.where((pnt[2] + x0 * vec[2] <= -size[1]) and (x0 < x), x0, x)
   x = wp.where((pnt[2] + x1 * vec[2] <= -size[1]) and (x1 < x), x1, x)
 
-  return x
+  return_id = wp.where(wp.isinf(x), -1, geom_id)
+  return DistanceWithId(x, return_id)
 
 
 @wp.func
@@ -142,7 +154,8 @@ def _ray_ellipsoid(
   size: wp.vec3,
   pnt: wp.vec3,
   vec: wp.vec3,
-) -> float:
+  geom_id: int,
+) -> DistanceWithId:
   """Returns the distance at which a ray intersects with an ellipsoid."""
 
   # invert size^2
@@ -162,7 +175,8 @@ def _ray_ellipsoid(
   x1 = solutions[1]
   x = wp.where(wp.isinf(x0), x1, x0)
 
-  return x
+  return_id = wp.where(wp.isinf(x), -1, geom_id)
+  return DistanceWithId(x, return_id)
 
 
 @wp.func
@@ -170,7 +184,8 @@ def _ray_box(
   size: wp.vec3,
   pnt: wp.vec3,
   vec: wp.vec3,
-) -> float:
+  geom_id: int,
+) -> DistanceWithId:
   """Returns the distance at which a ray intersects with a box."""
 
   # Initialize with infinity
@@ -225,7 +240,8 @@ def _ray_box(
     if z_neg >= 0.0 and wp.abs(p0) <= size[0] and wp.abs(p1) <= size[1]:
       min_x = wp.min(min_x, z_neg)
 
-  return min_x
+  return_id = wp.where(wp.isinf(min_x), -1, geom_id)
+  return DistanceWithId(min_x, return_id)
 
 
 @wp.struct
@@ -294,8 +310,8 @@ def _ray_mesh(
   unused_size: wp.vec3,
   pnt: wp.vec3,
   vec: wp.vec3,
-) -> wp.float32:
-  """Returns the distance for ray mesh intersections."""
+) -> DistanceWithId:
+  """Returns the distance and geom_id for ray mesh intersections."""
   data_id = m.geom_dataid[geom_id]
 
   # Create basis vectors for the ray
@@ -321,37 +337,34 @@ def _ray_mesh(
   basis.b1 = wp.normalize(basis.b1)
 
   min_dist = wp.float32(wp.inf)
+  hit_found = int(0)
 
   # Get mesh face and vertex data
   face_start = m.mesh_faceadr[data_id]
-  face_end = wp.where(
-    data_id + 1 < m.nmeshface, m.mesh_faceadr[data_id + 1], m.nmeshface
-  )
-
-  vert_start = m.mesh_vertadr[data_id]
-  vert_end = wp.where(
-    data_id + 1 < m.nmeshvert, m.mesh_vertadr[data_id + 1], m.nmeshvert
-  )
+  face_end = wp.where(data_id + 1 < m.ngeom, m.mesh_faceadr[data_id + 1], m.nmeshface)
 
   # Iterate through all faces
-  # TODO(team): make parallel
   for i in range(face_start, face_end):
     # Get vertices for this face
-    v0_idx = m.mesh_face[i * 3]
-    v1_idx = m.mesh_face[i * 3 + 1]
-    v2_idx = m.mesh_face[i * 3 + 2]
+    v0_idx = m.mesh_face[i, 0]
+    v1_idx = m.mesh_face[i, 1]
+    v2_idx = m.mesh_face[i, 2]
 
     # Create triangle struct
     triangle = Triangle()
-    triangle.v0 = m.mesh_vert[vert_start + v0_idx]
-    triangle.v1 = m.mesh_vert[vert_start + v1_idx]
-    triangle.v2 = m.mesh_vert[vert_start + v2_idx]
+    triangle.v0 = m.mesh_vert[v0_idx]
+    triangle.v1 = m.mesh_vert[v1_idx]
+    triangle.v2 = m.mesh_vert[v2_idx]
 
     # Calculate intersection
     dist = _ray_triangle(triangle, pnt, vec, basis)
-    min_dist = wp.min(min_dist, dist)
+    if dist < min_dist:
+      min_dist = dist
+      hit_found = 1
 
-  return min_dist
+  # Return the geom_id if we found a hit, otherwise -1
+  return_id = wp.where(hit_found == 1, geom_id, -1)
+  return DistanceWithId(min_dist, return_id)
 
 
 @wp.func
@@ -361,29 +374,31 @@ def _ray_geom(
   geom_id: int,
   pnt: wp.vec3,
   vec: wp.vec3,
-) -> float:
+) -> DistanceWithId:
   type = m.geom_type[geom_id]
   size = m.geom_size[geom_id]
 
   # TODO(team): static loop unrolling to remove unnecessary branching
   if type == int(GeomType.PLANE.value):
-    return _ray_plane(size, pnt, vec)
+    return _ray_plane(size, pnt, vec, geom_id)
   elif type == int(GeomType.SPHERE.value):
-    return _ray_sphere(size, pnt, vec)
+    return _ray_sphere(size, pnt, vec, geom_id)
   elif type == int(GeomType.CAPSULE.value):
-    return _ray_capsule(size, pnt, vec)
+    return _ray_capsule(size, pnt, vec, geom_id)
   elif type == int(GeomType.ELLIPSOID.value):
-    return _ray_ellipsoid(size, pnt, vec)
+    return _ray_ellipsoid(size, pnt, vec, geom_id)
   elif type == int(GeomType.BOX.value):
-    return _ray_box(size, pnt, vec)
+    return _ray_box(size, pnt, vec, geom_id)
   elif type == int(GeomType.MESH.value):
     return _ray_mesh(m, geom_id, size, pnt, vec)
-  return wp.inf
+  return DistanceWithId(wp.inf, -1)
+
 
 @wp.struct
-class RayIntersection:  
+class RayIntersection:
   dist: wp.float32
   geom_id: wp.int32
+
 
 @wp.func
 def _ray_all_geom(
@@ -400,15 +415,20 @@ def _ray_all_geom(
   min_val = wp.float32(wp.inf)
   min_idx = wp.int32(-1)
 
-  for geom_id in range(tid, ngeom, num_threads):
-    # Get ray in local coordinates
-    pos = d.geom_xpos[worldid, geom_id]
-    rot = d.geom_xmat[worldid, geom_id]
-    local_pnt = wp.transpose(rot) @ (pnt - pos)
-    local_vec = wp.transpose(rot) @ vec
+  upper = ((ngeom + num_threads - 1) // num_threads) * num_threads
+  for geom_id in range(tid, upper, num_threads):
+    if geom_id < ngeom:
+      # Get ray in local coordinates
+      pos = d.geom_xpos[worldid, geom_id]
+      rot = d.geom_xmat[worldid, geom_id]
+      local_pnt = wp.transpose(rot) @ (pnt - pos)
+      local_vec = wp.transpose(rot) @ vec
 
-    # Calculate intersection distance
-    cur_dist = _ray_geom(m, d, geom_id, local_pnt, local_vec)
+      # Calculate intersection distance
+      result = _ray_geom(m, d, geom_id, local_pnt, local_vec)
+      cur_dist = result.dist
+    else:
+      cur_dist = wp.float32(wp.inf)
 
     t = wp.tile(cur_dist)
     local_min_idx = wp.tile_argmin(t)
@@ -417,7 +437,7 @@ def _ray_all_geom(
     if local_min_val < min_val:
       min_val = local_min_val
       min_idx = local_min_idx[0]
-      
+
   min_val = wp.where(min_val == wp.inf, wp.float32(-1.0), min_val)
 
   return RayIntersection(min_val, min_idx)
@@ -444,7 +464,7 @@ def _ray_all_geom_kernel(
     num_threads,
     tid,
   )
-  
+
   # Write intersection results to output arrays
   dist[worldid, rayid] = intersection.dist
   closest_hit_geom_id[worldid, rayid] = intersection.geom_id

@@ -373,7 +373,7 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
   m.mesh_vertnum = wp.array(mjm.mesh_vertnum, dtype=wp.int32, ndim=1)
   m.mesh_vert = wp.array(mjm.mesh_vert, dtype=wp.vec3, ndim=1)
   m.mesh_faceadr = wp.array(mjm.mesh_faceadr, dtype=wp.int32, ndim=1)
-  m.mesh_face = wp.array(mjm.mesh_face, dtype=wp.int32, ndim=1)
+  m.mesh_face = wp.array(mjm.mesh_face, dtype=wp.int32, ndim=2)
   m.site_pos = wp.array(mjm.site_pos, dtype=wp.vec3, ndim=1)
   m.site_quat = wp.array(mjm.site_quat, dtype=wp.quat, ndim=1)
   m.site_bodyid = wp.array(mjm.site_bodyid, dtype=wp.int32, ndim=1)

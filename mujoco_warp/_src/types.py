@@ -772,7 +772,7 @@ class Model:
   mesh_vertnum: wp.array(dtype=wp.int32, ndim=1)
   mesh_vert: wp.array(dtype=wp.vec3, ndim=1)
   mesh_faceadr: wp.array(dtype=wp.int32, ndim=1)
-  mesh_face: wp.array(dtype=wp.int32, ndim=1)
+  mesh_face: wp.array(dtype=wp.int32, ndim=2)
   actuator_trntype: wp.array(dtype=wp.int32, ndim=1)
   actuator_dyntype: wp.array(dtype=wp.int32, ndim=1)
   actuator_gaintype: wp.array(dtype=wp.int32, ndim=1)
