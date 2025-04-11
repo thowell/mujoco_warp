@@ -447,35 +447,42 @@ def _ray_all_geom(
   upper = ((ngeom + num_threads - 1) // num_threads) * num_threads
   for geom_id in range(tid, upper, num_threads):
     if geom_id < ngeom:
-      # Apply filters
+      # Apply all filters combined into a single boolean
+      body_id = m.geom_bodyid[geom_id]
+      
+      # Start with True and apply each filter condition
+      geom_filter = True
       
       # Body exclusion filter
-      if bodyexclude >= 0 and m.geom_bodyid[geom_id] == bodyexclude:
-        continue
+      if bodyexclude >= 0:
+        geom_filter = geom_filter and (body_id != bodyexclude)
         
       # Static geom filter
-      if not flg_static:
-        body_id = m.geom_bodyid[geom_id]
-        if m.body_weldid[body_id] == 0:
-          continue
+      geom_filter = geom_filter and (flg_static or m.body_weldid[body_id] != 0)
           
       # Geom group filter
       if geomgroup[0] != 0 or geomgroup[1] != 0 or geomgroup[2] != 0 or geomgroup[3] != 0 or geomgroup[4] != 0 or geomgroup[5] != 0:
         group = m.geom_group[geom_id]
         # Clip group index to [0, 5] (mjNGROUP-1)
         group = wp.max(0, wp.min(5, group))
-        if geomgroup[group] == 0:
-          continue
+        geom_filter = geom_filter and (geomgroup[group] != 0)
 
-      # Get ray in local coordinates
-      pos = d.geom_xpos[worldid, geom_id]
-      rot = d.geom_xmat[worldid, geom_id]
-      local_pnt = wp.transpose(rot) @ (pnt - pos)
-      local_vec = wp.transpose(rot) @ vec
+      # Print geom_filter value for debugging
+      wp.printf("geom_id: %d, geom_filter: %d, flg_static: %d\n", geom_id, geom_filter, flg_static)
 
-      # Calculate intersection distance
-      result = _ray_geom(m, d, geom_id, local_pnt, local_vec)
-      cur_dist = result.dist
+
+      if not geom_filter:
+        cur_dist = wp.float32(wp.inf)
+      else:
+        # Get ray in local coordinates
+        pos = d.geom_xpos[worldid, geom_id]
+        rot = d.geom_xmat[worldid, geom_id]
+        local_pnt = wp.transpose(rot) @ (pnt - pos)
+        local_vec = wp.transpose(rot) @ vec
+
+        # Calculate intersection distance
+        result = _ray_geom(m, d, geom_id, local_pnt, local_vec)
+        cur_dist = result.dist
     else:
       cur_dist = wp.float32(wp.inf)
 
@@ -486,6 +493,8 @@ def _ray_all_geom(
     if local_min_val < min_val:
       min_val = local_min_val
       min_idx = local_min_idx[0]
+      # Print min_val and min_idx for debugging
+      wp.printf("min_val: %f, min_idx: %d\n", min_val, min_idx)
 
   min_val = wp.where(min_val == wp.inf, wp.float32(-1.0), min_val)
 
