@@ -88,6 +88,8 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
   m.nwrap = mjm.nwrap
   m.nsensor = mjm.nsensor
   m.nsensordata = mjm.nsensordata
+  m.nmeshvert = mjm.nmeshvert
+  m.nmeshface = mjm.nmeshface
   m.nlsp = mjm.opt.ls_iterations  # TODO(team): how to set nlsp?
   m.nexclude = mjm.nexclude
   m.opt.timestep = mjm.opt.timestep
@@ -233,7 +235,7 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
       qLD_tilesize = np.array(sorted(tiles.keys()))
     else:
       qLD_tile = np.array([], dtype=int)
-      qLD_tileadr = np.array([], dtype=int) 
+      qLD_tileadr = np.array([], dtype=int)
       qLD_tilesize = np.array([], dtype=int)
 
   # tiles for actuator_moment - needs nu + nv tile size and offset
@@ -370,6 +372,8 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
   m.mesh_vertadr = wp.array(mjm.mesh_vertadr, dtype=wp.int32, ndim=1)
   m.mesh_vertnum = wp.array(mjm.mesh_vertnum, dtype=wp.int32, ndim=1)
   m.mesh_vert = wp.array(mjm.mesh_vert, dtype=wp.vec3, ndim=1)
+  m.mesh_faceadr = wp.array(mjm.mesh_faceadr, dtype=wp.int32, ndim=1)
+  m.mesh_face = wp.array(mjm.mesh_face, dtype=wp.int32, ndim=1)
   m.site_pos = wp.array(mjm.site_pos, dtype=wp.vec3, ndim=1)
   m.site_quat = wp.array(mjm.site_quat, dtype=wp.quat, ndim=1)
   m.site_bodyid = wp.array(mjm.site_bodyid, dtype=wp.int32, ndim=1)

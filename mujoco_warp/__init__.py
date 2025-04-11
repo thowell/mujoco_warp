@@ -65,4 +65,3 @@ from ._src.types import Option as Option
 from ._src.types import Statistic as Statistic
 from ._src.types import TrnType as TrnType
 from ._src.ray import ray_geom as ray_geom
-

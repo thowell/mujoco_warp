@@ -486,6 +486,8 @@ class Model:
     nwrap: number of wrap objects in all tendon paths        ()
     nsensor: number of sensors                               ()
     nsensordata: number of elements in sensor data vector    ()
+    nmeshvert: number of vertices for all meshes             ()
+    nmeshface: number of faces for all meshes                ()
     nlsp: number of step sizes for parallel linsearch        ()
     opt: physics options
     stat: model statistics
@@ -597,6 +599,8 @@ class Model:
     mesh_vertadr: first vertex address                       (nmesh,)
     mesh_vertnum: number of vertices                         (nmesh,)
     mesh_vert: vertex positions for all meshes               (nmeshvert, 3)
+    mesh_faceadr: first face address                         (nmesh,)
+    mesh_face: face indices for all meshes                   (nface, 3)
     actuator_trntype: transmission type (mjtTrn)             (nu,)
     actuator_dyntype: dynamics type (mjtDyn)                 (nu,)
     actuator_gaintype: gain type (mjtGain)                   (nu,)
@@ -654,6 +658,8 @@ class Model:
   nwrap: int
   nsensor: int
   nsensordata: int
+  nmeshvert: int
+  nmeshface: int
   nlsp: int  # warp only
   opt: Option
   stat: Statistic
@@ -765,6 +771,8 @@ class Model:
   mesh_vertadr: wp.array(dtype=wp.int32, ndim=1)
   mesh_vertnum: wp.array(dtype=wp.int32, ndim=1)
   mesh_vert: wp.array(dtype=wp.vec3, ndim=1)
+  mesh_faceadr: wp.array(dtype=wp.int32, ndim=1)
+  mesh_face: wp.array(dtype=wp.int32, ndim=1)
   actuator_trntype: wp.array(dtype=wp.int32, ndim=1)
   actuator_dyntype: wp.array(dtype=wp.int32, ndim=1)
   actuator_gaintype: wp.array(dtype=wp.int32, ndim=1)
