@@ -24,6 +24,8 @@ import mujoco_warp as mjwarp
 
 from . import test_util
 
+from .types import vec6
+
 # tolerance for difference between MuJoCo and MJX ray calculations - mostly
 # due to float precision
 _TOLERANCE = 5e-5
@@ -220,72 +222,69 @@ class RayTest(absltest.TestCase):
     mj_dist = mujoco.mj_ray(m, d, pnt_np, vec_np, None, 1, -1, unused)
     _assert_eq(dist_np, mj_dist, "dist-dodecahedron")
 
-  # TODO(team): Add geomgroup support
-  # def test_ray_geomgroup(self):
-  #   """Tests ray geomgroup filter."""
-  #   m, d, _, _ = test_util.fixture("ray.xml")
-  #   mujoco.mj_forward(m, d)
-  #   mx, dx = mjwarp.put_model(m), mjwarp.put_data(m, d)
+  def test_ray_geomgroup(self):
+    """Tests ray geomgroup filter."""
+    m, d, _, _ = test_util.fixture("ray.xml")
+    mujoco.mj_forward(m, d)
+    mx, dx = mjwarp.put_model(m), mjwarp.put_data(m, d)
 
-  #   # hits plane with geom_group[0] = 1
-  #   pnt = wp.array([wp.vec3(2.0, 1.0, 3.0)], dtype=wp.vec3)
-  #   vec = wp.array([wp.normalize(wp.vec3(0.1, 0.2, -1.0))], dtype=wp.vec3)
-  #   geomgroup = wp.vec6(1, 0, 0, 0, 0, 0)
-  #   dist, geomid = mjwarp.ray_geom(mx, dx, pnt, vec, geomgroup=geomgroup)
-  #   wp.synchronize()
-  #   geomid_np = geomid.numpy()[0][0]
-  #   dist_np = dist.numpy()[0][0]
-  #   _assert_eq(geomid_np, 0, "geom_id")
+    # hits plane with geom_group[0] = 1
+    pnt = wp.array([wp.vec3(2.0, 1.0, 3.0)], dtype=wp.vec3)
+    vec = wp.array([wp.normalize(wp.vec3(0.1, 0.2, -1.0))], dtype=wp.vec3)
+    geomgroup = vec6(1, 0, 0, 0, 0, 0)
+    dist, geomid = mjwarp.ray_geom(mx, dx, pnt, vec, geomgroup=geomgroup)
+    wp.synchronize()
+    geomid_np = geomid.numpy()[0][0]
+    dist_np = dist.numpy()[0][0]
+    _assert_eq(geomid_np, 0, "geom_id")
 
-  #   pnt_np, vec_np = pnt.numpy()[0], vec.numpy()[0]
-  #   unused = np.zeros(1, dtype=np.int32)
-  #   mj_dist = mujoco.mj_ray(m, d, pnt_np, vec_np, None, 1, -1, unused)
-  #   _assert_eq(dist_np, mj_dist, "dist")
+    pnt_np, vec_np = pnt.numpy()[0], vec.numpy()[0]
+    unused = np.zeros(1, dtype=np.int32)
+    mj_dist = mujoco.mj_ray(m, d, pnt_np, vec_np, None, 1, -1, unused)
+    _assert_eq(dist_np, mj_dist, "dist")
 
-  #   # nothing hit with geom_group[0] = 0
-  #   pnt = wp.array([wp.vec3(2.0, 1.0, 3.0)], dtype=wp.vec3)
-  #   vec = wp.array([wp.normalize(wp.vec3(0.1, 0.2, -1.0))], dtype=wp.vec3)
-  #   geomgroup = wp.vec6(0, 0, 0, 0, 0, 0)
-  #   dist, geomid = mjwarp.ray_geom(mx, dx, pnt, vec, geomgroup=geomgroup)
-  #   wp.synchronize()
-  #   geomid_np = geomid.numpy()[0][0]
-  #   dist_np = dist.numpy()[0][0]
-  #   _assert_eq(geomid_np, -1, "geom_id")
-  #   _assert_eq(dist_np, -1, "dist")
+    # nothing hit with geom_group[0] = 0
+    pnt = wp.array([wp.vec3(2.0, 1.0, 3.0)], dtype=wp.vec3)
+    vec = wp.array([wp.normalize(wp.vec3(0.1, 0.2, -1.0))], dtype=wp.vec3)
+    geomgroup = vec6(0, 0, 0, 0, 0, 0)
+    dist, geomid = mjwarp.ray_geom(mx, dx, pnt, vec, geomgroup=geomgroup)
+    wp.synchronize()
+    geomid_np = geomid.numpy()[0][0]
+    dist_np = dist.numpy()[0][0]
+    _assert_eq(geomid_np, -1, "geom_id")
+    _assert_eq(dist_np, -1, "dist")
 
-  # TODO(team): Add flg_static support
-  # def test_ray_flg_static(self):
-  #   """Tests ray flg_static filter."""
-  #   m, d, _, _ = test_util.fixture("ray.xml")
-  #   mujoco.mj_forward(m, d)
-  #   mx, dx = mjwarp.put_model(m), mjwarp.put_data(m, d)
+  def test_ray_flg_static(self):
+    """Tests ray flg_static filter."""
+    m, d, _, _ = test_util.fixture("ray.xml")
+    mujoco.mj_forward(m, d)
+    mx, dx = mjwarp.put_model(m), mjwarp.put_data(m, d)
 
-  #   # nothing hit with flg_static = False
-  #   pnt = wp.array([wp.vec3(2.0, 1.0, 3.0)], dtype=wp.vec3)
-  #   vec = wp.array([wp.normalize(wp.vec3(0.1, 0.2, -1.0))], dtype=wp.vec3)
-  #   dist, geomid = mjwarp.ray_geom(mx, dx, pnt, vec, flg_static=False)
-  #   wp.synchronize()
-  #   geomid_np = geomid.numpy()[0][0]
-  #   dist_np = dist.numpy()[0][0]
-  #   _assert_eq(geomid_np, -1, "geom_id")
-  #   _assert_eq(dist_np, -1, "dist")
+    # nothing hit with flg_static = False
+    pnt = wp.array([wp.vec3(2.0, 1.0, 3.0)], dtype=wp.vec3)
+    vec = wp.array([wp.normalize(wp.vec3(0.1, 0.2, -1.0))], dtype=wp.vec3)
+    dist, geomid = mjwarp.ray_geom(mx, dx, pnt, vec, flg_static=False)
+    wp.synchronize()
+    geomid_np = geomid.numpy()[0][0]
+    dist_np = dist.numpy()[0][0]
+    _assert_eq(geomid_np, -1, "geom_id")
+    _assert_eq(dist_np, -1, "dist")
 
-  # TODO(team): Add bodyexclude support
-  # def test_ray_bodyexclude(self):
-  #   """Tests ray bodyexclude filter."""
-  #   m, d, _, _ = test_util.fixture("ray.xml")
-  #   mujoco.mj_forward(m, d)
-  #   mx, dx = mjwarp.put_model(m), mjwarp.put_data(m, d)
+  def test_ray_bodyexclude(self):
+    """Tests ray bodyexclude filter."""
+    m, d, _, _ = test_util.fixture("ray.xml")
+    mujoco.mj_forward(m, d)
+    mx, dx = mjwarp.put_model(m), mjwarp.put_data(m, d)
 
-  #   # nothing hit with bodyexclude = 0 (world body)
-  #   pnt = wp.array([wp.vec3(2.0, 1.0, 3.0)], dtype=wp.vec3)
-  #   vec = wp.array([wp.normalize(wp.vec3(0.1, 0.2, -1.0))], dtype=wp.vec3)
-  #   dist, geomid = mjwarp.ray_geom(mx, dx, pnt, vec, bodyexclude=0)
-  #   wp.synchronize()
-  #   geomid_np = geomid.numpy()[0][0]
-  #   dist_np = dist.numpy()[0][0]
-  #   _assert_eq(geomid_np, -1, "geom_id")
-  #   _assert_eq(dist_np, -1, "dist")
+    # nothing hit with bodyexclude = 0 (world body)
+    pnt = wp.array([wp.vec3(2.0, 1.0, 3.0)], dtype=wp.vec3)
+    vec = wp.array([wp.normalize(wp.vec3(0.1, 0.2, -1.0))], dtype=wp.vec3)
+    dist, geomid = mjwarp.ray_geom(mx, dx, pnt, vec, bodyexclude=0)
+    wp.synchronize()
+    geomid_np = geomid.numpy()[0][0]
+    dist_np = dist.numpy()[0][0]
+    _assert_eq(geomid_np, -1, "geom_id")
+    _assert_eq(dist_np, -1, "dist")
 
 
 if __name__ == "__main__":

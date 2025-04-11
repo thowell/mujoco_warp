@@ -25,6 +25,7 @@ from .types import Model
 
 from .types import MJ_MINVAL
 
+from .types import vec6
 
 
 @wp.struct
@@ -252,6 +253,7 @@ class Basis:
   b0: wp.vec3
   b1: wp.vec3
 
+
 @wp.func
 def _ray_triangle(
   triangle: Triangle,
@@ -274,10 +276,12 @@ def _ray_triangle(
   planar_2_1 = wp.dot(dif2, basis.b1)
 
   # reject if on the same side of any coordinate axis
-  if ((planar_0_0 > 0.0 and planar_1_0 > 0.0 and planar_2_0 > 0.0) or
-      (planar_0_0 < 0.0 and planar_1_0 < 0.0 and planar_2_0 < 0.0) or
-      (planar_0_1 > 0.0 and planar_1_1 > 0.0 and planar_2_1 > 0.0) or
-      (planar_0_1 < 0.0 and planar_1_1 < 0.0 and planar_2_1 < 0.0)):
+  if (
+    (planar_0_0 > 0.0 and planar_1_0 > 0.0 and planar_2_0 > 0.0)
+    or (planar_0_0 < 0.0 and planar_1_0 < 0.0 and planar_2_0 < 0.0)
+    or (planar_0_1 > 0.0 and planar_1_1 > 0.0 and planar_2_1 > 0.0)
+    or (planar_0_1 < 0.0 and planar_1_1 < 0.0 and planar_2_1 < 0.0)
+  ):
     return wp.float32(wp.inf)
 
   # determine if origin is inside planar projection of triangle
@@ -304,10 +308,10 @@ def _ray_triangle(
   # intersect ray with plane of triangle
   dif0 = triangle.v0 - triangle.v2  # v0-v2
   dif1 = triangle.v1 - triangle.v2  # v1-v2
-  dif2 = pnt - triangle.v2          # lpnt-v2
-  nrm = wp.cross(dif0, dif1)        # normal to triangle plane
+  dif2 = pnt - triangle.v2  # lpnt-v2
+  nrm = wp.cross(dif0, dif1)  # normal to triangle plane
   denom = wp.dot(vec, nrm)
-  if wp.abs(denom) < MJ_MINVAL:    
+  if wp.abs(denom) < MJ_MINVAL:
     return wp.float32(wp.inf)
 
   dist = -wp.dot(dif2, nrm) / denom
@@ -356,7 +360,6 @@ def _ray_mesh(
   #   data_id + 1 < m.mesh_vertadr.shape[0], m.mesh_vertadr[data_id + 1], m.nmeshvert
   # )
 
-
   # Get mesh face and vertex data
   face_start = m.mesh_faceadr[data_id]
   face_end = wp.where(
@@ -386,7 +389,7 @@ def _ray_mesh(
   return_id = wp.where(hit_found == 1, geom_id, -1)
 
   print(min_dist)
-  
+
   return DistanceWithId(min_dist, return_id)
 
 
@@ -430,6 +433,9 @@ def _ray_all_geom(
   d: Data,
   pnt: wp.vec3,
   vec: wp.vec3,
+  geomgroup: vec6,
+  flg_static: bool,
+  bodyexclude: int,
   num_threads: int,
   tid: int,
 ) -> RayIntersection:
@@ -473,6 +479,9 @@ def _ray_all_geom_kernel(
   d: Data,
   pnt: wp.array(dtype=wp.vec3),
   vec: wp.array(dtype=wp.vec3),
+  geomgroup: vec6,
+  flg_static: bool,
+  bodyexclude: int,
   dist: wp.array(dtype=float, ndim=2),
   closest_hit_geom_id: wp.array(dtype=int, ndim=2),
   num_threads: int,
@@ -484,6 +493,9 @@ def _ray_all_geom_kernel(
     d,
     pnt[rayid],
     vec[rayid],
+    geomgroup,
+    flg_static,
+    bodyexclude,
     num_threads,
     tid,
   )
@@ -498,6 +510,9 @@ def ray_geom(
   d: Data,
   pnt: wp.array(dtype=wp.vec3),
   vec: wp.array(dtype=wp.vec3),
+  geomgroup: vec6 = vec6(0, 0, 0, 0, 0, 0),
+  flg_static: bool = True,
+  bodyexclude: int = -1,
 ) -> tuple[wp.array, wp.array]:
   """Returns the distance at which rays intersect with primitive geoms.
 
@@ -506,6 +521,9 @@ def ray_geom(
       d: MuJoCo data
       pnt: ray origin points
       vec: ray directions
+      geomgroup: group inclusion/exclusion mask (6,), or all zeros to ignore
+      flg_static: if True, allows rays to intersect with static geoms
+      bodyexclude: ignore geoms on specified body id (-1 to disable)
 
   Returns:
       dist: distances from ray origins to geom surfaces
@@ -518,7 +536,18 @@ def ray_geom(
   wp.launch_tiled(
     _ray_all_geom_kernel,
     dim=(d.nworld, nrays),
-    inputs=[m, d, pnt, vec, dist, closest_hit_geom_id, num_threads],
+    inputs=[
+      m,
+      d,
+      pnt,
+      vec,
+      geomgroup,
+      flg_static,
+      bodyexclude,
+      dist,
+      closest_hit_geom_id,
+      num_threads,
+    ],
     block_dim=num_threads,
   )
   return dist, closest_hit_geom_id

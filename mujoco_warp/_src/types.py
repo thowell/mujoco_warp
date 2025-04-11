@@ -298,11 +298,16 @@ class vec5f(wp.types.vector(length=5, dtype=wp.float32)):
   pass
 
 
+class vec6f(wp.types.vector(length=6, dtype=wp.float32)):
+  pass
+
+
 class vec10f(wp.types.vector(length=10, dtype=wp.float32)):
   pass
 
 
 vec5 = vec5f
+vec6 = vec6f
 vec10 = vec10f
 array2df = wp.array2d(dtype=wp.float32)
 array3df = wp.array3d(dtype=wp.float32)
@@ -565,6 +570,7 @@ class Model:
     geom_condim: contact dimensionality (1, 3, 4, 6)         (ngeom,)
     geom_bodyid: id of geom's body                           (ngeom,)
     geom_dataid: id of geom's mesh/hfield; -1: none          (ngeom,)
+    geom_group: geom group inclusion/exclusion mask          (ngeom, 1)
     geom_priority: geom contact priority                     (ngeom,)
     geom_solmix: mixing coef for solref/imp in geom pair     (ngeom,)
     geom_solref: constraint solver reference: contact        (ngeom, mjNREF)
@@ -737,6 +743,7 @@ class Model:
   geom_condim: wp.array(dtype=wp.int32, ndim=1)
   geom_bodyid: wp.array(dtype=wp.int32, ndim=1)
   geom_dataid: wp.array(dtype=wp.int32, ndim=1)
+  geom_group: wp.array(dtype=wp.int32, ndim=1)
   geom_priority: wp.array(dtype=wp.int32, ndim=1)
   geom_solmix: wp.array(dtype=wp.float32, ndim=1)
   geom_solref: wp.array(dtype=wp.vec2, ndim=1)
