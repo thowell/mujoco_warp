@@ -59,24 +59,25 @@ class ForwardTest(parameterized.TestCase):
 
     _assert_eq(d.ten_velocity.numpy()[0], mjd.ten_velocity, "ten_velocity")
 
-  @parameterized.parameters(True, False)
-  def test_fwd_actuation(self, sparse):
-    mjm, mjd, m, d = test_util.fixture("actuation.xml", kick=True, sparse=sparse)
-
-    mujoco.mj_fwdActuation(mjm, mjd)
-
-    for arr in (d.actuator_force, d.qfrc_actuator):
-      arr.zero_()
+  @parameterized.parameters(
+    "actuation/actuation.xml",
+    "actuation/actuators.xml",
+  )
+  def test_actuation(self, xml):
+    mjm, mjd, m, d = test_util.fixture(xml, keyframe=0)
 
     mjwarp.fwd_actuation(m, d)
 
-    _assert_eq(d.ctrl.numpy()[0], mjd.ctrl, "ctrl")
-    _assert_eq(d.actuator_force.numpy()[0], mjd.actuator_force, "actuator_force")
     _assert_eq(d.qfrc_actuator.numpy()[0], mjd.qfrc_actuator, "qfrc_actuator")
+    _assert_eq(d.actuator_force.numpy()[0], mjd.actuator_force, "actuator_force")
+
+    if mjm.na:
+      _assert_eq(d.act_dot.numpy()[0], mjd.act_dot, "act_dot")
 
     # TODO(team): test DisableBit.CLAMPCTRL
     # TODO(team): test DisableBit.ACTUATION
-    # TODO(team): test actuator gain/bias (e.g. position control)
+    # TODO(team): test muscle
+    # TODO(team): test actearly
 
   def test_fwd_acceleration(self):
     _, mjd, m, d = test_util.fixture("humanoid/humanoid.xml", kick=True)
