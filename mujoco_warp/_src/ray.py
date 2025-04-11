@@ -15,13 +15,10 @@
 
 import warp as wp
 
+from .types import MJ_MINVAL
 from .types import Data
 from .types import GeomType
-from .types import MJ_MINVAL
 from .types import Model
-
-from .types import MJ_MINVAL
-
 from .types import vec6
 
 

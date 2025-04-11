@@ -22,7 +22,6 @@ from absl.testing import absltest
 import mujoco_warp as mjwarp
 
 from . import test_util
-
 from .types import vec6
 
 # tolerance for difference between MuJoCo and MJX ray calculations - mostly
