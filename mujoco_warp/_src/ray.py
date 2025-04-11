@@ -447,6 +447,26 @@ def _ray_all_geom(
   upper = ((ngeom + num_threads - 1) // num_threads) * num_threads
   for geom_id in range(tid, upper, num_threads):
     if geom_id < ngeom:
+      # Apply filters
+      
+      # Body exclusion filter
+      if bodyexclude >= 0 and m.geom_bodyid[geom_id] == bodyexclude:
+        continue
+        
+      # Static geom filter
+      if not flg_static:
+        body_id = m.geom_bodyid[geom_id]
+        if m.body_weldid[body_id] == 0:
+          continue
+          
+      # Geom group filter
+      if geomgroup[0] != 0 or geomgroup[1] != 0 or geomgroup[2] != 0 or geomgroup[3] != 0 or geomgroup[4] != 0 or geomgroup[5] != 0:
+        group = m.geom_group[geom_id]
+        # Clip group index to [0, 5] (mjNGROUP-1)
+        group = wp.max(0, wp.min(5, group))
+        if geomgroup[group] == 0:
+          continue
+
       # Get ray in local coordinates
       pos = d.geom_xpos[worldid, geom_id]
       rot = d.geom_xmat[worldid, geom_id]
