@@ -260,17 +260,19 @@ def contact_force(
   """Extract 6D force:torque for one contact, in contact frame by default."""
   force = wp.spatial_vector(0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
   condim = d.contact.dim[contact_id]
+  efc_address = d.contact.efc_address[contact_id, 0]
 
-  if m.opt.cone == int(ConeType.PYRAMIDAL.value):
-    force = _decode_pyramid(
-      d.efc.force,
-      d.contact.efc_address[contact_id, 0],
-      d.contact.friction[contact_id],
-      condim,
-    )
-  elif m.opt.cone == int(ConeType.ELLIPTIC.value):
-    for i in range(condim):
-      force[i] = d.efc.force[d.contact.efc_address[contact_id, i]]
+  if contact_id >= 0 and contact_id <= d.ncon[0] and efc_address >= 0:
+    if m.opt.cone == int(ConeType.PYRAMIDAL.value):
+      force = _decode_pyramid(
+        d.efc.force,
+        efc_address,
+        d.contact.friction[contact_id],
+        condim,
+      )
+    else:
+      for i in range(condim):
+        force[i] = d.efc.force[d.contact.efc_address[contact_id, i]]
 
   if to_world_frame:
     # Transform both top and bottom parts of spatial vector by the full contact frame matrix
