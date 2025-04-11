@@ -227,7 +227,6 @@ class SmoothTest(parameterized.TestCase):
     _assert_eq(d.ten_length.numpy()[0], mjd.ten_length, "ten_length")
     _assert_eq(d.ten_J.numpy()[0], mjd.ten_J.reshape((mjm.ntendon, mjm.nv)), "ten_J")
     _assert_eq(d.wrap_xpos.numpy()[0], mjd.wrap_xpos, "wrap_xpos")
-    _assert_eq(d.wrap_xpos.numpy()[0], mjd.wrap_xpos, "wrap_xpos")
     _assert_eq(d.wrap_obj.numpy()[0], mjd.wrap_obj, "wrap_obj")
     _assert_eq(d.ten_wrapnum.numpy()[0], mjd.ten_wrapnum, "ten_wrapnum")
     _assert_eq(d.ten_wrapadr.numpy()[0], mjd.ten_wrapadr, "ten_wrapadr")
