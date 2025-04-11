@@ -293,11 +293,13 @@ def _ray_triangle(
   t0 = (A11 * b0 - A10 * b1) / det
   t1 = (-A01 * b0 + A00 * b1) / det
   valid = (t0 >= 0.0) and (t1 >= 0.0) and (t0 + t1 <= 1.0)
+  if not valid:
+    return wp.float32(wp.inf)
 
   # intersect ray with plane of triangle
   nrm = wp.cross(triangle.v0 - triangle.v2, triangle.v1 - triangle.v2)
   dist = wp.dot(triangle.v2 - pnt, nrm) / wp.dot(vec, nrm)
-  valid = valid and (dist >= 0.0)
+  valid = dist >= 0.0
   dist = wp.where(valid, dist, wp.float32(wp.inf))
 
   return dist
@@ -341,7 +343,9 @@ def _ray_mesh(
 
   # Get mesh face and vertex data
   face_start = m.mesh_faceadr[data_id]
-  face_end = wp.where(data_id + 1 < m.ngeom, m.mesh_faceadr[data_id + 1], m.nmeshface)
+  face_end = wp.where(
+    data_id + 1 < m.mesh_faceadr.shape[0], m.mesh_faceadr[data_id + 1], m.nmeshface
+  )
 
   # Iterate through all faces
   for i in range(face_start, face_end):
