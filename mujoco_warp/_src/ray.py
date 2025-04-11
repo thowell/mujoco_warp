@@ -13,9 +13,6 @@
 # limitations under the License.
 # ==============================================================================
 
-from typing import Any
-
-import mujoco
 import warp as wp
 
 from .types import Data
@@ -434,6 +431,7 @@ def _ray_all_geom(
   pnt: wp.vec3,
   vec: wp.vec3,
   geomgroup: vec6,
+  has_geomgroup: bool,
   flg_static: bool,
   bodyexclude: int,
   num_threads: int,
@@ -449,27 +447,29 @@ def _ray_all_geom(
     if geom_id < ngeom:
       # Apply all filters combined into a single boolean
       body_id = m.geom_bodyid[geom_id]
-      
+
       # Start with True and apply each filter condition
       geom_filter = True
-      
       # Body exclusion filter
-      if bodyexclude >= 0:
-        geom_filter = geom_filter and (body_id != bodyexclude)
-        
+      geom_filter = geom_filter and (body_id != bodyexclude)
+
       # Static geom filter
       geom_filter = geom_filter and (flg_static or m.body_weldid[body_id] != 0)
-          
+
       # Geom group filter
-      if geomgroup[0] != 0 or geomgroup[1] != 0 or geomgroup[2] != 0 or geomgroup[3] != 0 or geomgroup[4] != 0 or geomgroup[5] != 0:
+      if has_geomgroup:
         group = m.geom_group[geom_id]
         # Clip group index to [0, 5] (mjNGROUP-1)
         group = wp.max(0, wp.min(5, group))
         geom_filter = geom_filter and (geomgroup[group] != 0)
 
       # Print geom_filter value for debugging
-      wp.printf("geom_id: %d, geom_filter: %d, flg_static: %d\n", geom_id, geom_filter, flg_static)
-
+      wp.printf(
+        "geom_id: %d, geom_filter: %d, flg_static: %d\n",
+        geom_id,
+        geom_filter,
+        flg_static,
+      )
 
       if not geom_filter:
         cur_dist = wp.float32(wp.inf)
@@ -509,6 +509,7 @@ def _ray_all_geom_kernel(
   pnt: wp.array(dtype=wp.vec3),
   vec: wp.array(dtype=wp.vec3),
   geomgroup: vec6,
+  has_geomgroup: bool,
   flg_static: bool,
   bodyexclude: int,
   dist: wp.array(dtype=float, ndim=2),
@@ -523,6 +524,7 @@ def _ray_all_geom_kernel(
     pnt[rayid],
     vec[rayid],
     geomgroup,
+    has_geomgroup,
     flg_static,
     bodyexclude,
     num_threads,
@@ -539,7 +541,7 @@ def ray_geom(
   d: Data,
   pnt: wp.array(dtype=wp.vec3),
   vec: wp.array(dtype=wp.vec3),
-  geomgroup: vec6 = vec6(0, 0, 0, 0, 0, 0),
+  geomgroup: vec6 = None,
   flg_static: bool = True,
   bodyexclude: int = -1,
 ) -> tuple[wp.array, wp.array]:
@@ -562,6 +564,12 @@ def ray_geom(
   dist = wp.zeros((d.nworld, nrays), dtype=float)
   closest_hit_geom_id = wp.zeros((d.nworld, nrays), dtype=int)
   num_threads = 64
+
+  # Create default geomgroup if None is provided
+  has_geomgroup = geomgroup is not None
+  if geomgroup is None:
+    geomgroup = vec6(0, 0, 0, 0, 0, 0)
+
   wp.launch_tiled(
     _ray_all_geom_kernel,
     dim=(d.nworld, nrays),
@@ -571,6 +579,7 @@ def ray_geom(
       pnt,
       vec,
       geomgroup,
+      has_geomgroup,
       flg_static,
       bodyexclude,
       dist,

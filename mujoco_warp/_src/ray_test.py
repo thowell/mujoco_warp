@@ -18,7 +18,6 @@ import mujoco
 import numpy as np
 import warp as wp
 from absl.testing import absltest
-from absl.testing import parameterized
 
 import mujoco_warp as mjwarp
 
@@ -48,9 +47,6 @@ class RayTest(absltest.TestCase):
     vec = wp.array([wp.vec3(0.0, 0.0, -1.0)], dtype=wp.vec3)
     dist, geomid = mjwarp.ray_geom(mx, dx, pnt, vec)
     wp.synchronize()
-    # print results
-    # print("geomid:", geomid.numpy())
-    # print("dist:", dist.numpy())
     geomid_np = geomid.numpy()[0][0]  # Extract from [[-1]]
     dist_np = dist.numpy()[0][0]  # Extract from [[-1.]]
     _assert_eq(geomid_np, -1, "geom_id")
