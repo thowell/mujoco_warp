@@ -53,7 +53,7 @@ _RK4_B = [1.0 / 6.0, 1.0 / 3.0, 1.0 / 3.0, 1.0 / 6.0]
 
 @wp.func
 def _integrate_pos(
-  worldId: int,
+  worldid: int,
   jntid: int,
   m: Model,
   qpos_out: array2df,
@@ -64,9 +64,9 @@ def _integrate_pos(
   jnt_type = m.jnt_type[jntid]
   qpos_adr = m.jnt_qposadr[jntid]
   dof_adr = m.jnt_dofadr[jntid]
-  qpos = qpos_in[worldId]
-  qpos_o = qpos_out[worldId]
-  qvel = qvel_in[worldId]
+  qpos = qpos_in[worldid]
+  qpos_o = qpos_out[worldid]
+  qvel = qvel_in[worldid]
 
   if jnt_type == wp.static(JointType.FREE.value):
     qpos_pos = wp.vec3(qpos[qpos_adr], qpos[qpos_adr + 1], qpos[qpos_adr + 2])
@@ -273,16 +273,16 @@ def rungekutta4(m: Model, d: Data):
 
     @kernel
     def _qvel_acc(d: Data, b: float):
-      worldId, tid = wp.tid()
-      d.qvel_rk[worldId, tid] += b * d.qvel[worldId, tid]
-      d.qacc_rk[worldId, tid] += b * d.qacc[worldId, tid]
+      worldid, tid = wp.tid()
+      d.qvel_rk[worldid, tid] += b * d.qvel[worldid, tid]
+      d.qacc_rk[worldid, tid] += b * d.qacc[worldid, tid]
 
     if m.na:
 
       @kernel
       def _act_dot(d: Data, b: float):
-        worldId, tid = wp.tid()
-        d.act_dot_rk[worldId, tid] += b * d.act_dot[worldId, tid]
+        worldid, tid = wp.tid()
+        d.act_dot_rk[worldid, tid] += b * d.act_dot[worldid, tid]
 
     wp.launch(_qvel_acc, dim=(d.nworld, m.nv), inputs=[d, b])
 
@@ -293,22 +293,22 @@ def rungekutta4(m: Model, d: Data):
     @kernel
     def _qpos(m: Model, d: Data):
       """Integrate joint positions"""
-      worldId, jntId = wp.tid()
-      _integrate_pos(worldId, jntId, m, d.qpos, d.qpos_t0, d.qvel, qvel_scale=a)
+      worldid, jntId = wp.tid()
+      _integrate_pos(worldid, jntId, m, d.qpos, d.qpos_t0, d.qvel, qvel_scale=a)
 
     if m.na:
 
       @kernel
       def _act(m: Model, d: Data):
-        worldId, tid = wp.tid()
-        dact_dot = a * d.act_dot[worldId, tid]
-        d.act[worldId, tid] = d.act_t0[worldId, tid] + dact_dot * m.opt.timestep
+        worldid, tid = wp.tid()
+        dact_dot = a * d.act_dot[worldid, tid]
+        d.act[worldid, tid] = d.act_t0[worldid, tid] + dact_dot * m.opt.timestep
 
     @kernel
     def _qvel(m: Model, d: Data):
-      worldId, tid = wp.tid()
-      dqacc = a * d.qacc[worldId, tid]
-      d.qvel[worldId, tid] = d.qvel_t0[worldId, tid] + dqacc * m.opt.timestep
+      worldid, tid = wp.tid()
+      dqacc = a * d.qacc[worldid, tid]
+      d.qvel[worldid, tid] = d.qvel_t0[worldid, tid] + dqacc * m.opt.timestep
 
     wp.launch(_qpos, dim=(d.nworld, m.njnt), inputs=[m, d])
     if m.na:
