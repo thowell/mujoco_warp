@@ -20,10 +20,10 @@ import numpy as np
 import warp as wp
 from absl.testing import absltest
 from absl.testing import parameterized
-from etils import epath
 
 import mujoco_warp as mjwarp
 
+from . import forward
 from . import test_util
 
 wp.config.verify_cuda = True
@@ -73,6 +73,12 @@ class ForwardTest(parameterized.TestCase):
 
     if mjm.na:
       _assert_eq(d.act_dot.numpy()[0], mjd.act_dot, "act_dot")
+
+      # next activations
+      mujoco.mj_step(mjm, mjd)
+      mjwarp.step(m, d)
+
+      _assert_eq(d.act.numpy()[0], mjd.act, "act")
 
     # TODO(team): test DisableBit.CLAMPCTRL
     # TODO(team): test DisableBit.ACTUATION

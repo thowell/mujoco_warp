@@ -125,22 +125,22 @@ def _next_activation(m: Model, d: Data):
     worldid, actid = wp.tid()
 
     act = d.act[worldid, actid]
-    actdot = d.actdot[worldid, actid]
+    act_dot = d.act_dot[worldid, actid]
 
     # advance the actuation
     if m.actuator_dyntype[actid] == wp.static(DynType.FILTEREXACT.value):
       dyn_prm = m.actuator_dynprm[actid]
       tau = wp.max(MJ_MINVAL, dyn_prm[0])
-      act = act + actdot * tau * (1.0 - wp.exp(-m.opt.timestep / tau))
+      act += act_dot * tau * (1.0 - wp.exp(-m.opt.timestep / tau))
     else:
-      act = act + actdot * m.opt.timestep
+      act += act_dot * m.opt.timestep
 
     # clamp to actrange
     if m.actuator_actlimited[actid]:
       actrange = m.actuator_actrange[actid]
       act = wp.clamp(act, actrange[0], actrange[1])
 
-    d.act[actid] = act
+    d.act[worldid, actid] = act
 
   wp.launch(_next_act, dim=(d.nworld, m.na), inputs=[m, d])
 
