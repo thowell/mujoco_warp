@@ -196,10 +196,6 @@
       <joint joint="knee_left" coef="-.5"/>
     </fixed>
   </tendon> -->
-  <equality>
-    <connect name="joint1" body1="hand_right" body2="hand_left" anchor="0 0 0"/>
-    <connect name="joint2" body1="foot_right" body2="foot_left" anchor="0 0 0"/>
-  </equality>
 
   <actuator>
     <motor name="abdomen_y"       gear="40"  joint="abdomen_y"/>

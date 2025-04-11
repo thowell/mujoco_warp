@@ -149,11 +149,10 @@ def _efc_equality_connect(
     jacp1, _ = _jac(m, d, pos1, body1id, dofid, worldid)
     jacp2, _ = _jac(m, d, pos2, body2id, dofid, worldid)
     j1mj2 = jacp1 - jacp2
-    if j1mj2[0] + j1mj2[1] + j1mj2[2] != 0.0:
-      d.efc.J[efcid, dofid] = j1mj2[0]
-      d.efc.J[efcid + 1, dofid] = j1mj2[1]
-      d.efc.J[efcid + 2, dofid] = j1mj2[2]
-      Jqvel += j1mj2 * d.qvel[worldid, dofid]
+    d.efc.J[efcid, dofid] = j1mj2[0]
+    d.efc.J[efcid + 1, dofid] = j1mj2[1]
+    d.efc.J[efcid + 2, dofid] = j1mj2[2]
+    Jqvel += j1mj2 * d.qvel[worldid, dofid]
 
   invweight = m.body_invweight0[body1id, 0] + m.body_invweight0[body2id, 0]
   pos_imp = wp.length(pos)
