@@ -18,7 +18,7 @@ import mujoco
 import numpy as np
 from absl.testing import absltest
 from absl.testing import parameterized
-from . import collision_driver
+from . import io
 from . import test_util
 
 import mujoco_warp as mjwarp
@@ -154,7 +154,7 @@ class PrimitiveTest(parameterized.TestCase):
         </contact>
       </mujoco>
     """)
-    pairs = collision_driver.geom_pair(mjm)[0]
+    pairs = io.geom_pair(mjm)[0]
     self.assertEqual(pairs.shape[0], 2)
 
   def test_contact_pair(self):
@@ -170,7 +170,7 @@ class PrimitiveTest(parameterized.TestCase):
         </worldbody>
       </mujoco>
     """)
-    _, pairid = collision_driver.geom_pair(mjm)
+    _, pairid = io.geom_pair(mjm)
     self.assertTrue((pairid == -1).all())
 
     # 1 pair
@@ -191,7 +191,7 @@ class PrimitiveTest(parameterized.TestCase):
         </contact>
       </mujoco>
     """)
-    _, pairid = collision_driver.geom_pair(mjm)
+    _, pairid = io.geom_pair(mjm)
     self.assertTrue((pairid == 0).all())
 
     # generate contact
@@ -229,7 +229,7 @@ class PrimitiveTest(parameterized.TestCase):
         </contact>
       </mujoco>
     """)
-    _, pairid = collision_driver.geom_pair(mjm)
+    _, pairid = io.geom_pair(mjm)
     self.assertTrue((pairid == 0).all())
 
     # generate contact
@@ -268,7 +268,7 @@ class PrimitiveTest(parameterized.TestCase):
         </contact>
       </mujoco>
     """)
-    _, pairid = collision_driver.geom_pair(mjm)
+    _, pairid = io.geom_pair(mjm)
     self.assertTrue((pairid == 0).all())
 
     # generate contact
@@ -311,7 +311,7 @@ class PrimitiveTest(parameterized.TestCase):
         </contact>
       </mujoco>
     """)
-    _, pairid = collision_driver.geom_pair(mjm)
+    _, pairid = io.geom_pair(mjm)
     np.testing.assert_equal(pairid, np.array([-1, 0]))
 
     # generate contact

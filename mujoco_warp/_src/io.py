@@ -13,13 +13,58 @@
 # limitations under the License.
 # ==============================================================================
 
+from typing import Tuple
+
 import mujoco
 import numpy as np
 import warp as wp
 
-from . import collision_driver
 from . import support
 from . import types
+
+
+def geom_pair(m: mujoco.MjModel) -> Tuple[np.array, np.array]:
+  filterparent = not (m.opt.disableflags & types.DisableBit.FILTERPARENT.value)
+  exclude_signature = set(m.exclude_signature)
+  predefined_pairs = {(m.pair_geom1[i], m.pair_geom2[i]): i for i in range(m.npair)}
+
+  tri = np.triu_indices(m.ngeom)
+
+  pairs = []
+  pairids = []
+  for geom1, geom2 in zip(*tri):
+    bodyid1 = m.geom_bodyid[geom1]
+    bodyid2 = m.geom_bodyid[geom2]
+    contype1 = m.geom_contype[geom1]
+    contype2 = m.geom_contype[geom2]
+    conaffinity1 = m.geom_conaffinity[geom1]
+    conaffinity2 = m.geom_conaffinity[geom2]
+    weldid1 = m.body_weldid[bodyid1]
+    weldid2 = m.body_weldid[bodyid2]
+    weld_parentid1 = m.body_weldid[m.body_parentid[weldid1]]
+    weld_parentid2 = m.body_weldid[m.body_parentid[weldid2]]
+
+    self_collision = weldid1 == weldid2
+    parent_child_collision = (
+      filterparent
+      and (weldid1 != 0)
+      and (weldid2 != 0)
+      and ((weldid1 == weld_parentid2) or (weldid2 == weld_parentid1))
+    )
+    mask = (contype1 & conaffinity2) or (contype2 & conaffinity1)
+    exclude = (bodyid1 << 16) + (bodyid2) in exclude_signature
+
+    # check for predefined geom pair
+    pairid = predefined_pairs.get((geom1, geom2), -1)
+    pairid = predefined_pairs.get((geom2, geom1), pairid)
+
+    if pairid > -1 or (
+      mask and (not self_collision) and (not parent_child_collision) and (not exclude)
+    ):
+      pairs.append([geom1, geom2])
+      pairids.append(pairid)
+
+  return np.array(pairs), np.array(pairids)
 
 
 def put_model(mjm: mujoco.MjModel) -> types.Model:
@@ -333,8 +378,8 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
     or np.any(mjm.actuator_gaintype == types.GainType.AFFINE.value)
   )
 
-  geom_pair, pairid = collision_driver.geom_pair(mjm)
-  m.nxn_geom_pair = wp.array(geom_pair, dtype=wp.vec2i, ndim=1)
+  geompair, pairid = geom_pair(mjm)
+  m.nxn_geom_pair = wp.array(geompair, dtype=wp.vec2i, ndim=1)
   m.nxn_pairid = wp.array(pairid, dtype=wp.int32, ndim=1)
 
   # predefined collision pairs

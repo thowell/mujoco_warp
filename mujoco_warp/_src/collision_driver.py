@@ -27,57 +27,6 @@ from .types import Model
 from .warp_util import event_scope
 
 
-def geom_pair(m: mujoco.MjModel) -> Tuple[np.array, np.array]:
-  filterparent = not (m.opt.disableflags & DisableBit.FILTERPARENT.value)
-  exclude_signature = set(m.exclude_signature)
-  predefined_pairs = [(g1, g2) for g1, g2 in zip(m.pair_geom1, m.pair_geom2)]
-
-  tri = np.triu_indices(m.ngeom)
-  ntri = tri[0].size
-
-  pairs = []
-  pairids = []
-  for i in range(ntri):
-    geom1 = tri[0][i]
-    geom2 = tri[1][i]
-
-    bodyid1 = m.geom_bodyid[geom1]
-    bodyid2 = m.geom_bodyid[geom2]
-    contype1 = m.geom_contype[geom1]
-    contype2 = m.geom_contype[geom2]
-    conaffinity1 = m.geom_conaffinity[geom1]
-    conaffinity2 = m.geom_conaffinity[geom2]
-    weldid1 = m.body_weldid[bodyid1]
-    weldid2 = m.body_weldid[bodyid2]
-    weld_parentid1 = m.body_weldid[m.body_parentid[weldid1]]
-    weld_parentid2 = m.body_weldid[m.body_parentid[weldid2]]
-
-    self_collision = weldid1 == weldid2
-    parent_child_collision = (
-      filterparent
-      and (weldid1 != 0)
-      and (weldid2 != 0)
-      and ((weldid1 == weld_parentid2) or (weldid2 == weld_parentid1))
-    )
-    mask = (contype1 & conaffinity2) or (contype2 & conaffinity1)
-    exclude = (bodyid1 << 16) + (bodyid2) in exclude_signature
-
-    # check for predefined geom pair
-    pairid = -1
-    for i, pair in enumerate(predefined_pairs):
-      if (geom1, geom2) == pair or (geom2, geom1) == pair:
-        pairid = i
-        break
-
-    if pairid > -1 or (
-      mask and (not self_collision) and (not parent_child_collision) and (not exclude)
-    ):
-      pairs.append([geom1, geom2])
-      pairids.append(pairid)
-
-  return np.array(pairs), np.array(pairids)
-
-
 @wp.func
 def _geom_filter(m: Model, geom1: int, geom2: int, filterparent: bool) -> bool:
   bodyid1 = m.geom_bodyid[geom1]

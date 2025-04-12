@@ -16,7 +16,6 @@
 """Public API for MJWarp."""
 
 from ._src.collision_driver import collision as collision
-from ._src.collision_driver import geom_pair as geom_pair
 from ._src.collision_driver import nxn_broadphase as nxn_broadphase
 from ._src.collision_driver import sap_broadphase as sap_broadphase
 from ._src.collision_primitive import primitive_narrowphase as primitive_narrowphase
@@ -29,6 +28,7 @@ from ._src.forward import fwd_position as fwd_position
 from ._src.forward import fwd_velocity as fwd_velocity
 from ._src.forward import implicit as implicit
 from ._src.forward import step as step
+from ._src.io import geom_pair as geom_pair
 from ._src.io import get_data_into as get_data_into
 from ._src.io import make_data as make_data
 from ._src.io import put_data as put_data
