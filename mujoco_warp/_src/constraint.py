@@ -172,7 +172,7 @@ def _efc_equality_connect(
       wp.float32(0.0),
       refsafe,
       Jqvel[i],
-      0.0
+      0.0,
     )
 
 
@@ -234,7 +234,7 @@ def _efc_equality_joint(
     wp.float32(0.0),
     refsafe,
     Jqvel,
-    0.0
+    0.0,
   )
 
 
@@ -397,7 +397,7 @@ def _efc_contact_pyramidal(
       includemargin,
       refsafe,
       Jqvel,
-      0.0
+      0.0,
     )
 
 
