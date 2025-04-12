@@ -13,14 +13,9 @@
 # limitations under the License.
 # ==============================================================================
 
-from typing import Tuple
-
-import mujoco
-import numpy as np
 import warp as wp
 
 from .collision_primitive import primitive_narrowphase
-from .types import MJ_MINVAL
 from .types import Data
 from .types import DisableBit
 from .types import Model
