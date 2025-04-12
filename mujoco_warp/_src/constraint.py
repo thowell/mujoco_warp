@@ -34,6 +34,7 @@ def _update_efc_row(
   margin: wp.float32,
   refsafe: bool,
   Jqvel: float,
+  frictionloss: float,
 ):
   # Calculate kbi
   timeconst = solref[0]
@@ -72,6 +73,7 @@ def _update_efc_row(
   d.efc.aref[efcid] = -k * imp * pos_aref - b * Jqvel
   d.efc.pos[efcid] = pos_aref + margin
   d.efc.margin[efcid] = margin
+  d.efc.frictionloss[efcid] = frictionloss
 
 
 @wp.func
@@ -170,6 +172,7 @@ def _efc_equality_connect(
       wp.float32(0.0),
       refsafe,
       Jqvel[i],
+      0.0,
     )
 
 
@@ -231,6 +234,42 @@ def _efc_equality_joint(
     wp.float32(0.0),
     refsafe,
     Jqvel,
+    0.0,
+  )
+
+
+@wp.kernel
+def _efc_friction(
+  m: types.Model,
+  d: types.Data,
+  refsafe: bool,
+):
+  # TODO(team): tendon
+  worldid, dofid = wp.tid()
+
+  if m.dof_frictionloss[dofid] <= 0.0:
+    return
+
+  efcid = wp.atomic_add(d.nefc, 0, 1)
+  wp.atomic_add(d.nf, 0, 1)
+  d.efc.worldid[efcid] = worldid
+
+  d.efc.J[efcid, dofid] = 1.0
+  Jqvel = d.qvel[worldid, dofid]
+
+  _update_efc_row(
+    m,
+    d,
+    efcid,
+    0.0,
+    0.0,
+    m.dof_invweight0[dofid],
+    m.dof_solref[dofid],
+    m.dof_solimp[dofid],
+    0.0,
+    refsafe,
+    Jqvel,
+    m.dof_frictionloss[dofid],
   )
 
 
@@ -271,6 +310,7 @@ def _efc_limit_slide_hinge(
       m.jnt_margin[jntid],
       refsafe,
       Jqvel,
+      0.0,
     )
 
 
@@ -357,6 +397,7 @@ def _efc_contact_pyramidal(
       includemargin,
       refsafe,
       Jqvel,
+      0.0,
     )
 
 
@@ -453,6 +494,7 @@ def _efc_contact_elliptic(
       includemargin,
       refsafe,
       Jqvel,
+      0.0,
     )
 
 
@@ -460,11 +502,12 @@ def _efc_contact_elliptic(
 def make_constraint(m: types.Model, d: types.Data):
   """Creates constraint jacobians and other supporting data."""
 
+  d.ne.zero_()
+  d.nf.zero_()
   d.nefc.zero_()
 
   if not (m.opt.disableflags & types.DisableBit.CONSTRAINT.value):
     d.efc.J.zero_()
-    d.ne.zero_()
 
     refsafe = not m.opt.disableflags & types.DisableBit.REFSAFE.value
 
@@ -477,6 +520,13 @@ def make_constraint(m: types.Model, d: types.Data):
       wp.launch(
         _efc_equality_joint,
         dim=(d.nworld, m.eq_jnt_adr.size),
+        inputs=[m, d, refsafe],
+      )
+
+    if not (m.opt.disableflags & types.DisableBit.FRICTIONLOSS.value):
+      wp.launch(
+        _efc_friction,
+        dim=(d.nworld, m.nv),
         inputs=[m, d, refsafe],
       )
 
