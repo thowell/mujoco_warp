@@ -270,34 +270,60 @@ def _update_gradient(m: types.Model, d: types.Data):
       colid = m.dof_tri_col[elementid]
       d.efc.h[worldid, rowid, colid] = d.qM[worldid, rowid, colid]
 
+  # Optimization: launching _JTDAJ with limited number of blocks on a GPU.
+  # Profiling suggests that only a fraction of blocks out of the original
+  # d.njmax blocks do the actual work. It aims to minimize #CTAs with no
+  # effective work. It launches with #blocks that's proportional to the number
+  # of SMs on the GPU. We can now query the SM count:
+  # https://github.com/NVIDIA/warp/commit/f3814e7e5459e5fd13032cf0fddb3daddd510f30
+
+  # make dim_x and nblocks_perblock static arguments for _JTDAJ to allow unrolling the loop
+  if wp.get_device().is_cuda:
+    sm_count = wp.get_device().sm_count
+
+    # Here we assume one block has 256 threads. We use a factor of 6, which
+    # can be change in future to fine-tune the perf. The optimal factor will
+    # depend on the kernel's occupancy, which determines how many blocks can
+    # simultaneously run on the SM. TODO: This factor can be tuned further.
+    dim_x = int((sm_count * 6 * 256) / m.dof_tri_row.size)
+  else:
+    dim_x = d.njmax  # fall back for CPU
+
+  nblocks_perblock = int((d.njmax + dim_x - 1) / dim_x)
+
   @kernel
   def _JTDAJ(m: types.Model, d: types.Data):
     # TODO(team): static m?
-    efcid, elementid = wp.tid()
+    efcid_temp, elementid = wp.tid()
 
-    if efcid >= d.nefc[0]:
-      return
+    nefc = d.nefc[0]
 
-    worldid = d.efc.worldid[efcid]
+    for i in range(nblocks_perblock):
+      efcid = efcid_temp + i * dim_x
 
-    if ITERATIONS > 1:
-      if d.efc.done[worldid]:
+      if efcid >= nefc:
         return
 
-    dofi = m.dof_tri_row[elementid]
-    dofj = m.dof_tri_col[elementid]
+      worldid = d.efc.worldid[efcid]
 
     efc_D = d.efc.D[efcid]
     active = d.efc.active[efcid]
     if efc_D == 0.0 or not active:
       return
 
+    efc_D = d.efc.D[efcid]
+    active = d.efc.active[efcid]
+
+    if efc_D * float(active) == 0.0:
+      return
+
+    dofi = m.dof_tri_row[elementid]
+    dofj = m.dof_tri_col[elementid]
+
     # TODO(team): sparse efc_J
-    wp.atomic_add(
-      d.efc.h[worldid, dofi],
-      dofj,
-      d.efc.J[efcid, dofi] * d.efc.J[efcid, dofj] * efc_D,
-    )
+    value = d.efc.J[efcid, dofi] * d.efc.J[efcid, dofj] * efc_D
+    if value != 0.0:
+      wp.atomic_add(d.efc.h[worldid, dofi], dofj, value)
 
   @kernel
   def _cholesky(d: types.Data):
@@ -331,7 +357,11 @@ def _update_gradient(m: types.Model, d: types.Data):
     else:
       wp.launch(_copy_lower_triangle, dim=(d.nworld, m.dof_tri_row.size), inputs=[m, d])
 
-    wp.launch(_JTDAJ, dim=(d.njmax, m.dof_tri_row.size), inputs=[m, d])
+    wp.launch(
+      _JTDAJ,
+      dim=(dim_x, m.dof_tri_row.size),
+      inputs=[m, d],
+    )
 
     wp.launch_tiled(_cholesky, dim=(d.nworld,), inputs=[d], block_dim=32)
 
@@ -776,6 +806,9 @@ def _linesearch(m: types.Model, d: types.Data):
   @kernel
   def _zero_jv(d: types.Data):
     efcid = wp.tid()
+
+    if efcid >= d.nefc[0]:
+      return
 
     if wp.static(m.opt.iterations) > 1:
       if d.efc.done[d.efc.worldid[efcid]]:

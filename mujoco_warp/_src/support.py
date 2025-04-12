@@ -22,8 +22,11 @@ from .types import Data
 from .types import Model
 from .types import array2df
 from .types import array3df
+from .types import vec5
 from .warp_util import event_scope
 from .warp_util import kernel
+
+wp.set_module_options({"enable_backward": False})
 
 
 def is_sparse(m: mujoco.MjModel):
@@ -133,7 +136,9 @@ def mul_m(
     wp.launch(_mul_m_sparse_diag, dim=(d.nworld, m.nv), inputs=[m, d, res, vec, skip])
 
     wp.launch(
-      _mul_m_sparse_ij, dim=(d.nworld, m.qM_madr_ij.size), inputs=[m, d, res, vec, skip]
+      _mul_m_sparse_ij,
+      dim=(d.nworld, m.qM_madr_ij.size),
+      inputs=[m, d, res, vec, skip],
     )
 
 
@@ -193,6 +198,32 @@ def bisection(x: wp.array(dtype=int), v: int, a_: int, b_: int) -> int:
 
 
 @wp.func
+def all_same(v0: wp.vec3, v1: wp.vec3) -> wp.bool:
+  dx = abs(v0[0] - v1[0])
+  dy = abs(v0[1] - v1[1])
+  dz = abs(v0[2] - v1[2])
+
+  return (
+    (dx <= 1.0e-9 or dx <= max(abs(v0[0]), abs(v1[0])) * 1.0e-9)
+    and (dy <= 1.0e-9 or dy <= max(abs(v0[1]), abs(v1[1])) * 1.0e-9)
+    and (dz <= 1.0e-9 or dz <= max(abs(v0[2]), abs(v1[2])) * 1.0e-9)
+  )
+
+
+@wp.func
+def any_different(v0: wp.vec3, v1: wp.vec3) -> wp.bool:
+  dx = abs(v0[0] - v1[0])
+  dy = abs(v0[1] - v1[1])
+  dz = abs(v0[2] - v1[2])
+
+  return (
+    (dx > 1.0e-9 and dx > max(abs(v0[0]), abs(v1[0])) * 1.0e-9)
+    or (dy > 1.0e-9 and dy > max(abs(v0[1]), abs(v1[1])) * 1.0e-9)
+    or (dz > 1.0e-9 and dz > max(abs(v0[2]), abs(v1[2])) * 1.0e-9)
+  )
+
+
+@wp.func
 def mat33_from_rows(a: wp.vec3, b: wp.vec3, c: wp.vec3):
   return wp.mat33(a, b, c)
 
@@ -200,3 +231,85 @@ def mat33_from_rows(a: wp.vec3, b: wp.vec3, c: wp.vec3):
 @wp.func
 def mat33_from_cols(a: wp.vec3, b: wp.vec3, c: wp.vec3):
   return wp.mat33(a.x, b.x, c.x, a.y, b.y, c.y, a.z, b.z, c.z)
+
+
+@wp.func
+def _decode_pyramid(
+  pyramid: wp.array(dtype=wp.float32), efc_address: int, mu: vec5, condim: int
+) -> wp.spatial_vector:
+  """Converts pyramid representation to contact force."""
+  force = wp.spatial_vector()
+
+  if condim == 1:
+    force[0] = pyramid[efc_address]
+    return force
+
+  force[0] = float(0.0)
+  for i in range(condim - 1):
+    dir1 = pyramid[2 * i + efc_address]
+    dir2 = pyramid[2 * i + efc_address + 1]
+    force[0] += dir1 + dir2
+    force[i + 1] = (dir1 - dir2) * mu[i]
+
+  return force
+
+
+@wp.func
+def contact_force(
+  m: Model, d: Data, contact_id: int, to_world_frame: bool = False
+) -> wp.spatial_vector:
+  """Extract 6D force:torque for one contact, in contact frame by default."""
+  efc_address = d.contact.efc_address[
+    contact_id, 0
+  ]  # 0 in second dimension to get the normal force
+  force = wp.spatial_vector(0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+
+  if efc_address >= 0:
+    condim = d.contact.dim[contact_id]
+
+    # TODO(team): add support for elliptical cone type
+    if m.opt.cone == int(mujoco.mjtCone.mjCONE_PYRAMIDAL.value):
+      force = _decode_pyramid(
+        d.efc.force, efc_address, d.contact.friction[contact_id], condim
+      )
+
+    if to_world_frame:
+      # Transform both top and bottom parts of spatial vector by the full contact frame matrix
+      t = wp.spatial_top(force) @ d.contact.frame[contact_id]
+      b = wp.spatial_bottom(force) @ d.contact.frame[contact_id]
+      force = wp.spatial_vector(t, b)
+
+  return force
+
+
+@wp.kernel
+def contact_force_kernel(
+  m: Model,
+  d: Data,
+  force: wp.array(dtype=wp.spatial_vector),
+  contact_ids: wp.array(dtype=int),
+  to_world_frame: bool,
+):
+  tid = wp.tid()
+
+  contact_id = contact_ids[tid]
+
+  if contact_id >= d.ncon[0]:
+    return
+
+  force[tid] = contact_force(m, d, contact_id, to_world_frame)
+
+
+@wp.func
+def transform_force(
+  force: wp.vec3, torque: wp.vec3, offset: wp.vec3
+) -> wp.spatial_vector:
+  torque -= wp.cross(offset, force)
+  return wp.spatial_vector(torque, force)
+
+
+@wp.func
+def transform_force(frc: wp.spatial_vector, offset: wp.vec3) -> wp.spatial_vector:
+  force = wp.spatial_top(frc)
+  torque = wp.spatial_bottom(frc)
+  return transform_force(force, torque, offset)
