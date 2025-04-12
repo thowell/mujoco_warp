@@ -41,34 +41,6 @@ def _assert_eq(a, b, name):
 
 
 class SolverTest(parameterized.TestCase):
-  def _load(
-    self,
-    fname: str,
-    is_sparse: bool = True,
-    cone: int = mujoco.mjtCone.mjCONE_PYRAMIDAL,
-    solver_: int = mujoco.mjtSolver.mjSOL_NEWTON,
-    iterations: int = 2,
-    ls_iterations: int = 4,
-    nworld: int = 1,
-    njmax: int = 512,
-    keyframe: int = 0,
-    ls_parallel: bool = False,
-  ):
-    path = epath.resource_path("mujoco_warp") / "test_data" / fname
-    mjm = mujoco.MjModel.from_xml_path(path.as_posix())
-    mjm.opt.jacobian = is_sparse
-    mjm.opt.iterations = iterations
-    mjm.opt.ls_iterations = ls_iterations
-    mjm.opt.cone = cone
-    mjm.opt.solver = solver_
-    mjd = mujoco.MjData(mjm)
-    mujoco.mj_resetDataKeyframe(mjm, mjd, keyframe)
-    mujoco.mj_step(mjm, mjd)
-    m = mjwarp.put_model(mjm)
-    m.opt.ls_parallel = ls_parallel
-    d = mjwarp.put_data(mjm, mjd, nworld=nworld, njmax=njmax)
-    return mjm, mjd, m, d
-
   @parameterized.parameters(
     (ConeType.PYRAMIDAL, SolverType.CG, 25, 5, False, False),
     (ConeType.PYRAMIDAL, SolverType.NEWTON, 2, 4, False, False),
@@ -389,15 +361,7 @@ class SolverTest(parameterized.TestCase):
     # TODO(team): test tendon frictionloss
     # TODO(team): test keyframe 2
     for keyframe in range(2):
-      mjm, mjd, m, d = self._load(
-        "constraints.xml",
-      )
-      mjd = mujoco.MjData(mjm)
-      mujoco.mj_resetDataKeyframe(mjm, mjd, keyframe)
-      mujoco.mj_forward(mjm, mjd)
-
-      m = mjwarp.put_model(mjm)
-      d = mjwarp.put_data(mjm, mjd)
+      _, mjd, m, d = test_util.fixture("constraints.xml", keyframe=keyframe)
       mjwarp.solve(m, d)
 
       _assert_eq(d.nf.numpy()[0], mjd.nf, "nf")
