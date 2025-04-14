@@ -18,6 +18,8 @@ import warp as wp
 from . import types
 from .warp_util import event_scope
 
+wp.config.enable_backward = False
+
 
 @wp.func
 def _update_efc_row(
@@ -163,10 +165,20 @@ def _efc_limit_tendon(
 
     Jqvel = float(0.0)
     scl = float(dist_min < dist_max) * 2.0 - 1.0
-    for i in range(m.nv):
-      J = scl * d.ten_J[worldid, tenid, i]
-      d.efc.J[efcid, i] = J
-      Jqvel += J * d.qvel[worldid, i]
+
+    adr = m.tendon_adr[tenid]
+    if m.wrap_type[adr] == wp.static(types.WrapType.JOINT.value):
+      ten_num = m.tendon_num[tenid]
+      for i in range(ten_num):
+        dofadr = m.jnt_dofadr[m.wrap_objid[adr + i]]
+        J = scl * d.ten_J[worldid, tenid, dofadr]
+        d.efc.J[efcid, dofadr] = J
+        Jqvel += J * d.qvel[worldid, dofadr]
+    else:
+      for i in range(m.nv):
+        J = scl * d.ten_J[worldid, tenid, i]
+        d.efc.J[efcid, i] = J
+        Jqvel += J * d.qvel[worldid, i]
 
     _update_efc_row(
       m,
