@@ -557,40 +557,42 @@ def _update_gradient(m: types.Model, d: types.Data):
   if m.opt.cone == types.ConeType.ELLIPTIC:
     # TODO(team): combine with _JTDAJ
     @kernel
-    def _JTCJ(m: types.Model, d: types.Data):
-      conid, elementid, dim1id, dim2id = wp.tid()
+    def _JTCJ(m: types.Model, d: types.Data, nblocks_perblock: int, dim_y: int):
+      conid_tmp, elementid, dim1id, dim2id = wp.tid()
 
       # TODO(team): cone hessian upper/lower triangle
+      for i in range(nblocks_perblock):
+        conid = conid_tmp + i * dim_y
 
-      if conid >= d.ncon[0]:
-        return
+        if conid >= d.ncon[0]:
+          return
 
-      if d.efc.done[d.contact.worldid[conid]]:
-        return
+        if d.efc.done[d.contact.worldid[conid]]:
+          return
 
-      if not d.efc.middle_zone[conid]:
-        return
+        if not d.efc.middle_zone[conid]:
+          return
 
-      condim = d.contact.dim[conid]
+        condim = d.contact.dim[conid]
 
-      if (dim1id >= condim) or (dim2id >= condim):
-        return
+        if (dim1id >= condim) or (dim2id >= condim):
+          return
 
-      worldid = d.contact.worldid[conid]
+        worldid = d.contact.worldid[conid]
 
-      dof1id = m.dof_tri_row[elementid]
-      dof2id = m.dof_tri_col[elementid]
+        dof1id = m.dof_tri_row[elementid]
+        dof2id = m.dof_tri_col[elementid]
 
-      efc1id = d.contact.efc_address[conid, dim1id]
-      efc2id = d.contact.efc_address[conid, dim2id]
+        efc1id = d.contact.efc_address[conid, dim1id]
+        efc2id = d.contact.efc_address[conid, dim2id]
 
-      wp.atomic_add(
-        d.efc.h[worldid, dof1id],
-        dof2id,
-        d.efc.J[efc1id, dof1id]
-        * d.efc.J[efc2id, dof2id]
-        * d.efc.hcone[conid, dim1id, dim2id],
-      )
+        wp.atomic_add(
+          d.efc.h[worldid, dof1id],
+          dof2id,
+          d.efc.J[efc1id, dof1id]
+          * d.efc.J[efc2id, dof2id]
+          * d.efc.hcone[conid, dim1id, dim2id],
+        )
 
   @kernel
   def _cholesky(d: types.Data):
@@ -638,8 +640,10 @@ def _update_gradient(m: types.Model, d: types.Data):
       # depend on the kernel's occupancy, which determines how many blocks can
       # simultaneously run on the SM. TODO: This factor can be tuned further.
       dim_x = int((sm_count * 6 * 256) / m.dof_tri_row.size)
-    else:
-      dim_x = d.njmax  # fall back
+      dim_y = dim_x
+    else:  # fall back
+      dim_x = d.njmax
+      dim_y = d.nconmax
 
     wp.launch(
       _JTDAJ,
@@ -651,8 +655,8 @@ def _update_gradient(m: types.Model, d: types.Data):
       # TODO(team): optimize launch
       wp.launch(
         _JTCJ,
-        dim=(d.nconmax, m.dof_tri_row.size, m.condim_max, m.condim_max),
-        inputs=[m, d],
+        dim=(dim_y, m.dof_tri_row.size, m.condim_max, m.condim_max),
+        inputs=[m, d, int((d.nconmax + dim_y - 1) / dim_y), dim_y],
       )
 
     wp.launch_tiled(_cholesky, dim=(d.nworld,), inputs=[d], block_dim=32)
