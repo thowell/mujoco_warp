@@ -263,6 +263,23 @@ class RayTest(absltest.TestCase):
     _assert_eq(geomid_np, -1, "geom_id")
     _assert_eq(dist_np, -1, "dist")
 
+  def test_ray_invisible(self):
+    """Tests ray doesn't hit transparent geoms."""
+    mjm, mjd, m, d = test_util.fixture("ray.xml")
+
+    # nothing hit with transparent geoms
+    m.geom_rgba = wp.array([wp.vec4(0.0, 0.0, 0.0, 0.0)], dtype=wp.vec4)
+    mujoco.mj_forward(mjm, mjd)
+
+    pnt = wp.array([wp.vec3(2.0, 1.0, 3.0)], dtype=wp.vec3)
+    vec = wp.array([wp.normalize(wp.vec3(0.1, 0.2, -1.0))], dtype=wp.vec3)
+    dist, geomid = mjwarp.ray_geom(m, d, pnt, vec)
+    wp.synchronize()
+    geomid_np = geomid.numpy()[0][0]
+    dist_np = dist.numpy()[0][0]
+    _assert_eq(geomid_np, -1, "geom_id")
+    _assert_eq(dist_np, -1, "dist")
+
 
 if __name__ == "__main__":
   absltest.main()

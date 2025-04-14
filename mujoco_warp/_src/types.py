@@ -584,6 +584,7 @@ class Model:
     geom_bodyid: id of geom's body                           (ngeom,)
     geom_dataid: id of geom's mesh/hfield; -1: none          (ngeom,)
     geom_group: geom group inclusion/exclusion mask          (ngeom,)
+    geom_matid: material id for rendering                    (ngeom,)
     geom_priority: geom contact priority                     (ngeom,)
     geom_solmix: mixing coef for solref/imp in geom pair     (ngeom,)
     geom_solref: constraint solver reference: contact        (ngeom, mjNREF)
@@ -596,6 +597,7 @@ class Model:
     geom_friction: friction for (slide, spin, roll)          (ngeom, 3)
     geom_margin: detect contact if dist<margin               (ngeom,)
     geom_gap: include in solver if dist<margin-gap           (ngeom,)
+    geom_rgba: rgba when material is omitted                  (ngeom, 4)
     site_bodyid: id of site's body                           (nsite,)
     site_pos: local position offset rel. to body             (nsite, 3)
     site_quat: local orientation offset rel. to body         (nsite, 4)
@@ -648,6 +650,7 @@ class Model:
     exclude_signature: body1 << 16 + body2                   (nexclude,)
     actuator_affine_bias_gain: affine bias/gain present
     condim_max: maximum condim for geoms
+    mat_rgba: rgba                                           (nmat, 4)
     tendon_adr: address of first object in tendon's path     (ntendon,)
     tendon_num: number of objects in tendon's path           (ntendon,)
     wrap_objid: object id: geom, site, joint                 (nwrap,)
@@ -767,6 +770,7 @@ class Model:
   geom_bodyid: wp.array(dtype=wp.int32, ndim=1)
   geom_dataid: wp.array(dtype=wp.int32, ndim=1)
   geom_group: wp.array(dtype=wp.int32, ndim=1)
+  geom_matid: wp.array(dtype=wp.int32, ndim=1)
   geom_priority: wp.array(dtype=wp.int32, ndim=1)
   geom_solmix: wp.array(dtype=wp.float32, ndim=1)
   geom_solref: wp.array(dtype=wp.vec2, ndim=1)
@@ -779,6 +783,7 @@ class Model:
   geom_friction: wp.array(dtype=wp.vec3, ndim=1)
   geom_margin: wp.array(dtype=wp.float32, ndim=1)
   geom_gap: wp.array(dtype=wp.float32, ndim=1)
+  geom_rgba: wp.array(dtype=wp.vec4, ndim=1)
   site_bodyid: wp.array(dtype=wp.int32, ndim=1)
   site_pos: wp.array(dtype=wp.vec3, ndim=1)
   site_quat: wp.array(dtype=wp.quat, ndim=1)
@@ -831,6 +836,7 @@ class Model:
   exclude_signature: wp.array(dtype=wp.int32, ndim=1)
   actuator_affine_bias_gain: bool  # warp only
   condim_max: int  # warp only
+  mat_rgba: wp.array(dtype=wp.vec4, ndim=1)
   tendon_adr: wp.array(dtype=wp.int32, ndim=1)
   tendon_num: wp.array(dtype=wp.int32, ndim=1)
   wrap_objid: wp.array(dtype=wp.int32, ndim=1)

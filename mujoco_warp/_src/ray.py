@@ -187,8 +187,7 @@ def _ray_box(
       j = (i + 1) % 3
       k = (i + 2) % 3
 
-      for t in range(wp.static(2)):    
-
+      for t in range(wp.static(2)):
         s = wp.where(t == 0, size[i], -size[i])
         sol = (s - pnt[i]) / vec[i]
 
@@ -320,9 +319,6 @@ def _ray_mesh(
 
   # Get mesh vertex data range
   vert_start = m.mesh_vertadr[data_id]
-  # vert_end = wp.where(
-  #   data_id + 1 < m.mesh_vertadr.shape[0], m.mesh_vertadr[data_id + 1], m.nmeshvert
-  # )
 
   # Get mesh face and vertex data
   face_start = m.mesh_faceadr[data_id]
@@ -428,13 +424,20 @@ def _ray_all_geom(
         group = wp.max(0, wp.min(5, group))
         geom_filter = geom_filter and (geomgroup[group] != 0)
 
-      # Print geom_filter value for debugging
-      wp.printf(
-        "geom_id: %d, geom_filter: %d, flg_static: %d\n",
-        geom_id,
-        geom_filter,
-        flg_static,
+      # RGBA filter
+      matid = m.geom_matid[geom_id]
+      geom_alpha = m.geom_rgba[geom_id][3]
+      mat_alpha = wp.float32(0.0)
+      if matid != -1:
+        mat_alpha = m.mat_rgba[matid][3]
+
+      # Geom is visible if either:
+      # 1. No material and non-zero geom alpha, or
+      # 2. Has material and non-zero material alpha
+      geom_visible = (matid == -1 and geom_alpha != 0.0) or (
+        matid != -1 and mat_alpha != 0.0
       )
+      geom_filter = geom_filter and geom_visible
 
       if not geom_filter:
         cur_dist = wp.float32(wp.inf)
@@ -453,13 +456,11 @@ def _ray_all_geom(
 
     t = wp.tile(cur_dist)
     local_min_idx = wp.tile_argmin(t)
-    local_min_val = t[local_min_idx[0]]  # wp.tile_min(t)
+    local_min_val = t[local_min_idx[0]]
 
     if local_min_val < min_val:
       min_val = local_min_val
       min_idx = local_min_idx[0]
-      # Print min_val and min_idx for debugging
-      wp.printf("min_val: %f, min_idx: %d\n", min_val, min_idx)
 
   min_val = wp.where(min_val == wp.inf, wp.float32(-1.0), min_val)
 

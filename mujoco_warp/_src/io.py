@@ -367,10 +367,12 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
   m.geom_friction = wp.array(mjm.geom_friction, dtype=wp.vec3, ndim=1)
   m.geom_margin = wp.array(mjm.geom_margin, dtype=wp.float32, ndim=1)
   m.geom_gap = wp.array(mjm.geom_gap, dtype=wp.float32, ndim=1)
+  m.geom_rgba = wp.array(mjm.geom_rgba, dtype=wp.vec4, ndim=1)
   m.geom_aabb = wp.array(mjm.geom_aabb, dtype=wp.vec3, ndim=3)
   m.geom_rbound = wp.array(mjm.geom_rbound, dtype=wp.float32, ndim=1)
   m.geom_dataid = wp.array(mjm.geom_dataid, dtype=wp.int32, ndim=1)
   m.geom_group = wp.array(mjm.geom_group, dtype=wp.int32, ndim=1)
+  m.geom_matid = wp.array(mjm.geom_matid, dtype=wp.int32, ndim=1)
   m.mesh_vertadr = wp.array(mjm.mesh_vertadr, dtype=wp.int32, ndim=1)
   m.mesh_vertnum = wp.array(mjm.mesh_vertnum, dtype=wp.int32, ndim=1)
   m.mesh_vert = wp.array(mjm.mesh_vert, dtype=wp.vec3, ndim=1)
@@ -442,6 +444,8 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
   )
 
   m.condim_max = np.max(mjm.geom_condim)  # TODO(team): get max after filtering
+
+  m.mat_rgba = wp.array(mjm.mat_rgba, dtype=wp.vec4, ndim=1)
 
   # tendon
   m.tendon_adr = wp.array(mjm.tendon_adr, dtype=wp.int32, ndim=1)
