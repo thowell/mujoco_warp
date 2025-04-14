@@ -180,54 +180,26 @@ def _ray_box(
   # Initialize with infinity
   min_x = wp.inf
 
-  # Check all 6 faces of the box
-  # X faces (i=0)
-  if vec[0] != 0.0:
-    # +X face
-    x_pos = (size[0] - pnt[0]) / vec[0]
-    p1 = pnt[1] + x_pos * vec[1]
-    p2 = pnt[2] + x_pos * vec[2]
-    if x_pos >= 0.0 and wp.abs(p1) <= size[1] and wp.abs(p2) <= size[2]:
-      min_x = wp.min(min_x, x_pos)
+  # Check all 6 faces of the box (2 faces per axis)
+  for i in range(wp.static(3)):
+    if vec[i] != 0.0:
+      # Get indices for the other two dimensions
+      j = (i + 1) % 3
+      k = (i + 2) % 3
 
-    # -X face
-    x_neg = (-size[0] - pnt[0]) / vec[0]
-    p1 = pnt[1] + x_neg * vec[1]
-    p2 = pnt[2] + x_neg * vec[2]
-    if x_neg >= 0.0 and wp.abs(p1) <= size[1] and wp.abs(p2) <= size[2]:
-      min_x = wp.min(min_x, x_neg)
+      # +i face
+      x_pos = (size[i] - pnt[i]) / vec[i]
+      pj = pnt[j] + x_pos * vec[j]
+      pk = pnt[k] + x_pos * vec[k]
+      if x_pos >= 0.0 and wp.abs(pj) <= size[j] and wp.abs(pk) <= size[k]:
+        min_x = wp.min(min_x, x_pos)
 
-  # Y faces (i=1)
-  if vec[1] != 0.0:
-    # +Y face
-    y_pos = (size[1] - pnt[1]) / vec[1]
-    p0 = pnt[0] + y_pos * vec[0]
-    p2 = pnt[2] + y_pos * vec[2]
-    if y_pos >= 0.0 and wp.abs(p0) <= size[0] and wp.abs(p2) <= size[2]:
-      min_x = wp.min(min_x, y_pos)
-
-    # -Y face
-    y_neg = (-size[1] - pnt[1]) / vec[1]
-    p0 = pnt[0] + y_neg * vec[0]
-    p2 = pnt[2] + y_neg * vec[2]
-    if y_neg >= 0.0 and wp.abs(p0) <= size[0] and wp.abs(p2) <= size[2]:
-      min_x = wp.min(min_x, y_neg)
-
-  # Z faces (i=2)
-  if vec[2] != 0.0:
-    # +Z face
-    z_pos = (size[2] - pnt[2]) / vec[2]
-    p0 = pnt[0] + z_pos * vec[0]
-    p1 = pnt[1] + z_pos * vec[1]
-    if z_pos >= 0.0 and wp.abs(p0) <= size[0] and wp.abs(p1) <= size[1]:
-      min_x = wp.min(min_x, z_pos)
-
-    # -Z face
-    z_neg = (-size[2] - pnt[2]) / vec[2]
-    p0 = pnt[0] + z_neg * vec[0]
-    p1 = pnt[1] + z_neg * vec[1]
-    if z_neg >= 0.0 and wp.abs(p0) <= size[0] and wp.abs(p1) <= size[1]:
-      min_x = wp.min(min_x, z_neg)
+      # -i face
+      x_neg = (-size[i] - pnt[i]) / vec[i]
+      pj = pnt[j] + x_neg * vec[j]
+      pk = pnt[k] + x_neg * vec[k]
+      if x_neg >= 0.0 and wp.abs(pj) <= size[j] and wp.abs(pk) <= size[k]:
+        min_x = wp.min(min_x, x_neg)
 
   return_id = wp.where(wp.isinf(min_x), -1, geom_id)
   return DistanceWithId(min_x, return_id)
