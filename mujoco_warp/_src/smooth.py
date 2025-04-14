@@ -24,6 +24,7 @@ from .types import DisableBit
 from .types import JointType
 from .types import Model
 from .types import TrnType
+from .types import WrapType
 from .types import array2df
 from .types import array3df
 from .types import vec10
@@ -674,11 +675,17 @@ def transmission(m: Model, d: Data):
       else:
         wp.printf("unrecognized joint type")
     elif trntype == wp.static(TrnType.TENDON.value):
-      trnid = m.actuator_trnid[actid, 0]
+      tenid = m.actuator_trnid[actid, 0]
+
       gear0 = gear[0]
-      length[worldid, actid] = d.ten_length[worldid, trnid] * gear0
-      for i in range(m.nv):
-        moment[worldid, actid, i] = d.ten_J[worldid, trnid, i] * gear0
+      length[worldid, actid] = d.ten_length[worldid, tenid] * gear0
+
+      # fixed
+      if m.wrap_type[m.tendon_adr[tenid]] == wp.static(WrapType.JOINT.value):
+        for i in range(m.wrap_jnt_adr.size):
+          dofadr = m.jnt_dofadr[m.wrap_objid[m.wrap_jnt_adr[i]]]
+          moment[worldid, actid, dofadr] = d.ten_J[worldid, tenid, dofadr] * gear0
+      # TODO(team): spatial
     else:
       # TODO(team): site, slidercrank, body
       wp.printf("unhandled transmission type %d\n", trntype)
