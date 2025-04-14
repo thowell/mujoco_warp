@@ -13,6 +13,7 @@
 # limitations under the License.
 # ==============================================================================
 
+import numpy as np
 import warp as wp
 
 from . import smooth
@@ -93,7 +94,11 @@ def sensor_vel(m: Model, d: Data):
   if (m.sensor_vel_adr.size == 0) or (m.opt.disableflags & DisableBit.SENSOR):
     return
 
-  if m.sensor_subtreevel:
+  if wp.static(
+    np.isin(
+      m.sensor_type.numpy(), [SensorType.SUBTREELINVEL, SensorType.SUBTREEANGMOM]
+    ).any()
+  ):
     smooth.subtree_vel(m, d)
 
   wp.launch(_sensor_vel, dim=(d.nworld, m.sensor_vel_adr.size), inputs=[m, d])
