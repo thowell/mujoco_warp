@@ -187,19 +187,15 @@ def _ray_box(
       j = (i + 1) % 3
       k = (i + 2) % 3
 
-      # +i face
-      x_pos = (size[i] - pnt[i]) / vec[i]
-      pj = pnt[j] + x_pos * vec[j]
-      pk = pnt[k] + x_pos * vec[k]
-      if x_pos >= 0.0 and wp.abs(pj) <= size[j] and wp.abs(pk) <= size[k]:
-        min_x = wp.min(min_x, x_pos)
+      for t in range(wp.static(2)):    
 
-      # -i face
-      x_neg = (-size[i] - pnt[i]) / vec[i]
-      pj = pnt[j] + x_neg * vec[j]
-      pk = pnt[k] + x_neg * vec[k]
-      if x_neg >= 0.0 and wp.abs(pj) <= size[j] and wp.abs(pk) <= size[k]:
-        min_x = wp.min(min_x, x_neg)
+        s = wp.where(t == 0, size[i], -size[i])
+        sol = (s - pnt[i]) / vec[i]
+
+        pj = pnt[j] + sol * vec[j]
+        pk = pnt[k] + sol * vec[k]
+        if sol >= 0.0 and wp.abs(pj) <= size[j] and wp.abs(pk) <= size[k]:
+          min_x = wp.min(min_x, sol)
 
   return_id = wp.where(wp.isinf(min_x), -1, geom_id)
   return DistanceWithId(min_x, return_id)
