@@ -375,7 +375,7 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
   m.mesh_vertnum = wp.array(mjm.mesh_vertnum, dtype=wp.int32, ndim=1)
   m.mesh_vert = wp.array(mjm.mesh_vert, dtype=wp.vec3, ndim=1)
   m.mesh_faceadr = wp.array(mjm.mesh_faceadr, dtype=wp.int32, ndim=1)
-  m.mesh_face = wp.array(mjm.mesh_face, dtype=wp.int32, ndim=2)
+  m.mesh_face = wp.array(mjm.mesh_face, dtype=wp.vec3i, ndim=1)
   m.eq_type = wp.array(mjm.eq_type, dtype=wp.int32, ndim=1)
   m.eq_obj1id = wp.array(mjm.eq_obj1id, dtype=wp.int32, ndim=1)
   m.eq_obj2id = wp.array(mjm.eq_obj2id, dtype=wp.int32, ndim=1)

@@ -97,9 +97,11 @@ def _ray_capsule(
   # cylinder round side: (x*lvec+lpnt)'*(x*lvec+lpnt) = size[0]*size[0]
   # For a capsule, we only care about the x,y components when checking cylinder intersection
   # since the z component is handled separately with the caps
-  a = wp.dot(wp.vec2(vec[0], vec[1]), wp.vec2(vec[0], vec[1]))
-  b = wp.dot(wp.vec2(pnt[0], pnt[1]), wp.vec2(vec[0], vec[1]))
-  c = wp.dot(wp.vec2(pnt[0], pnt[1]), wp.vec2(pnt[0], pnt[1])) - size[0] * size[0]
+  vec_2d = wp.vec2(vec[0], vec[1])
+  pnt_2d = wp.vec2(pnt[0], pnt[1])
+  a = wp.dot(vec_2d, vec_2d)
+  b = wp.dot(pnt_2d, vec_2d)
+  c = wp.dot(pnt_2d, pnt_2d) - size[0] * size[0]
 
   # solve a*x^2 + 2*b*x + c = 0
   solutions = _ray_quad(a, b, c)
@@ -363,15 +365,13 @@ def _ray_mesh(
   # Iterate through all faces
   for i in range(face_start, face_end):
     # Get vertices for this face
-    v0_idx = m.mesh_face[i, 0]
-    v1_idx = m.mesh_face[i, 1]
-    v2_idx = m.mesh_face[i, 2]
+    v_idx = m.mesh_face[i]
 
     # Create triangle struct
     triangle = Triangle()
-    triangle.v0 = m.mesh_vert[vert_start + v0_idx]
-    triangle.v1 = m.mesh_vert[vert_start + v1_idx]
-    triangle.v2 = m.mesh_vert[vert_start + v2_idx]
+    triangle.v0 = m.mesh_vert[vert_start + v_idx.x]
+    triangle.v1 = m.mesh_vert[vert_start + v_idx.y]
+    triangle.v2 = m.mesh_vert[vert_start + v_idx.z]
 
     # Calculate intersection
     dist = _ray_triangle(triangle, pnt, vec, basis)
