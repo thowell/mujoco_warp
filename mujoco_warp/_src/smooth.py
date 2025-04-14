@@ -681,9 +681,11 @@ def transmission(m: Model, d: Data):
       length[worldid, actid] = d.ten_length[worldid, tenid] * gear0
 
       # fixed
-      if m.wrap_type[m.tendon_adr[tenid]] == wp.static(WrapType.JOINT.value):
-        for i in range(m.wrap_jnt_adr.size):
-          dofadr = m.jnt_dofadr[m.wrap_objid[m.wrap_jnt_adr[i]]]
+      adr = m.tendon_adr[tenid]
+      if m.wrap_type[adr] == wp.static(WrapType.JOINT.value):
+        ten_num = m.tendon_num[tenid]
+        for i in range(ten_num):
+          dofadr = m.jnt_dofadr[m.wrap_objid[adr + i]]
           moment[worldid, actid, dofadr] = d.ten_J[worldid, tenid, dofadr] * gear0
       # TODO(team): spatial
     else:
