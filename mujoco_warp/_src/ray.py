@@ -502,7 +502,7 @@ def _ray_all_geom_kernel(
   closest_hit_geom_id[worldid, rayid] = intersection.geom_id
 
 
-def ray_geom(
+def ray(
   m: Model,
   d: Data,
   pnt: wp.array(dtype=wp.vec3),
