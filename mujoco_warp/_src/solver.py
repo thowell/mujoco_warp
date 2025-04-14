@@ -71,7 +71,7 @@ def _create_context(m: types.Model, d: types.Data, grad: bool = True):
         return
 
       friction = d.contact.friction[conid]
-      mu = friction[0] / wp.sqrt(wp.static(m.opt.impratio))
+      mu = friction[0] / wp.static(wp.sqrt(m.opt.impratio))
 
       d.efc.fri[conid, 0] = mu
       d.efc.fri[conid, 1] = friction[0]
