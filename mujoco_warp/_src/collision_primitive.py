@@ -15,6 +15,7 @@
 
 import warp as wp
 
+from .math import closest_segment_point
 from .math import closest_segment_to_segment_points
 from .math import make_frame
 from .math import normalize_with_norm
@@ -24,6 +25,8 @@ from .types import GeomType
 from .types import Model
 from .types import vec5
 
+wp.set_module_options({"enable_backward": False})
+
 
 @wp.struct
 class Geom:
@@ -31,7 +34,8 @@ class Geom:
   rot: wp.mat33
   normal: wp.vec3
   size: wp.vec3
-  # TODO(team): mesh fields: vertadr, vertnum
+  vertadr: int
+  vertnum: int
 
 
 @wp.func
@@ -47,6 +51,13 @@ def _geom(
   geom.rot = rot
   geom.size = m.geom_size[gid]
   geom.normal = wp.vec3(rot[0, 2], rot[1, 2], rot[2, 2])  # plane
+  dataid = m.geom_dataid[gid]
+  if dataid >= 0:
+    geom.vertadr = m.mesh_vertadr[dataid]
+    geom.vertnum = m.mesh_vertnum[dataid]
+  else:
+    geom.vertadr = -1
+    geom.vertnum = -1
 
   return geom
 
@@ -171,6 +182,55 @@ def _sphere_sphere(
 
 
 @wp.func
+def _sphere_sphere_ext(
+  pos1: wp.vec3,
+  radius1: float,
+  pos2: wp.vec3,
+  radius2: float,
+  worldid: int,
+  d: Data,
+  margin: float,
+  gap: float,
+  condim: int,
+  friction: vec5,
+  solref: wp.vec2f,
+  solreffriction: wp.vec2f,
+  solimp: vec5,
+  geoms: wp.vec2i,
+  mat1: wp.mat33,
+  mat2: wp.mat33,
+):
+  dir = pos2 - pos1
+  dist = wp.length(dir)
+  if dist == 0.0:
+    # Use cross product of z axes like MuJoCo
+    axis1 = wp.vec3(mat1[0, 2], mat1[1, 2], mat1[2, 2])
+    axis2 = wp.vec3(mat2[0, 2], mat2[1, 2], mat2[2, 2])
+    n = wp.cross(axis1, axis2)
+    n = wp.normalize(n)
+  else:
+    n = dir / dist
+  dist = dist - (radius1 + radius2)
+  pos = pos1 + n * (radius1 + 0.5 * dist)
+
+  write_contact(
+    d,
+    dist,
+    pos,
+    make_frame(n),
+    margin,
+    gap,
+    condim,
+    friction,
+    solref,
+    solreffriction,
+    solimp,
+    geoms,
+    worldid,
+  )
+
+
+@wp.func
 def sphere_sphere(
   sphere1: Geom,
   sphere2: Geom,
@@ -190,6 +250,48 @@ def sphere_sphere(
     sphere1.size[0],
     sphere2.pos,
     sphere2.size[0],
+    worldid,
+    d,
+    margin,
+    gap,
+    condim,
+    friction,
+    solref,
+    solreffriction,
+    solimp,
+    geoms,
+  )
+
+
+@wp.func
+def sphere_capsule(
+  sphere: Geom,
+  cap: Geom,
+  worldid: int,
+  d: Data,
+  margin: float,
+  gap: float,
+  condim: int,
+  friction: vec5,
+  solref: wp.vec2f,
+  solreffriction: wp.vec2f,
+  solimp: vec5,
+  geoms: wp.vec2i,
+):
+  """Calculates one contact between a sphere and a capsule."""
+  axis = wp.vec3(cap.rot[0, 2], cap.rot[1, 2], cap.rot[2, 2])
+  length = cap.size[1]
+  segment = axis * length
+
+  # Find closest point on capsule centerline to sphere center
+  pt = closest_segment_point(cap.pos - segment, cap.pos + segment, sphere.pos)
+
+  # Treat as sphere-sphere collision between sphere and closest point
+  _sphere_sphere(
+    sphere.pos,
+    sphere.size[0],
+    pt,
+    cap.size[0],
     worldid,
     d,
     margin,
@@ -373,6 +475,267 @@ def plane_box(
       break
 
 
+@wp.func
+def sphere_cylinder(
+  sphere: Geom,
+  cylinder: Geom,
+  worldid: int,
+  d: Data,
+  margin: float,
+  gap: float,
+  condim: int,
+  friction: vec5,
+  solref: wp.vec2f,
+  solreffriction: wp.vec2f,
+  solimp: vec5,
+  geoms: wp.vec2i,
+):
+  axis = wp.vec3(
+    cylinder.rot[0, 2],
+    cylinder.rot[1, 2],
+    cylinder.rot[2, 2],
+  )
+
+  vec = sphere.pos - cylinder.pos
+  x = wp.dot(vec, axis)
+
+  a_proj = axis * x
+  p_proj = vec - a_proj
+  p_proj_sqr = wp.dot(p_proj, p_proj)
+
+  collide_side = wp.abs(x) < cylinder.size[1]
+  collide_cap = p_proj_sqr < (cylinder.size[0] * cylinder.size[0])
+
+  if collide_side and collide_cap:
+    dist_cap = cylinder.size[1] - wp.abs(x)
+    dist_radius = cylinder.size[0] - wp.sqrt(p_proj_sqr)
+
+    if dist_cap < dist_radius:
+      collide_side = False
+    else:
+      collide_cap = False
+
+  # Side collision
+  if collide_side:
+    pos_target = cylinder.pos + a_proj
+    _sphere_sphere_ext(
+      sphere.pos,
+      sphere.size[0],
+      pos_target,
+      cylinder.size[0],
+      worldid,
+      d,
+      margin,
+      gap,
+      condim,
+      friction,
+      solref,
+      solreffriction,
+      solimp,
+      geoms,
+      sphere.rot,
+      cylinder.rot,
+    )
+    return
+
+  # Cap collision
+  if collide_cap:
+    if x > 0.0:
+      # top cap
+      pos_cap = cylinder.pos + axis * cylinder.size[1]
+      plane_normal = axis
+    else:
+      # bottom cap
+      pos_cap = cylinder.pos - axis * cylinder.size[1]
+      plane_normal = -axis
+
+    dist, pos_contact = _plane_sphere(plane_normal, pos_cap, sphere.pos, sphere.size[0])
+    plane_normal = -plane_normal  # Flip normal after position calculation
+
+    write_contact(
+      d,
+      dist,
+      pos_contact,
+      make_frame(plane_normal),
+      margin,
+      gap,
+      condim,
+      friction,
+      solref,
+      solreffriction,
+      solimp,
+      geoms,
+      worldid,
+    )
+
+    return
+
+  # Corner collision
+  inv_len = 1.0 / wp.sqrt(p_proj_sqr)
+  p_proj = p_proj * (cylinder.size[0] * inv_len)
+
+  cap_offset = axis * (wp.sign(x) * cylinder.size[1])
+  pos_corner = cylinder.pos + cap_offset + p_proj
+
+  _sphere_sphere_ext(
+    sphere.pos,
+    sphere.size[0],
+    pos_corner,
+    0.0,
+    worldid,
+    d,
+    margin,
+    gap,
+    condim,
+    friction,
+    solref,
+    solreffriction,
+    solimp,
+    geoms,
+    sphere.rot,
+    cylinder.rot,
+  )
+
+
+@wp.func
+def plane_cylinder(
+  plane: Geom,
+  cylinder: Geom,
+  worldid: int,
+  d: Data,
+  margin: float,
+  gap: float,
+  condim: int,
+  friction: vec5,
+  solref: wp.vec2f,
+  solreffriction: wp.vec2f,
+  solimp: vec5,
+  geoms: wp.vec2i,
+):
+  """Calculates contacts between a cylinder and a plane."""
+  # Extract plane normal and cylinder axis
+  n = plane.normal
+  axis = wp.vec3(cylinder.rot[0, 2], cylinder.rot[1, 2], cylinder.rot[2, 2])
+
+  # Project, make sure axis points toward plane
+  prjaxis = wp.dot(n, axis)
+  if prjaxis > 0:
+    axis = -axis
+    prjaxis = -prjaxis
+
+  # Compute normal distance from plane to cylinder center
+  dist0 = wp.dot(cylinder.pos - plane.pos, n)
+
+  # Remove component of -normal along cylinder axis
+  vec = axis * prjaxis - n
+  len_sqr = wp.dot(vec, vec)
+
+  # If vector is nondegenerate, normalize and scale by radius
+  # Otherwise use cylinder's x-axis scaled by radius
+  vec = wp.where(
+    len_sqr >= 1e-12,
+    vec * (cylinder.size[0] / wp.sqrt(len_sqr)),
+    wp.vec3(cylinder.rot[0, 0], cylinder.rot[1, 0], cylinder.rot[2, 0])
+    * cylinder.size[0],
+  )
+
+  # Project scaled vector on normal
+  prjvec = wp.dot(vec, n)
+
+  # Scale cylinder axis by half-length
+  axis = axis * cylinder.size[1]
+  prjaxis = prjaxis * cylinder.size[1]
+
+  frame = make_frame(n)
+
+  # First contact point (end cap closer to plane)
+  dist1 = dist0 + prjaxis + prjvec
+  if dist1 <= margin:
+    pos1 = cylinder.pos + vec + axis - n * (dist1 * 0.5)
+    write_contact(
+      d,
+      dist1,
+      pos1,
+      frame,
+      margin,
+      gap,
+      condim,
+      friction,
+      solref,
+      solreffriction,
+      solimp,
+      geoms,
+      worldid,
+    )
+  else:
+    # If nearest point is above margin, no contacts
+    return
+
+  # Second contact point (end cap farther from plane)
+  dist2 = dist0 - prjaxis + prjvec
+  if dist2 <= margin:
+    pos2 = cylinder.pos + vec - axis - n * (dist2 * 0.5)
+    write_contact(
+      d,
+      dist2,
+      pos2,
+      frame,
+      margin,
+      gap,
+      condim,
+      friction,
+      solref,
+      solreffriction,
+      solimp,
+      geoms,
+      worldid,
+    )
+
+  # Try triangle contact points on side closer to plane
+  prjvec1 = -prjvec * 0.5
+  dist3 = dist0 + prjaxis + prjvec1
+  if dist3 <= margin:
+    # Compute sideways vector scaled by radius*sqrt(3)/2
+    vec1 = wp.cross(vec, axis)
+    vec1 = wp.normalize(vec1) * (cylinder.size[0] * wp.sqrt(3.0) * 0.5)
+
+    # Add contact point A - adjust to closest side
+    pos3 = cylinder.pos + vec1 + axis - vec * 0.5 - n * (dist3 * 0.5)
+    write_contact(
+      d,
+      dist3,
+      pos3,
+      frame,
+      margin,
+      gap,
+      condim,
+      friction,
+      solref,
+      solreffriction,
+      solimp,
+      geoms,
+      worldid,
+    )
+
+    # Add contact point B - adjust to closest side
+    pos4 = cylinder.pos - vec1 + axis - vec * 0.5 - n * (dist3 * 0.5)
+    write_contact(
+      d,
+      dist3,
+      pos4,
+      frame,
+      margin,
+      gap,
+      condim,
+      friction,
+      solref,
+      solreffriction,
+      solimp,
+      geoms,
+      worldid,
+    )
+
+
 @wp.kernel
 def _primitive_narrowphase(
   m: Model,
@@ -507,6 +870,51 @@ def _primitive_narrowphase(
     )
   elif type1 == int(GeomType.CAPSULE.value) and type2 == int(GeomType.CAPSULE.value):
     capsule_capsule(
+      geom1,
+      geom2,
+      worldid,
+      d,
+      margin,
+      gap,
+      condim,
+      friction,
+      solref,
+      solreffriction,
+      solimp,
+      geoms,
+    )
+  elif type1 == int(GeomType.SPHERE.value) and type2 == int(GeomType.CAPSULE.value):
+    sphere_capsule(
+      geom1,
+      geom2,
+      worldid,
+      d,
+      margin,
+      gap,
+      condim,
+      friction,
+      solref,
+      solreffriction,
+      solimp,
+      geoms,
+    )
+  elif type1 == int(GeomType.SPHERE.value) and type2 == int(GeomType.CYLINDER.value):
+    sphere_cylinder(
+      geom1,
+      geom2,
+      worldid,
+      d,
+      margin,
+      gap,
+      condim,
+      friction,
+      solref,
+      solreffriction,
+      solimp,
+      geoms,
+    )
+  elif type1 == int(GeomType.PLANE.value) and type2 == int(GeomType.CYLINDER.value):
+    plane_cylinder(
       geom1,
       geom2,
       worldid,

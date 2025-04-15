@@ -16,7 +16,7 @@
 """Utilities for testing."""
 
 import time
-from typing import Callable, Tuple
+from typing import Callable, Optional, Tuple
 
 import mujoco
 import numpy as np
@@ -24,22 +24,67 @@ import warp as wp
 from etils import epath
 
 from . import io
-from . import types
 from . import warp_util
+from .types import ConeType
+from .types import Data
+from .types import DisableBit
+from .types import Model
+from .types import SolverType
 
 
-def fixture(fname: str, keyframe: int = -1, sparse: bool = True):
-  path = epath.resource_path("mujoco_warp") / "test_data" / fname
-  mjm = mujoco.MjModel.from_xml_path(path.as_posix())
-  mjm.opt.jacobian = sparse
+def fixture(
+  fname: Optional[str] = None,
+  xml: Optional[str] = None,
+  keyframe: int = -1,
+  contact: bool = True,
+  constraint: bool = True,
+  gravity: bool = True,
+  cone: Optional[ConeType] = None,
+  solver: Optional[SolverType] = None,
+  iterations: Optional[int] = None,
+  ls_iterations: Optional[int] = None,
+  ls_parallel: Optional[bool] = None,
+  sparse: Optional[bool] = None,
+  kick: bool = False,
+):
+  if fname is not None:
+    path = epath.resource_path("mujoco_warp") / "test_data" / fname
+    mjm = mujoco.MjModel.from_xml_path(path.as_posix())
+  elif xml is not None:
+    mjm = mujoco.MjModel.from_xml_string(xml)
+  else:
+    raise ValueError("either fname or xml must be provided")
+  if not contact:
+    mjm.opt.disableflags |= DisableBit.CONTACT
+  if not constraint:
+    mjm.opt.disableflags |= DisableBit.CONSTRAINT
+  if not gravity:
+    mjm.opt.disableflags |= DisableBit.GRAVITY
+  if cone is not None:
+    mjm.opt.cone = cone
+  if solver is not None:
+    mjm.opt.solver = solver
+  if iterations is not None:
+    mjm.opt.iterations = iterations
+  if ls_iterations is not None:
+    mjm.opt.ls_iterations = ls_iterations
+  if sparse is not None:
+    if sparse:
+      mjm.opt.jacobian = mujoco.mjtJacobian.mjJAC_SPARSE
+    else:
+      mjm.opt.jacobian = mujoco.mjtJacobian.mjJAC_DENSE
   mjd = mujoco.MjData(mjm)
   if keyframe > -1:
     mujoco.mj_resetDataKeyframe(mjm, mjd, keyframe)
-  # give the system a little kick to ensure we have non-identity rotations
-  mjd.qvel = np.random.uniform(-0.01, 0.01, mjm.nv)
-  mujoco.mj_step(mjm, mjd, 3)  # let dynamics get state significantly non-zero
+  if kick:
+    # give the system a little kick to ensure we have non-identity rotations
+    mjd.qvel = np.random.uniform(-0.01, 0.01, mjm.nv)
+    mjd.ctrl = np.random.normal(scale=0.01, size=mjm.nu)
+    mujoco.mj_step(mjm, mjd, 3)  # let dynamics get state significantly non-zero
   mujoco.mj_forward(mjm, mjd)
   m = io.put_model(mjm)
+  if ls_parallel is not None:
+    m.opt.ls_parallel = ls_parallel
   d = io.put_data(mjm, mjd)
   return mjm, mjd, m, d
 
@@ -55,46 +100,24 @@ def _sum(stack1, stack2):
 
 
 def benchmark(
-  fn: Callable[[types.Model, types.Data], None],
-  mjm: mujoco.MjModel,
-  mjd: mujoco.MjData,
-  nstep: int = 1000,
-  batch_size: int = 1024,
-  solver: str = "cg",
-  iterations: int = 1,
-  ls_iterations: int = 4,
-  ls_parallel: bool = False,
-  nconmax: int = -1,
-  njmax: int = -1,
+  fn: Callable[[Model, Data], None],
+  m: Model,
+  d: Data,
+  nstep: int,
   event_trace: bool = False,
   measure_alloc: bool = False,
-) -> Tuple[float, float, dict, int, list, list]:
-  """Benchmark a model."""
-
-  if solver == "cg":
-    mjm.opt.solver = mujoco.mjtSolver.mjSOL_CG
-  elif solver == "newton":
-    mjm.opt.solver = mujoco.mjtSolver.mjSOL_NEWTON
-
-  mjm.opt.iterations = iterations
-  mjm.opt.ls_iterations = ls_iterations
-
-  m = io.put_model(mjm)
-  m.opt.ls_parallel = ls_parallel
-  d = io.put_data(mjm, mjd, nworld=batch_size, nconmax=nconmax, njmax=njmax)
-
+) -> Tuple[float, float, dict, list, list]:
+  """Benchmark a function of Model and Data."""
   jit_beg = time.perf_counter()
 
-  fn(m, d)
-  # double warmup to work around issues with compilation during graph capture:
   fn(m, d)
 
   jit_end = time.perf_counter()
   jit_duration = jit_end - jit_beg
   wp.synchronize()
+
   trace = {}
-  ncon = []
-  nefc = []
+  ncon, nefc = [], []
 
   with warp_util.EventTracer(enabled=event_trace) as tracer:
     # capture the whole function as a CUDA graph
@@ -117,4 +140,4 @@ def benchmark(
     run_end = time.perf_counter()
     run_duration = run_end - run_beg
 
-  return jit_duration, run_duration, trace, batch_size * nstep, ncon, nefc
+  return jit_duration, run_duration, trace, ncon, nefc
