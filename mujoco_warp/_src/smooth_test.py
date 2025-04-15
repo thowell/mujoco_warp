@@ -226,16 +226,15 @@ class SmoothTest(parameterized.TestCase):
     """Tests fixed tendon."""
     mjm, mjd, m, d = test_util.fixture("tendon.xml", keyframe=0)
 
-    for arr in (d.ten_length, d.ten_J):
+    # tendon
+    for arr in (d.ten_length, d.ten_J, d.actuator_length, d.actuator_moment):
       arr.zero_()
 
     mjwarp.tendon(m, d)
+    mjwarp.transmission(m, d)
 
-    # tendon
     _assert_eq(d.ten_length.numpy()[0], mjd.ten_length, "ten_length")
     _assert_eq(d.ten_J.numpy()[0], mjd.ten_J.reshape((mjm.ntendon, mjm.nv)), "ten_J")
-
-    # actuator
     _assert_eq(d.actuator_length.numpy()[0], mjd.actuator_length, "actuator_length")
     actuator_moment = np.zeros((mjm.nu, mjm.nv))
     mujoco.mju_sparse2dense(
