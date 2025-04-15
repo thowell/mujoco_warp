@@ -13,7 +13,7 @@
 # limitations under the License.
 # ==============================================================================
 
-from typing import Optional
+from typing import Optional, Tuple
 
 import mujoco
 import numpy as np
@@ -22,6 +22,52 @@ from packaging import version
 
 from . import support
 from . import types
+
+
+def geom_pair(m: mujoco.MjModel) -> Tuple[np.array, np.array]:
+  filterparent = not (m.opt.disableflags & types.DisableBit.FILTERPARENT.value)
+  exclude_signature = set(m.exclude_signature)
+  predefined_pairs = {(m.pair_geom1[i], m.pair_geom2[i]): i for i in range(m.npair)}
+
+  tri = np.triu_indices(m.ngeom, k=1)  # k=1 to skip self collision pairs
+
+  geompairs = []
+  pairids = []
+  for geom1, geom2 in zip(*tri):
+    bodyid1 = m.geom_bodyid[geom1]
+    bodyid2 = m.geom_bodyid[geom2]
+    contype1 = m.geom_contype[geom1]
+    contype2 = m.geom_contype[geom2]
+    conaffinity1 = m.geom_conaffinity[geom1]
+    conaffinity2 = m.geom_conaffinity[geom2]
+    weldid1 = m.body_weldid[bodyid1]
+    weldid2 = m.body_weldid[bodyid2]
+    weld_parentid1 = m.body_weldid[m.body_parentid[weldid1]]
+    weld_parentid2 = m.body_weldid[m.body_parentid[weldid2]]
+
+    self_collision = weldid1 == weldid2
+    parent_child_collision = (
+      filterparent
+      and (weldid1 != 0)
+      and (weldid2 != 0)
+      and ((weldid1 == weld_parentid2) or (weldid2 == weld_parentid1))
+    )
+    mask = (contype1 & conaffinity2) or (contype2 & conaffinity1)
+    exclude = (bodyid1 << 16) + (bodyid2) in exclude_signature
+
+    if mask and (not self_collision) and (not parent_child_collision) and (not exclude):
+      pairid = -1
+    else:
+      pairid = -2
+
+    # check for predefined geom pair
+    pairid = predefined_pairs.get((geom1, geom2), pairid)
+    pairid = predefined_pairs.get((geom2, geom1), pairid)
+
+    pairids.append(pairid)
+    geompairs.append([geom1, geom2])
+
+  return np.array(geompairs), np.array(pairids)
 
 
 def put_model(mjm: mujoco.MjModel) -> types.Model:
@@ -92,6 +138,7 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
   m.nsensor = mjm.nsensor
   m.nsensordata = mjm.nsensordata
   m.nlsp = mjm.opt.ls_iterations  # TODO(team): how to set nlsp?
+  m.npair = mjm.npair
   m.nexclude = mjm.nexclude
   m.neq = mjm.neq
   m.opt.timestep = mjm.opt.timestep
@@ -439,6 +486,20 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
     or np.any(mjm.actuator_gaintype == types.GainType.AFFINE.value)
   )
 
+  geompair, pairid = geom_pair(mjm)
+  m.nxn_geom_pair = wp.array(geompair, dtype=wp.vec2i, ndim=1)
+  m.nxn_pairid = wp.array(pairid, dtype=wp.int32, ndim=1)
+
+  # predefined collision pairs
+  m.pair_dim = wp.array(mjm.pair_dim, dtype=wp.int32, ndim=1)
+  m.pair_geom1 = wp.array(mjm.pair_geom1, dtype=wp.int32, ndim=1)
+  m.pair_geom2 = wp.array(mjm.pair_geom2, dtype=wp.int32, ndim=1)
+  m.pair_solref = wp.array(mjm.pair_solref, dtype=wp.vec2, ndim=1)
+  m.pair_solreffriction = wp.array(mjm.pair_solreffriction, dtype=wp.vec2, ndim=1)
+  m.pair_solimp = wp.array(mjm.pair_solimp, dtype=types.vec5, ndim=1)
+  m.pair_margin = wp.array(mjm.pair_margin, dtype=wp.float32, ndim=1)
+  m.pair_gap = wp.array(mjm.pair_gap, dtype=wp.float32, ndim=1)
+  m.pair_friction = wp.array(mjm.pair_friction, dtype=types.vec5, ndim=1)
   m.condim_max = np.max(mjm.geom_condim)  # TODO(team): get max after filtering
 
   # tendon
@@ -672,6 +733,7 @@ def make_data(
 
   # collision driver
   d.collision_pair = wp.empty(nconmax, dtype=wp.vec2i, ndim=1)
+  d.collision_pairid = wp.empty(nconmax, dtype=wp.int32, ndim=1)
   d.collision_worldid = wp.empty(nconmax, dtype=wp.int32, ndim=1)
   d.ncollision = wp.zeros(1, dtype=wp.int32, ndim=1)
 
@@ -939,6 +1001,7 @@ def put_data(
 
   # collision driver
   d.collision_pair = wp.empty(nconmax, dtype=wp.vec2i, ndim=1)
+  d.collision_pairid = wp.empty(nconmax, dtype=wp.int32, ndim=1)
   d.collision_worldid = wp.empty(nconmax, dtype=wp.int32, ndim=1)
   d.ncollision = wp.zeros(1, dtype=wp.int32, ndim=1)
 
