@@ -286,16 +286,17 @@ def sap_broadphase_kernel(m: Model, d: Data, num_threads: int, filter_parent: bo
     j = j % m.ngeom
 
     # geom index
-    idx1 = d.sap_sort_index[worldId, i]
-    idx2 = d.sap_sort_index[worldId, j]
+    geom1 = d.sap_sort_index[worldId, i]
+    geom2 = d.sap_sort_index[worldId, j]
+    idx = (m.ngeom - geom1 // 2) * wp.max(0, geom1 - 1) + geom2 - m.ngeom // 2 - 1
 
-    if not _geom_filter(m, idx1, idx2, filter_parent):
+    if m.nxn_pairid[idx] < -1:
       threadId += num_threads
       continue
 
     # Check if the boxes overlap
     if overlap(worldId, i, j, d.sap_geom_sort):
-      _add_geom_pair(m, d, idx1, idx2, worldId, -1)  # TODO(team): nxnid
+      _add_geom_pair(m, d, geom1, geom2, worldId, idx)
 
     threadId += num_threads
 
@@ -414,6 +415,11 @@ def nxn_broadphase(m: Model, d: Data):
   @wp.kernel
   def _nxn_broadphase(m: Model, d: Data):
     worldid, elementid = wp.tid()
+
+    # check for valid geom pair
+    if m.nxn_pairid[elementid] < -1:
+      return
+
     geom = m.nxn_geom_pair[elementid]
     geom1 = geom[0]
     geom2 = geom[1]

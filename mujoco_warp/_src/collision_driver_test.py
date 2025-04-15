@@ -18,10 +18,11 @@ import mujoco
 import numpy as np
 from absl.testing import absltest
 from absl.testing import parameterized
-from . import io
-from . import test_util
 
 import mujoco_warp as mjwarp
+
+from . import io
+from . import test_util
 
 # tolerance for difference between MuJoCo and MJWarp calculations - mostly
 # due to float precision
@@ -154,8 +155,9 @@ class PrimitiveTest(parameterized.TestCase):
         </contact>
       </mujoco>
     """)
-    pairs = io.geom_pair(mjm)[0]
-    self.assertEqual(pairs.shape[0], 2)
+    geompair, pairid = io.geom_pair(mjm)
+    self.assertEqual(geompair.shape[0], 3)
+    np.testing.assert_equal(pairid, np.array([-2, -1, -1]))
 
   def test_contact_pair(self):
     """Tests contact pair."""
@@ -312,7 +314,7 @@ class PrimitiveTest(parameterized.TestCase):
       </mujoco>
     """)
     _, pairid = io.geom_pair(mjm)
-    np.testing.assert_equal(pairid, np.array([-1, 0]))
+    np.testing.assert_equal(pairid, np.array([-2, -1, 0]))
 
     # generate contact
     m = mjwarp.put_model(mjm)
@@ -330,6 +332,8 @@ class PrimitiveTest(parameterized.TestCase):
     np.testing.assert_allclose(
       d.contact.solimp.numpy()[1], np.array([0.1, 0.2, 0.3, 0.4, 0.5])
     )
+
+    # TODO(team): test sap_broadphase
 
   @parameterized.parameters(
     (True, True),

@@ -28,9 +28,9 @@ def geom_pair(m: mujoco.MjModel) -> Tuple[np.array, np.array]:
   exclude_signature = set(m.exclude_signature)
   predefined_pairs = {(m.pair_geom1[i], m.pair_geom2[i]): i for i in range(m.npair)}
 
-  tri = np.triu_indices(m.ngeom)
+  tri = np.triu_indices(m.ngeom, k=1)  # k=1 to skip self collision pairs
 
-  pairs = []
+  geompairs = []
   pairids = []
   for geom1, geom2 in zip(*tri):
     bodyid1 = m.geom_bodyid[geom1]
@@ -54,17 +54,19 @@ def geom_pair(m: mujoco.MjModel) -> Tuple[np.array, np.array]:
     mask = (contype1 & conaffinity2) or (contype2 & conaffinity1)
     exclude = (bodyid1 << 16) + (bodyid2) in exclude_signature
 
+    if mask and (not self_collision) and (not parent_child_collision) and (not exclude):
+      pairid = -1
+    else:
+      pairid = -2
+
     # check for predefined geom pair
-    pairid = predefined_pairs.get((geom1, geom2), -1)
+    pairid = predefined_pairs.get((geom1, geom2), pairid)
     pairid = predefined_pairs.get((geom2, geom1), pairid)
 
-    if pairid > -1 or (
-      mask and (not self_collision) and (not parent_child_collision) and (not exclude)
-    ):
-      pairs.append([geom1, geom2])
-      pairids.append(pairid)
+    pairids.append(pairid)
+    geompairs.append([geom1, geom2])
 
-  return np.array(pairs), np.array(pairids)
+  return np.array(geompairs), np.array(pairids)
 
 
 def put_model(mjm: mujoco.MjModel) -> types.Model:
