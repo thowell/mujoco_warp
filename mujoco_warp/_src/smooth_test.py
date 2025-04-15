@@ -152,6 +152,32 @@ class SmoothTest(parameterized.TestCase):
     mjwarp.rne(m, d)
     _assert_eq(d.qfrc_bias.numpy()[0], mjd.qfrc_bias, "qfrc_bias")
 
+    # TODO(team): test DisableBit.GRAVITY
+
+  @parameterized.parameters(True, False)
+  def test_rne_postconstraint(self, gravity):
+    """Tests rne_postconstraint."""
+    # TODO(team): test: contact, equality constraints
+    mjm, mjd, m, d = test_util.fixture("pendula.xml", gravity=gravity)
+
+    mjd.xfrc_applied = np.random.uniform(
+      low=-0.01, high=0.01, size=mjd.xfrc_applied.shape
+    )
+    d.xfrc_applied = wp.array(
+      np.expand_dims(mjd.xfrc_applied, axis=0), dtype=wp.spatial_vector
+    )
+
+    mujoco.mj_rnePostConstraint(mjm, mjd)
+
+    for arr in (d.cacc, d.cfrc_int, d.cfrc_ext):
+      arr.zero_()
+
+    mjwarp.rne_postconstraint(m, d)
+
+    _assert_eq(d.cacc.numpy()[0], mjd.cacc, "cacc")
+    _assert_eq(d.cfrc_int.numpy()[0][1:], mjd.cfrc_int[1:], "cfrc_int")
+    _assert_eq(d.cfrc_ext.numpy()[0], mjd.cfrc_ext, "cfrc_ext")
+
   def test_com_vel(self):
     """Tests com_vel."""
     _, mjd, m, d = test_util.fixture("pendula.xml")
@@ -183,47 +209,22 @@ class SmoothTest(parameterized.TestCase):
     _assert_eq(d.actuator_length.numpy()[0], mjd.actuator_length, "actuator_length")
     _assert_eq(d.actuator_moment.numpy()[0], actuator_moment, "actuator_moment")
 
+  def test_subtree_vel(self):
+    """Tests subtree_vel."""
+    mjm, mjd, m, d = test_util.fixture("pendula.xml")
+
+    for arr in (d.subtree_linvel, d.subtree_angmom):
+      arr.zero_()
+
+    mujoco.mj_subtreeVel(mjm, mjd)
+    mjwarp.subtree_vel(m, d)
+
+    _assert_eq(d.subtree_linvel.numpy()[0], mjd.subtree_linvel, "subtree_linvel")
+    _assert_eq(d.subtree_angmom.numpy()[0], mjd.subtree_angmom, "subtree_angmom")
+
   def test_fixed_tendon(self):
     """Tests fixed tendon."""
-    _FIXED_TENDON = """
-      <mujoco>
-        <worldbody>
-          <body>
-            <joint name="joint0" type="hinge"/>
-            <geom type="sphere" size="0.1"/>
-            <body>
-              <joint name="joint1" type="hinge"/>
-              <geom type="sphere" size="0.1"/>
-              <body>
-                <joint name="joint2" type="hinge"/>
-                <geom type="sphere" size="0.1"/>
-              </body>
-            </body>
-          </body>
-        </worldbody>
-        <tendon>
-          <fixed name="fixed">
-            <joint joint="joint0" coef=".25"/>
-            <joint joint="joint1" coef=".5"/>
-            <joint joint="joint2" coef=".75"/>
-          </fixed>
-        </tendon>
-        <actuator>
-          <motor tendon="fixed"/>
-        </actuator>
-        <keyframe>
-          <key qpos=".2 .4 .6" ctrl="1"/>
-        </keyframe>
-      </mujoco>
-    """
-    mjm = mujoco.MjModel.from_xml_string(_FIXED_TENDON)
-    mjm.opt.jacobian = mujoco.mjtJacobian.mjJAC_DENSE
-    mjd = mujoco.MjData(mjm)
-    mujoco.mj_resetDataKeyframe(mjm, mjd, 0)
-    mujoco.mj_forward(mjm, mjd)
-
-    m = mjwarp.put_model(mjm)
-    d = mjwarp.put_data(mjm, mjd)
+    mjm, mjd, m, d = test_util.fixture("tendon.xml", keyframe=0)
 
     for arr in (d.ten_length, d.ten_J):
       arr.zero_()
