@@ -683,7 +683,7 @@ class Model:
     pair_solimp: solver impedance: contact                   (npair, mjNIMP)
     pair_margin: detect contact if dist<margin               (npair,)
     pair_gap: include in solver if dist<margin-gap           (npair,)
-    pair_friction: tangent1, 2, spin, roll1, 2               (npair,)
+    pair_friction: tangent1, 2, spin, roll1, 2               (npair, 5)
     condim_max: maximum condim for geoms
     tendon_adr: address of first object in tendon's path     (ntendon,)
     tendon_num: number of objects in tendon's path           (ntendon,)

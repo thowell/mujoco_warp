@@ -736,22 +736,10 @@ def plane_cylinder(
     )
 
 
-@wp.kernel
-def _primitive_narrowphase(
-  m: Model,
-  d: Data,
-):
-  tid = wp.tid()
-
-  if tid >= d.ncollision[0]:
-    return
-
-  geoms = d.collision_pair[tid]
-  pairid = d.collision_pairid[tid]
-  worldid = d.collision_worldid[tid]
-
-  g1 = geoms[0]
-  g2 = geoms[1]
+@wp.func
+def contact_params(m: Model, d: Data, cid: int):
+  geoms = d.collision_pair[cid]
+  pairid = d.collision_pairid[cid]
 
   if pairid > -1:
     margin = m.pair_margin[pairid]
@@ -762,6 +750,9 @@ def _primitive_narrowphase(
     solreffriction = m.pair_solreffriction[pairid]
     solimp = m.pair_solimp[pairid]
   else:
+    g1 = geoms[0]
+    g2 = geoms[1]
+
     p1 = m.geom_priority[g1]
     p2 = m.geom_priority[g2]
 
@@ -800,6 +791,27 @@ def _primitive_narrowphase(
     solreffriction = wp.vec2(0.0, 0.0)
 
     solimp = mix * m.geom_solimp[g1] + (1.0 - mix) * m.geom_solimp[g2]
+
+  return geoms, margin, gap, condim, friction, solref, solreffriction, solimp
+
+
+@wp.kernel
+def _primitive_narrowphase(
+  m: Model,
+  d: Data,
+):
+  tid = wp.tid()
+
+  if tid >= d.ncollision[0]:
+    return
+
+  geoms, margin, gap, condim, friction, solref, solreffriction, solimp = contact_params(
+    m, d, tid
+  )
+  g1 = geoms[0]
+  g2 = geoms[1]
+
+  worldid = d.collision_worldid[tid]
 
   geom1 = _geom(g1, m, d.geom_xpos[worldid], d.geom_xmat[worldid])
   geom2 = _geom(g2, m, d.geom_xpos[worldid], d.geom_xmat[worldid])
