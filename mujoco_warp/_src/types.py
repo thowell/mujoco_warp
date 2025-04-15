@@ -576,7 +576,6 @@ class Model:
     sensor_pos_adr: addresses for position sensors           (<=nsensor,)
     sensor_vel_adr: addresses for velocity sensors           (<=nsensor,)
     sensor_acc_adr: addresses for acceleration sensors       (<=nsensor,)
-    sensor_rne_postconstraint: rne_postconstraint sensor flag
   """
 
   nq: int
@@ -744,7 +743,6 @@ class Model:
   sensor_pos_adr: wp.array(dtype=wp.int32, ndim=1)  # warp only
   sensor_vel_adr: wp.array(dtype=wp.int32, ndim=1)  # warp only
   sensor_acc_adr: wp.array(dtype=wp.int32, ndim=1)  # warp only
-  sensor_rne_postconstraint: bool  # warp only
 
 
 @wp.struct

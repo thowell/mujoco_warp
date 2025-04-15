@@ -13,6 +13,7 @@
 # limitations under the License.
 # ==============================================================================
 
+import numpy as np
 import warp as wp
 
 from . import smooth
@@ -152,7 +153,12 @@ def sensor_acc(m: Model, d: Data):
   if (m.sensor_acc_adr.size == 0) or (m.opt.disableflags & DisableBit.SENSOR):
     return
 
-  if m.sensor_rne_postconstraint:
+  if wp.static(
+    np.isin(
+      m.sensor_type.numpy(),
+      [SensorType.ACCELEROMETER, SensorType.FORCE, SensorType.TORQUE],
+    ).any()
+  ):
     smooth.rne_postconstraint(m, d)
 
   wp.launch(_sensor_acc, dim=(d.nworld, m.sensor_acc_adr.size), inputs=[m, d])
