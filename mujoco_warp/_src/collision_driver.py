@@ -27,31 +27,6 @@ wp.set_module_options({"enable_backward": False})
 
 
 @wp.func
-def _geom_filter(m: Model, geom1: int, geom2: int, filterparent: bool) -> bool:
-  bodyid1 = m.geom_bodyid[geom1]
-  bodyid2 = m.geom_bodyid[geom2]
-  contype1 = m.geom_contype[geom1]
-  contype2 = m.geom_contype[geom2]
-  conaffinity1 = m.geom_conaffinity[geom1]
-  conaffinity2 = m.geom_conaffinity[geom2]
-  weldid1 = m.body_weldid[bodyid1]
-  weldid2 = m.body_weldid[bodyid2]
-  weld_parentid1 = m.body_weldid[m.body_parentid[weldid1]]
-  weld_parentid2 = m.body_weldid[m.body_parentid[weldid2]]
-
-  self_collision = weldid1 == weldid2
-  parent_child_collision = (
-    filterparent
-    and (weldid1 != 0)
-    and (weldid2 != 0)
-    and ((weldid1 == weld_parentid2) or (weldid2 == weld_parentid1))
-  )
-  mask = (contype1 & conaffinity2) or (contype2 & conaffinity1)
-
-  return mask and (not self_collision) and (not parent_child_collision)
-
-
-@wp.func
 def _add_geom_pair(m: Model, d: Data, geom1: int, geom2: int, worldid: int, nxnid: int):
   pairid = wp.atomic_add(d.ncollision, 0, 1)
 
