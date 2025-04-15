@@ -46,7 +46,7 @@ def fixture(
   ls_parallel: Optional[bool] = None,
   sparse: Optional[bool] = None,
   kick: bool = False,
-  seed: int = 42
+  seed: int = 42,
 ):
   np.random.seed(seed)
   if fname is not None:
