@@ -32,6 +32,34 @@ wp.set_module_options({"enable_backward": False})
 
 
 @wp.func
+def _sphere_filter(m: Model, d: Data, geom1: int, geom2: int, worldid: int) -> bool:
+  margin1 = m.geom_margin[geom1]
+  margin2 = m.geom_margin[geom2]
+  pos1 = d.geom_xpos[worldid, geom1]
+  pos2 = d.geom_xpos[worldid, geom2]
+  size1 = m.geom_rbound[geom1]
+  size2 = m.geom_rbound[geom2]
+
+  bound = size1 + size2 + wp.max(margin1, margin2)
+  dif = pos2 - pos1
+
+  if size1 != 0.0 and size2 != 0.0:
+    # neither geom is a plane
+    dist_sq = wp.dot(dif, dif)
+    return dist_sq <= bound * bound
+  elif size1 == 0.0:
+    # geom1 is a plane
+    xmat1 = d.geom_xmat[worldid, geom1]
+    dist = wp.dot(dif, wp.vec3(xmat1[0, 2], xmat1[1, 2], xmat1[2, 2]))
+    return dist <= bound
+  else:
+    # geom2 is a plane
+    xmat2 = d.geom_xmat[worldid, geom2]
+    dist = wp.dot(-dif, wp.vec3(xmat2[0, 2], xmat2[1, 2], xmat2[2, 2]))
+    return dist <= bound
+
+
+@wp.func
 def _geom_filter(m: Model, geom1: int, geom2: int, filterparent: bool) -> bool:
   bodyid1 = m.geom_bodyid[geom1]
   bodyid2 = m.geom_bodyid[geom2]
@@ -75,109 +103,25 @@ def _add_geom_pair(m: Model, d: Data, geom1: int, geom2: int, worldid: int):
   d.collision_worldid[pairid] = worldid
 
 
-# constants for plane types
-PLANE_ZERO_OFFSET = -1.0
-PLANE_NEGATIVE_OFFSET = -2.0
-PLANE_POSITIVE_OFFSET = -3.0
-
-
-@wp.func
-def _encode_plane(normal: wp.vec3, point_on_plane: wp.vec3, margin: float) -> wp.vec4:
-  normal = wp.normalize(normal)
-  plane_offset = -wp.dot(normal, point_on_plane + normal * margin)
-
-  # scale factor for normal
-  scale = wp.abs(plane_offset)
-
-  if scale < MJ_MINVAL:
-    return wp.vec4(normal.x, normal.y, normal.z, PLANE_ZERO_OFFSET)
-  elif plane_offset < 0.0:
-    return wp.vec4(
-      scale * normal.x, scale * normal.y, scale * normal.z, PLANE_NEGATIVE_OFFSET
-    )
-  else:
-    return wp.vec4(
-      scale * normal.x, scale * normal.y, scale * normal.z, PLANE_POSITIVE_OFFSET
-    )
-
-
-@wp.func
-def _decode_plane(encoded: wp.vec4) -> wp.vec4:
-  magnitude = wp.length(encoded)
-  normal = wp.normalize(_xyz(encoded))
-
-  if encoded.w == PLANE_ZERO_OFFSET:
-    return wp.vec4(normal.x, normal.y, normal.z, 0.0)
-  elif encoded.w == PLANE_NEGATIVE_OFFSET:
-    return wp.vec4(normal.x, normal.y, normal.z, -magnitude)
-  else:
-    return wp.vec4(normal.x, normal.y, normal.z, magnitude)
-
-
-@wp.func
-def _xyz(v: wp.vec4) -> wp.vec3:
-  return wp.vec3(v.x, v.y, v.z)
-
-
-@wp.func
-def _signed_distance_point_plane(point: wp.vec3, plane: wp.vec4) -> float:
-  return wp.dot(point, _xyz(plane)) + plane.w
-
-
-@wp.func
-def _overlap(
-  worldid: int,
-  geom1: int,
-  geom2: int,
-  geoms: wp.array(dtype=wp.vec4, ndim=2),
-) -> bool:
-  # centers and sizes
-  s_a = geoms[worldid, geom1]
-  s_b = geoms[worldid, geom2]
-
-  if s_a.w < 0.0 and s_b.w < 0.0:
-    # both are planes
-    return False
-  elif s_a.w < 0.0 or s_b.w < 0.0:
-    # swap such that s_a is always a plane
-    if s_b.w < 0.0:
-      tmp = s_a
-      s_a = s_b
-      s_b = tmp
-    s_a = _decode_plane(s_a)
-    dist = _signed_distance_point_plane(_xyz(s_b), s_a)
-    return dist <= s_b.w
-  else:
-    # geoms are spheres
-    delta = _xyz(s_a) - _xyz(s_b)
-    dist_sq = wp.dot(delta, delta)
-    radius_sum = s_a.w + s_b.w
-    return dist_sq <= radius_sum * radius_sum
-
-
 @wp.func
 def _binary_search(
   values: wp.array(dtype=Any, ndim=1),
   value: Any,
-  low: int,
-  high: int,
-  return_high: bool = False,
+  lower: int,
+  upper: int,
 ) -> int:
-  while low < high:
-    mid = (low + high) >> 1
+  while lower < upper:
+    mid = (lower + upper) >> 1
     if values[mid] > value:
-      high = mid
+      upper = mid
     else:
-      low = mid + 1
+      lower = mid + 1
 
-  if return_high:
-    return high
-  else:
-    return low
+  return upper
 
 
 @wp.kernel
-def _sap_projection(m: Model, d: Data, direction: wp.vec3):
+def _sap_project(m: Model, d: Data, direction: wp.vec3):
   worldid, geomid = wp.tid()
 
   xpos = d.geom_xpos[worldid, geomid]
@@ -193,28 +137,6 @@ def _sap_projection(m: Model, d: Data, direction: wp.vec3):
   d.sap_projection_lower[worldid, geomid] = center - radius
   d.sap_projection_upper[worldid, geomid] = center + radius
   d.sap_sort_index[worldid, geomid] = geomid
-
-
-@wp.kernel
-def _sap_reorder(m: Model, d: Data):
-  worldid, geomid = wp.tid()
-  mapped = d.sap_sort_index[worldid, geomid]
-
-  # bounding volume
-  xpos = d.geom_xpos[worldid, mapped]
-  rbound = m.geom_rbound[mapped]
-  margin = m.geom_margin[mapped]
-
-  # reorder spheres
-  if rbound == 0.0:
-    # store the plane equation
-    xmat = d.geom_xmat[worldid, mapped]
-    plane_normal = wp.vec3(xmat[0, 2], xmat[1, 2], xmat[2, 2])
-
-    # negative w component distinguishes planes from spheres
-    d.sap_geom_sort[worldid, geomid] = _encode_plane(plane_normal, xpos, margin)
-  else:
-    d.sap_geom_sort[worldid, geomid] = wp.vec4(xpos.x, xpos.y, xpos.z, rbound + margin)
 
 
 @wp.kernel
@@ -234,7 +156,7 @@ def _sap_range(m: Model, d: Data):
 
 
 @wp.kernel
-def _sap_broadphase(m: Model, d: Data, nsweep: int, filter_parent: bool):
+def _sap_broadphase(m: Model, d: Data, nsweep: int, filterparent: bool):
   worldgeomid = wp.tid()
 
   nworldgeom = d.nworld * m.ngeom
@@ -242,9 +164,7 @@ def _sap_broadphase(m: Model, d: Data, nsweep: int, filter_parent: bool):
 
   while worldgeomid < nworkpackages:
     # binary search to find current and next geom pair indices
-    i = _binary_search(
-      d.sap_cumulative_sum, worldgeomid, 0, nworldgeom, return_high=True
-    )
+    i = _binary_search(d.sap_cumulative_sum, worldgeomid, 0, nworldgeom)
     j = i + worldgeomid + 1
 
     if i > 0:
@@ -258,10 +178,10 @@ def _sap_broadphase(m: Model, d: Data, nsweep: int, filter_parent: bool):
     geom1 = d.sap_sort_index[worldid, i]
     geom2 = d.sap_sort_index[worldid, j]
 
-    geom_filter = _geom_filter(m, geom1, geom2, filter_parent)
-    overlap = _overlap(worldid, i, j, d.sap_geom_sort)
+    sphere_filter = _sphere_filter(m, d, geom1, geom2, worldid)
+    geom_filter = _geom_filter(m, geom1, geom2, filterparent)
 
-    if geom_filter and overlap:
+    if sphere_filter and geom_filter:
       _add_geom_pair(m, d, geom1, geom2, worldid)
 
     worldgeomid += nsweep
@@ -279,7 +199,7 @@ def sap_broadphase(m: Model, d: Data):
   direction = wp.normalize(direction)
 
   wp.launch(
-    kernel=_sap_projection,
+    kernel=_sap_project,
     dim=(d.nworld, m.ngeom),
     inputs=[m, d, direction],
   )
@@ -294,12 +214,6 @@ def sap_broadphase(m: Model, d: Data):
   )
 
   wp.launch(
-    kernel=_sap_reorder,
-    dim=(d.nworld, m.ngeom),
-    inputs=[m, d],
-  )
-
-  wp.launch(
     kernel=_sap_range,
     dim=(d.nworld, m.ngeom),
     inputs=[m, d],
@@ -310,11 +224,11 @@ def sap_broadphase(m: Model, d: Data):
 
   # estimate number of overlap checks - assumes each geom has 5 other geoms (batched over all worlds)
   nsweep = 5 * nworldgeom
-  filter_parent = not m.opt.disableflags & DisableBit.FILTERPARENT.value
+  filterparent = not m.opt.disableflags & DisableBit.FILTERPARENT.value
   wp.launch(
     kernel=_sap_broadphase,
     dim=nsweep,
-    inputs=[m, d, nsweep, filter_parent],
+    inputs=[m, d, nsweep, filterparent],
   )
 
 
@@ -340,34 +254,10 @@ def nxn_broadphase(m: Model, d: Data):
       + (m.ngeom - geom1) * ((m.ngeom - geom1) - 1) // 2
     )
 
-    margin1 = m.geom_margin[geom1]
-    margin2 = m.geom_margin[geom2]
-    pos1 = d.geom_xpos[worldid, geom1]
-    pos2 = d.geom_xpos[worldid, geom2]
-    size1 = m.geom_rbound[geom1]
-    size2 = m.geom_rbound[geom2]
-
-    bound = size1 + size2 + wp.max(margin1, margin2)
-    dif = pos2 - pos1
-
-    if size1 != 0.0 and size2 != 0.0:
-      # neither geom is a plane
-      dist_sq = wp.dot(dif, dif)
-      bounds_filter = dist_sq <= bound * bound
-    elif size1 == 0.0:
-      # geom1 is a plane
-      xmat1 = d.geom_xmat[worldid, geom1]
-      dist = wp.dot(dif, wp.vec3(xmat1[0, 2], xmat1[1, 2], xmat1[2, 2]))
-      bounds_filter = dist <= bound
-    else:
-      # geom2 is a plane
-      xmat2 = d.geom_xmat[worldid, geom2]
-      dist = wp.dot(-dif, wp.vec3(xmat2[0, 2], xmat2[1, 2], xmat2[2, 2]))
-      bounds_filter = dist <= bound
-
+    sphere_filter = _sphere_filter(m, d, geom1, geom2, worldid)
     geom_filter = _geom_filter(m, geom1, geom2, filterparent)
 
-    if bounds_filter and geom_filter:
+    if sphere_filter and geom_filter:
       _add_geom_pair(m, d, geom1, geom2, worldid)
 
   wp.launch(
