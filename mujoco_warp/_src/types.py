@@ -350,6 +350,9 @@ class Constraint:
     cost_candidate: costs associated with step sizes  (nworld, nlsp)
     quad_total_candidate: quad_total for step sizes   (nworld, nlsp, 3)
     u: friction cone (normal and tangents)            (nconmax, 6)
+    uu: elliptic cone variables                       (nconmax,)
+    uv: elliptic cone variables                       (nconmax,)
+    vv: elliptic cone variables                       (nconmax,)
   """
 
   worldid: wp.array(dtype=wp.int32, ndim=1)
