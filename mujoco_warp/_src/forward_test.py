@@ -180,9 +180,9 @@ class ImplicitIntegratorTest(parameterized.TestCase):
     mjm, _, _, _ = test_util.fixture("pendula.xml")
 
     mjm.opt.integrator = mujoco.mjtIntegrator.mjINT_IMPLICITFAST
-    mjm.opt.disableflags = mjm.opt.disableflags | disableFlags
-    mjm.actuator_gainprm[:, 2] = np.random.normal(
-      scale=10, size=mjm.actuator_gainprm[:, 2].shape
+    mjm.opt.disableflags |= disableFlags
+    mjm.actuator_gainprm[:, 2] = np.random.uniform(
+      low=0.01, high=10.0, size=mjm.actuator_gainprm[:, 2].shape
     )
 
     # change actuators to velocity/damper to cover all codepaths
@@ -190,20 +190,18 @@ class ImplicitIntegratorTest(parameterized.TestCase):
     mjm.actuator_gaintype[6] = mujoco.mjtGain.mjGAIN_AFFINE
     mjm.actuator_biastype[0:3] = mujoco.mjtBias.mjBIAS_AFFINE
     mjm.actuator_biastype[4:6] = mujoco.mjtBias.mjBIAS_AFFINE
-    mjm.actuator_biasprm[0:3, 2] = -1
-    mjm.actuator_biasprm[4:6, 2] = -1
+    mjm.actuator_biasprm[0:3, 2] = -1.0
+    mjm.actuator_biasprm[4:6, 2] = -1.0
     mjm.actuator_ctrlrange[3:7] = 10.0
     mjm.actuator_gear[:] = 1.0
 
     mjd = mujoco.MjData(mjm)
 
     mjd.qvel = np.random.uniform(low=-0.01, high=0.01, size=mjd.qvel.shape)
-    mjd.ctrl = np.random.normal(scale=10, size=mjd.ctrl.shape)
-    mjd.act = np.random.normal(scale=10, size=mjd.act.shape)
+    mjd.ctrl = np.random.uniform(low=-0.1, high=0.1, size=mjd.ctrl.shape)
+    mjd.act = np.random.uniform(low=-0.1, high=0.1, size=mjd.act.shape)
     mujoco.mj_forward(mjm, mjd)
 
-    mjd.ctrl = np.random.normal(scale=10, size=mjd.ctrl.shape)
-    mjd.act = np.random.normal(scale=10, size=mjd.act.shape)
     m = mjwarp.put_model(mjm)
     d = mjwarp.put_data(mjm, mjd)
 
