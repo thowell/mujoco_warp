@@ -401,7 +401,6 @@ class Constraint:
   quad_total_candidate: wp.array(dtype=wp.vec3f, ndim=2)
   # elliptic cone
   u: wp.array(dtype=wp.float32, ndim=2)
-  middle_zone: wp.array(dtype=bool, ndim=1)
   uu: wp.array(dtype=wp.float32, ndim=1)
   uv: wp.array(dtype=wp.float32, ndim=1)
   vv: wp.array(dtype=wp.float32, ndim=1)

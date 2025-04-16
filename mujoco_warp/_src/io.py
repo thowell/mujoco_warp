@@ -522,7 +522,6 @@ def _constraint(
 
   # TODO(team): skip allocation if not elliptic?
   efc.u = wp.empty((nconmax, 6), dtype=wp.float32)
-  efc.middle_zone = wp.empty((nconmax,), dtype=bool)
   efc.uu = wp.empty((nconmax,), dtype=wp.float32)
   efc.uv = wp.empty((nconmax,), dtype=wp.float32)
   efc.vv = wp.empty((nconmax,), dtype=wp.float32)

@@ -213,42 +213,6 @@ def _update_constraint(m: types.Model, d: types.Data):
 
     @kernel
     def _efc_elliptic1(d: types.Data):
-      conid = wp.tid()
-
-      if conid >= d.ncon[0]:
-        return
-
-      if d.efc.done[d.contact.worldid[conid]]:
-        return
-
-      if d.contact.dim[conid] == 1:
-        return
-
-      mu = d.contact.friction[conid][0] * wp.static(1.0 / m.opt.impratio)
-      n = d.efc.u[conid, 0]
-      tt = d.efc.uu[conid]
-      if tt <= 0.0:
-        t = 0.0
-      else:
-        t = wp.sqrt(tt)
-
-      # middle zone: cone
-      middle_zone = (t > 0.0) and (n < (mu * t)) and ((mu * n + t) > 0.0)
-      d.efc.middle_zone[conid] = middle_zone
-
-      if middle_zone:
-        worldid = d.contact.worldid[conid]
-
-        mu2 = mu * mu
-        dm = d.efc.D[d.contact.efc_address[conid, 0]] / wp.max(
-          mu2 * (1.0 + mu2), types.MJ_MINVAL
-        )
-        nmt = n - mu * t
-
-        wp.atomic_add(d.efc.cost, worldid, 0.5 * dm * nmt * nmt)
-
-    @kernel
-    def _efc_elliptic2(d: types.Data):
       conid, dimid = wp.tid()
 
       if conid >= d.ncon[0]:
@@ -262,25 +226,28 @@ def _update_constraint(m: types.Model, d: types.Data):
       if condim == 1 or dimid >= condim:
         return
 
+      friction = d.contact.friction[conid]
+      efcid = d.contact.efc_address[conid, dimid]
+
+      mu = d.contact.friction[conid][0] * wp.static(1.0 / m.opt.impratio)
+      n = d.efc.u[conid, 0]
+      tt = d.efc.uu[conid]
+      if tt <= 0.0:
+        t = 0.0
+      else:
+        t = wp.sqrt(tt)
+
+      # middle zone: cone
+      middle_zone = (t > 0.0) and (n < (mu * t)) and ((mu * n + t) > 0.0)
+
       # tangent and friction for middle zone:
-      if d.efc.middle_zone[conid]:
-        friction = d.contact.friction[conid]
-        efcid = d.contact.efc_address[conid, dimid]
-
-        mu = d.contact.friction[conid][0] * wp.static(1.0 / m.opt.impratio)
-        n = d.efc.u[conid, 0]
-        tt = d.efc.uu[conid]
-        if tt <= 0.0:
-          t = 0.0
-        else:
-          t = wp.sqrt(tt)
-
-        nmt = n - mu * t
-
+      if middle_zone:
         mu2 = mu * mu
         dm = d.efc.D[d.contact.efc_address[conid, 0]] / wp.max(
           mu2 * float(1.0 + mu2), types.MJ_MINVAL
         )
+
+        nmt = n - mu * t
 
         force = -dm * nmt * mu
         if dimid > 0:
@@ -289,6 +256,9 @@ def _update_constraint(m: types.Model, d: types.Data):
           d.efc.force[efcid] += force_fri
         else:
           d.efc.force[efcid] += force
+
+          worldid = d.contact.worldid[conid]
+          wp.atomic_add(d.efc.cost, worldid, 0.5 * dm * nmt * nmt)
 
   @kernel
   def _zero_qfrc_constraint(d: types.Data):
@@ -343,8 +313,7 @@ def _update_constraint(m: types.Model, d: types.Data):
     wp.launch(_active_elliptic, dim=(d.njmax), inputs=[d])
     wp.launch(_active_bottom_zone, dim=(d.nconmax, m.condim_max), inputs=[d])
     wp.launch(_efc_elliptic0, dim=(d.njmax), inputs=[d])
-    wp.launch(_efc_elliptic1, dim=(d.nconmax), inputs=[d])
-    wp.launch(_efc_elliptic2, dim=(d.nconmax, m.condim_max), inputs=[d])
+    wp.launch(_efc_elliptic1, dim=(d.nconmax, m.condim_max), inputs=[d])
   else:
     wp.launch(_efc_pyramidal, dim=(d.njmax,), inputs=[d])
 
@@ -485,9 +454,6 @@ def _update_gradient(m: types.Model, d: types.Data):
         if d.efc.done[d.contact.worldid[conid]]:
           return
 
-        if not d.efc.middle_zone[conid]:
-          return
-
         condim = d.contact.dim[conid]
 
         if (dim1id >= condim) or (dim2id >= condim):
@@ -511,6 +477,11 @@ def _update_gradient(m: types.Model, d: types.Data):
             t = 0.0
           else:
             t = wp.sqrt(tt)
+
+          middle_zone = (t > 0) and (n < (mu * t)) and ((mu * n + t) > 0.0)
+
+          if not middle_zone:
+            return
 
           t = wp.max(t, types.MJ_MINVAL)
           ttt = wp.max(t * t * t, types.MJ_MINVAL)
