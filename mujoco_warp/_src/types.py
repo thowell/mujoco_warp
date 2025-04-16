@@ -349,7 +349,6 @@ class Constraint:
     mid_alpha: midpoint between lo_alpha and hi_alpha (nworld,)
     cost_candidate: costs associated with step sizes  (nworld, nlsp)
     quad_total_candidate: quad_total for step sizes   (nworld, nlsp, 3)
-    dm: regularized constraint mass                   (nconmax,)
     u: friction cone (normal and tangents)            (nconmax, 6)
   """
 
@@ -401,7 +400,6 @@ class Constraint:
   cost_candidate: wp.array(dtype=wp.float32, ndim=2)
   quad_total_candidate: wp.array(dtype=wp.vec3f, ndim=2)
   # elliptic cone
-  dm: wp.array(dtype=wp.float32, ndim=1)
   u: wp.array(dtype=wp.float32, ndim=2)
   middle_zone: wp.array(dtype=bool, ndim=1)
   uu: wp.array(dtype=wp.float32, ndim=1)

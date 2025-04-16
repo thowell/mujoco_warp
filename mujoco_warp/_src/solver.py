@@ -236,14 +236,15 @@ def _update_constraint(m: types.Model, d: types.Data):
       middle_zone = (t > 0.0) and (n < (mu * t)) and ((mu * n + t) > 0.0)
       d.efc.middle_zone[conid] = middle_zone
 
-      efcid = d.contact.efc_address[conid, 0]
-      mu2 = mu * mu
-      dm = d.efc.D[efcid] / wp.max(mu2 * (1.0 + mu2), types.MJ_MINVAL)
-      d.efc.dm[conid] = dm
-
       if middle_zone:
-        nmt = n - mu * t
         worldid = d.contact.worldid[conid]
+
+        mu2 = mu * mu
+        dm = d.efc.D[d.contact.efc_address[conid, 0]] / wp.max(
+          mu2 * (1.0 + mu2), types.MJ_MINVAL
+        )
+        nmt = n - mu * t
+
         wp.atomic_add(d.efc.cost, worldid, 0.5 * dm * nmt * nmt)
 
     @kernel
@@ -276,7 +277,12 @@ def _update_constraint(m: types.Model, d: types.Data):
 
         nmt = n - mu * t
 
-        force = -d.efc.dm[conid] * nmt * mu
+        mu2 = mu * mu
+        dm = d.efc.D[d.contact.efc_address[conid, 0]] / wp.max(
+          mu2 * float(1.0 + mu2), types.MJ_MINVAL
+        )
+
+        force = -dm * nmt * mu
         if dimid > 0:
           force_fri = -force / t
           force_fri *= d.efc.u[conid, dimid] * friction[dimid - 1]
@@ -537,7 +543,12 @@ def _update_gradient(m: types.Model, d: types.Data):
           else:
             fri2 = d.contact.friction[conid][dim2id - 1]
 
-          hcone *= d.efc.dm[conid] * fri1 * fri2
+          mu2 = mu * mu
+          dm = d.efc.D[d.contact.efc_address[conid, 0]] / wp.max(
+            mu2 * (1.0 + mu2), types.MJ_MINVAL
+          )
+
+          hcone *= dm * fri1 * fri2
 
         wp.atomic_add(
           d.efc.h[worldid, dof1id],
@@ -667,7 +678,10 @@ def _eval_pt_elliptic(
   t2 = vv / t - (uv + alpha * vv) * t1 / tsqr
 
   if middle_zone:
-    dm = d.efc.dm[conid]
+    mu2 = mu * mu
+    dm = d.efc.D[d.contact.efc_address[conid, 0]] / wp.max(
+      mu2 * (1.0 + mu2), types.MJ_MINVAL
+    )
     nmt = n - mu * t
     n1mut1 = n1 - mu * t1
 
