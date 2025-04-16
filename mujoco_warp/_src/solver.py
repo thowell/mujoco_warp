@@ -637,7 +637,7 @@ def _eval_pt_elliptic(
   d: types.Data, alpha: wp.float32, conid: int, efcid: int, impratio: wp.float32
 ) -> wp.vec3:
   uu = d.efc.uu[conid]
-  v0 = d.efc.v0[conid]
+  v0 = d.efc.jv[efcid] * d.contact.friction[conid][0] / impratio
   uv = d.efc.uv[conid]
   vv = d.efc.vv[conid]
   mu = d.contact.friction[conid][0] / impratio
@@ -1431,9 +1431,7 @@ def _linesearch(m: types.Model, d: types.Data):
       else:
         fri = d.contact.friction[conid][dimid - 1]
       v = d.efc.jv[efcid] * fri
-      if dimid == 0:
-        d.efc.v0[conid] = v
-      else:
+      if dimid > 0:
         u = d.efc.u[conid, dimid]
         wp.atomic_add(d.efc.uv, conid, u * v)
         wp.atomic_add(d.efc.vv, conid, v * v)
@@ -1485,7 +1483,6 @@ def _linesearch(m: types.Model, d: types.Data):
   wp.launch(_init_quad, dim=(d.njmax), inputs=[d])
 
   if m.opt.cone == types.ConeType.ELLIPTIC:
-    d.efc.v0.zero_()
     d.efc.uv.zero_()
     d.efc.vv.zero_()
     wp.launch(_quad_elliptic, dim=(d.nconmax, m.condim_max), inputs=[d])

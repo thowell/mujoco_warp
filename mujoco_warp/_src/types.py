@@ -405,7 +405,6 @@ class Constraint:
   u: wp.array(dtype=wp.float32, ndim=2)
   middle_zone: wp.array(dtype=bool, ndim=1)
   uu: wp.array(dtype=wp.float32, ndim=1)
-  v0: wp.array(dtype=wp.float32, ndim=1)
   uv: wp.array(dtype=wp.float32, ndim=1)
   vv: wp.array(dtype=wp.float32, ndim=1)
 
