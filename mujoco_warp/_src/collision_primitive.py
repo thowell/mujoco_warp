@@ -803,7 +803,13 @@ def sphere_box(
   worldid: int,
   d: Data,
   margin: float,
-  geom_indices: wp.vec2i,
+  gap: float,
+  condim: int,
+  friction: vec5,
+  solref: wp.vec2f,
+  solreffriction: wp.vec2f,
+  solimp: vec5,
+  geoms: wp.vec2i,
 ):
   center = wp.transpose(box.rot) @ (sphere.pos - box.pos)
 
@@ -842,7 +848,13 @@ def sphere_box(
     contact_pos,
     make_frame(contact_normal),
     margin,
-    geom_indices,
+    gap,
+    condim,
+    friction,
+    solref,
+    solreffriction,
+    solimp,
+    geoms,
     worldid,
   )
 
@@ -964,6 +976,21 @@ def _primitive_narrowphase(
     )
   elif type1 == int(GeomType.SPHERE.value) and type2 == int(GeomType.CYLINDER.value):
     sphere_cylinder(
+      geom1,
+      geom2,
+      worldid,
+      d,
+      margin,
+      gap,
+      condim,
+      friction,
+      solref,
+      solreffriction,
+      solimp,
+      geoms,
+    )
+  elif type1 == int(GeomType.SPHERE.value) and type2 == int(GeomType.BOX.value):
+    sphere_box(
       geom1,
       geom2,
       worldid,
