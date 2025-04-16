@@ -619,11 +619,11 @@ def _eval_pt_elliptic(
   d: types.Data, alpha: wp.float32, conid: int, efcid: int, impratio: wp.float32
 ) -> wp.vec3:
   uu = d.efc.uu[conid]
-  v0 = d.efc.jv[efcid] * d.contact.friction[conid][0] / impratio
-  uv = d.efc.uv[conid]
-  vv = d.efc.vv[conid]
   mu = d.contact.friction[conid][0] / impratio
   u0 = d.efc.u[conid, 0]
+  v0 = d.efc.jv[efcid] * mu
+  uv = d.efc.uv[conid]
+  vv = d.efc.vv[conid]
   n = u0 + alpha * v0
   tsqr = uu + alpha * (2.0 * uv + alpha * vv)
   t = wp.sqrt(tsqr)  # tangential force
@@ -1391,6 +1391,7 @@ def _linesearch(m: types.Model, d: types.Data):
     @kernel
     def _quad_elliptic(d: types.Data):
       conid, dimid = wp.tid()
+      dimid += 1
 
       if conid >= d.ncon[0]:
         return
@@ -1403,23 +1404,17 @@ def _linesearch(m: types.Model, d: types.Data):
       if condim == 1 or (dimid >= condim):
         return
 
+      efcid0 = d.contact.efc_address[conid, 0]
       efcid = d.contact.efc_address[conid, dimid]
 
       # complete vector quadratic (for bottom zone)
-      if dimid > 0:
-        efcid0 = d.contact.efc_address[conid, 0]
-        wp.atomic_add(d.efc.quad, efcid0, d.efc.quad[efcid])
+      wp.atomic_add(d.efc.quad, efcid0, d.efc.quad[efcid])
 
       # rescale to make primal cone circular
-      if dimid == 0:
-        fri = d.contact.friction[conid][0] * wp.static(1.0 / m.opt.impratio)
-      else:
-        fri = d.contact.friction[conid][dimid - 1]
-      v = d.efc.jv[efcid] * fri
-      if dimid > 0:
-        u = d.efc.u[conid, dimid]
-        wp.atomic_add(d.efc.uv, conid, u * v)
-        wp.atomic_add(d.efc.vv, conid, v * v)
+      u = d.efc.u[conid, dimid]
+      v = d.efc.jv[efcid] * d.contact.friction[conid][dimid - 1]
+      wp.atomic_add(d.efc.uv, conid, u * v)
+      wp.atomic_add(d.efc.vv, conid, v * v)
 
   @kernel
   def _qacc_ma(d: types.Data):
@@ -1470,7 +1465,7 @@ def _linesearch(m: types.Model, d: types.Data):
   if m.opt.cone == types.ConeType.ELLIPTIC:
     d.efc.uv.zero_()
     d.efc.vv.zero_()
-    wp.launch(_quad_elliptic, dim=(d.nconmax, m.condim_max), inputs=[d])
+    wp.launch(_quad_elliptic, dim=(d.nconmax, m.condim_max - 1), inputs=[d])
   if m.opt.ls_parallel:
     _linesearch_parallel(m, d)
   else:
