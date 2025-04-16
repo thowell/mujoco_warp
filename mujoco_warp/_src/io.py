@@ -524,7 +524,6 @@ def _constraint(
   efc.fri = wp.empty((nconmax, 6), dtype=wp.float32)
   efc.dm = wp.empty((nconmax,), dtype=wp.float32)
   efc.u = wp.empty((nconmax, 6), dtype=wp.float32)
-  efc.hcone = wp.empty((nconmax, 6, 6), dtype=wp.float32)
   efc.middle_zone = wp.empty((nconmax,), dtype=bool)
   efc.uu = wp.empty((nconmax,), dtype=wp.float32)
   efc.v0 = wp.empty((nconmax,), dtype=wp.float32)

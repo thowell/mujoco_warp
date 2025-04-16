@@ -352,7 +352,6 @@ class Constraint:
     fri: friction of regularized cone                 (nconmax, 6)
     dm: regularized constraint mass                   (nconmax,)
     u: friction cone (normal and tangents)            (nconmax, 6)
-    hcone: cone Hessian                               (nconmax, 6, 6)
   """
 
   worldid: wp.array(dtype=wp.int32, ndim=1)
@@ -406,7 +405,6 @@ class Constraint:
   fri: wp.array(dtype=wp.float32, ndim=2)
   dm: wp.array(dtype=wp.float32, ndim=1)
   u: wp.array(dtype=wp.float32, ndim=2)
-  hcone: wp.array(dtype=wp.float32, ndim=3)
   middle_zone: wp.array(dtype=bool, ndim=1)
   uu: wp.array(dtype=wp.float32, ndim=1)
   v0: wp.array(dtype=wp.float32, ndim=1)

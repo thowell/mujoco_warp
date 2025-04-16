@@ -319,61 +319,6 @@ def _update_constraint(m: types.Model, d: types.Data):
         else:
           d.efc.force[efcid] += force
 
-    if m.opt.solver == types.SolverType.NEWTON:
-
-      @kernel
-      def _cone_hessian(d: types.Data):
-        conid, dimidi, dimidj = wp.tid()
-
-        if conid >= d.ncon[0]:
-          return
-
-        if d.efc.done[d.contact.worldid[conid]]:
-          return
-
-        if not d.efc.middle_zone[conid]:
-          d.efc.hcone[conid, dimidi, dimidj] = 0.0
-          return
-
-        condim = d.contact.dim[conid]
-
-        # TODO(team): condim=1 case
-        if condim == 1:
-          return
-
-        mu = d.efc.fri[conid, 0]
-        n = d.efc.u[conid, 0]
-        tt = d.efc.uu[conid]
-        if tt <= 0.0:
-          t = 0.0
-        else:
-          t = wp.sqrt(tt)
-
-        t = wp.max(t, types.MJ_MINVAL)
-        ttt = wp.max(t * t * t, types.MJ_MINVAL)
-
-        ui = d.efc.u[conid, dimidi]
-        uj = d.efc.u[conid, dimidj]
-
-        # set first row/column: (1, -mu/t * u)
-        if dimidi == 0 and dimidj == 0:
-          hij = 1.0
-        elif dimidi == 0:
-          hij = -mu / t * uj
-        elif dimidj == 0:
-          hij = -mu / t * ui
-        else:
-          hij = mu * n / ttt * ui * uj
-
-          # add to diagonal: mu^2 - mu * n / t
-          if dimidi == dimidj:
-            hij += mu * mu - mu * n / t
-
-        # pre and post multiply by diag(mu, friction) scale by dm
-        hij *= d.efc.dm[conid] * d.efc.fri[conid, dimidi] * d.efc.fri[conid, dimidj]
-
-        d.efc.hcone[conid, dimidi, dimidj] = hij
-
   @kernel
   def _zero_qfrc_constraint(d: types.Data):
     worldid, dofid = wp.tid()
@@ -429,13 +374,6 @@ def _update_constraint(m: types.Model, d: types.Data):
     wp.launch(_efc_elliptic0, dim=(d.njmax), inputs=[d])
     wp.launch(_efc_elliptic1, dim=(d.nconmax), inputs=[d])
     wp.launch(_efc_elliptic2, dim=(d.nconmax, m.condim_max), inputs=[d])
-
-    if m.opt.solver == types.SolverType.NEWTON:
-      d.efc.hcone.zero_()
-      # TODO(team): compute only lower/upper triangle
-      # TODO(team): condim_max
-      wp.launch(_cone_hessian, dim=(d.nconmax, 6, 6), inputs=[d])
-
   else:
     wp.launch(_efc_pyramidal, dim=(d.njmax,), inputs=[d])
 
@@ -586,12 +524,44 @@ def _update_gradient(m: types.Model, d: types.Data):
         efc1id = d.contact.efc_address[conid, dim1id]
         efc2id = d.contact.efc_address[conid, dim2id]
 
+        # TODO(team): condim=1 case
+        hcone = float(0.0)
+        if condim > 1:
+          mu = d.efc.fri[conid, 0]
+          n = d.efc.u[conid, 0]
+          tt = d.efc.uu[conid]
+          if tt <= 0.0:
+            t = 0.0
+          else:
+            t = wp.sqrt(tt)
+
+          t = wp.max(t, types.MJ_MINVAL)
+          ttt = wp.max(t * t * t, types.MJ_MINVAL)
+
+          ui = d.efc.u[conid, dim1id]
+          uj = d.efc.u[conid, dim2id]
+
+          # set first row/column: (1, -mu/t * u)
+          if dim1id == 0 and dim2id == 0:
+            hcone = 1.0
+          elif dim1id == 0:
+            hcone = -mu / t * uj
+          elif dim2id == 0:
+            hcone = -mu / t * ui
+          else:
+            hcone = mu * n / ttt * ui * uj
+
+            # add to diagonal: mu^2 - mu * n / t
+            if dim1id == dim2id:
+              hcone += mu * mu - mu * n / t
+
+          # pre and post multiply by diag(mu, friction) scale by dm
+          hcone *= d.efc.dm[conid] * d.efc.fri[conid, dim1id] * d.efc.fri[conid, dim2id]
+
         wp.atomic_add(
           d.efc.h[worldid, dof1id],
           dof2id,
-          d.efc.J[efc1id, dof1id]
-          * d.efc.J[efc2id, dof2id]
-          * d.efc.hcone[conid, dim1id, dim2id],
+          d.efc.J[efc1id, dof1id] * d.efc.J[efc2id, dof2id] * hcone,
         )
 
   @kernel
