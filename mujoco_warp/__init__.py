@@ -29,6 +29,7 @@ from ._src.forward import fwd_velocity as fwd_velocity
 from ._src.forward import implicit as implicit
 from ._src.forward import rungekutta4 as rungekutta4
 from ._src.forward import step as step
+from ._src.io import geom_pair as geom_pair
 from ._src.io import get_data_into as get_data_into
 from ._src.io import make_data as make_data
 from ._src.io import put_data as put_data
