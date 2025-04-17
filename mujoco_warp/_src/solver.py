@@ -73,6 +73,8 @@ def _create_context(m: types.Model, d: types.Data, grad: bool = True):
 
 
 def _update_constraint(m: types.Model, d: types.Data):
+  DSBL_FLOSS = m.opt.disableflags & types.DisableBit.FRICTIONLOSS
+
   @kernel
   def _init_cost(d: types.Data):
     worldid = wp.tid()
@@ -95,26 +97,43 @@ def _update_constraint(m: types.Model, d: types.Data):
         return
 
       worldid = d.efc.worldid[efcid]
+      efc_D = d.efc.D[efcid]
+      Jaref = d.efc.Jaref[efcid]
 
-      if wp.static(m.opt.iterations) > 1:
-        if d.efc.done[worldid]:
+      cost = 0.5 * efc_D * Jaref * Jaref
+      efc_force = -efc_D * Jaref
+
+      ne = d.ne[0]
+      nf = d.nf[0]
+
+      if efcid < ne:
+        # equality
+        pass
+      elif efcid < ne + nf and wp.static(not DSBL_FLOSS):
+        # friction
+        f = d.efc.frictionloss[efcid]
+        if f > 0.0:
+          rf = _safe_div(f, efc_D)
+          if Jaref <= -rf:
+            d.efc.force[efcid] = f
+            d.efc.active[efcid] = False
+            wp.atomic_add(d.efc.cost, worldid, -0.5 * rf - Jaref)
+            return
+          elif Jaref >= rf:
+            d.efc.force[efcid] = -f
+            d.efc.active[efcid] = False
+            wp.atomic_add(d.efc.cost, worldid, -0.5 * rf + Jaref)
+            return
+      else:
+        # limit, contact
+        if Jaref >= 0.0:
+          d.efc.force[efcid] = 0.0
+          d.efc.active[efcid] = False
           return
 
-      Jaref = d.efc.Jaref[efcid]
-      efc_D = d.efc.D[efcid]
-
-      # TODO(team): active and conditionally active constraints
-      active = int(Jaref < 0.0)
-      d.efc.active[efcid] = active
-
-      if active:
-        # efc_force = -efc_D * Jaref * active
-        d.efc.force[efcid] = -1.0 * efc_D * Jaref
-
-        # cost = 0.5 * sum(efc_D * Jaref * Jaref * active))
-        wp.atomic_add(d.efc.cost, worldid, 0.5 * efc_D * Jaref * Jaref)
-      else:
-        d.efc.force[efcid] = 0.0
+      d.efc.force[efcid] = efc_force
+      d.efc.active[efcid] = True
+      wp.atomic_add(d.efc.cost, worldid, cost)
 
   elif m.opt.cone == types.ConeType.ELLIPTIC:
 
@@ -147,23 +166,6 @@ def _update_constraint(m: types.Model, d: types.Data):
         d.efc.u[conid, dimid] = 0.0
 
     @kernel
-    def _active_elliptic(d: types.Data):
-      efcid = wp.tid()
-
-      if efcid >= d.nefc[0]:
-        return
-
-      if d.efc.done[d.efc.worldid[efcid]]:
-        return
-
-      if d.efc.Jaref[efcid] < 0.0:
-        d.efc.active[efcid] = 1
-      elif efcid < d.ne + d.nf:
-        d.efc.active[efcid] = 1
-      else:
-        d.efc.active[efcid] = 0
-
-    @kernel
     def _active_bottom_zone(d: types.Data):
       conid, dimid = wp.tid()
 
@@ -190,7 +192,7 @@ def _update_constraint(m: types.Model, d: types.Data):
 
       # update active
       efcid = d.contact.efc_address[conid, dimid]
-      d.efc.active[efcid] = int(bottom_zone)
+      d.efc.active[efcid] = bottom_zone
 
     @kernel
     def _efc_elliptic0(d: types.Data):
@@ -202,14 +204,48 @@ def _update_constraint(m: types.Model, d: types.Data):
       if d.efc.done[d.efc.worldid[efcid]]:
         return
 
-      if d.efc.active[efcid]:
-        efc_D = d.efc.D[efcid]
-        Jaref = d.efc.Jaref[efcid]
-        DJ = efc_D * Jaref
-        d.efc.force[efcid] = -DJ
-        wp.atomic_add(d.efc.cost, d.efc.worldid[efcid], 0.5 * DJ * Jaref)
+      worldid = d.efc.worldid[efcid]
+      efc_D = d.efc.D[efcid]
+      Jaref = d.efc.Jaref[efcid]
+
+      ne = d.ne[0]
+      nf = d.nf[0]
+      nl = d.nl[0]
+
+      if efcid < ne:
+        # equality
+        d.efc.active[efcid] = True
+      elif efcid < ne + nf and wp.static(not DSBL_FLOSS):
+        # friction
+        f = d.efc.frictionloss[efcid]
+        if f > 0.0:
+          rf = _safe_div(f, efc_D)
+          if Jaref <= -rf:
+            d.efc.force[efcid] = f
+            d.efc.active[efcid] = False
+            wp.atomic_add(d.efc.cost, worldid, -0.5 * rf - Jaref)
+            return
+          elif Jaref >= rf:
+            d.efc.force[efcid] = -f
+            d.efc.active[efcid] = False
+            wp.atomic_add(d.efc.cost, worldid, -0.5 * rf + Jaref)
+            return
+      elif efcid < ne + nf + nl:
+        # limits
+        if Jaref < 0.0:
+          d.efc.active[efcid] = True
+        else:
+          d.efc.force[efcid] = 0.0
+          d.efc.active[efcid] = False
+          return
       else:
-        d.efc.force[efcid] = 0.0
+        # contact
+        if not d.efc.active[efcid]:  # calculated by _active_bottom_zone
+          d.efc.force[efcid] = 0.0
+          return
+
+      d.efc.force[efcid] = -efc_D * Jaref
+      wp.atomic_add(d.efc.cost, worldid, 0.5 * efc_D * Jaref * Jaref)
 
     @kernel
     def _efc_elliptic1(d: types.Data):
@@ -309,8 +345,8 @@ def _update_constraint(m: types.Model, d: types.Data):
 
   if m.opt.cone == types.ConeType.ELLIPTIC:
     d.efc.uu.zero_()
+    d.efc.active.zero_()
     wp.launch(_u_elliptic, dim=(d.nconmax, m.condim_max), inputs=[d])
-    wp.launch(_active_elliptic, dim=(d.njmax), inputs=[d])
     wp.launch(_active_bottom_zone, dim=(d.nconmax, m.condim_max), inputs=[d])
     wp.launch(_efc_elliptic0, dim=(d.njmax), inputs=[d])
     wp.launch(_efc_elliptic1, dim=(d.nconmax, m.condim_max), inputs=[d])
@@ -400,37 +436,63 @@ def _update_gradient(m: types.Model, d: types.Data):
       colid = m.dof_tri_col[elementid]
       d.efc.h[worldid, rowid, colid] = d.qM[worldid, rowid, colid]
 
+  # Optimization: launching _JTDAJ with limited number of blocks on a GPU.
+  # Profiling suggests that only a fraction of blocks out of the original
+  # d.njmax blocks do the actual work. It aims to minimize #CTAs with no
+  # effective work. It launches with #blocks that's proportional to the number
+  # of SMs on the GPU. We can now query the SM count:
+  # https://github.com/NVIDIA/warp/commit/f3814e7e5459e5fd13032cf0fddb3daddd510f30
+
+  # make dim_x and nblocks_perblock static arguments for _JTDAJ to allow unrolling the loop
+  if wp.get_device().is_cuda:
+    sm_count = wp.get_device().sm_count
+
+    # Here we assume one block has 256 threads. We use a factor of 6, which
+    # can be change in future to fine-tune the perf. The optimal factor will
+    # depend on the kernel's occupancy, which determines how many blocks can
+    # simultaneously run on the SM. TODO: This factor can be tuned further.
+    dim_x = int((sm_count * 6 * 256) / m.dof_tri_row.size)
+    dim_y = dim_x
+  else:
+    # fall back for CPU
+    dim_x = d.njmax
+    dim_y = d.nconmax
+
+  nblocks_perblock = int((d.njmax + dim_x - 1) / dim_x)
+
   @kernel
-  def _JTDAJ(m: types.Model, d: types.Data, nblocks_perblock: int, dim_x: int):
+  def _JTDAJ(m: types.Model, d: types.Data):
     # TODO(team): static m?
     efcid_temp, elementid = wp.tid()
+
+    nefc = d.nefc[0]
 
     for i in range(nblocks_perblock):
       efcid = efcid_temp + i * dim_x
 
-      if efcid >= d.nefc[0]:
+      if efcid >= nefc:
         return
 
       worldid = d.efc.worldid[efcid]
 
-      if ITERATIONS > 1:
-        if d.efc.done[worldid]:
-          continue
+    efc_D = d.efc.D[efcid]
+    active = d.efc.active[efcid]
+    if efc_D == 0.0 or not active:
+      return
 
-      dofi = m.dof_tri_row[elementid]
-      dofj = m.dof_tri_col[elementid]
+    efc_D = d.efc.D[efcid]
+    active = d.efc.active[efcid]
 
-      efc_D = d.efc.D[efcid]
-      active = d.efc.active[efcid]
-      if efc_D == 0.0 or active == 0:
-        continue
+    if efc_D * float(active) == 0.0:
+      return
 
-      # TODO(team): sparse efc_J
-      wp.atomic_add(
-        d.efc.h[worldid, dofi],
-        dofj,
-        d.efc.J[efcid, dofi] * d.efc.J[efcid, dofj] * efc_D,
-      )
+    dofi = m.dof_tri_row[elementid]
+    dofj = m.dof_tri_col[elementid]
+
+    # TODO(team): sparse efc_J
+    value = d.efc.J[efcid, dofi] * d.efc.J[efcid, dofj] * efc_D
+    if value != 0.0:
+      wp.atomic_add(d.efc.h[worldid, dofi], dofj, value)
 
   if m.opt.cone == types.ConeType.ELLIPTIC:
     # TODO(team): combine with _JTDAJ
@@ -559,29 +621,10 @@ def _update_gradient(m: types.Model, d: types.Data):
     else:
       wp.launch(_copy_lower_triangle, dim=(d.nworld, m.dof_tri_row.size), inputs=[m, d])
 
-    # Optimization: launching _JTDAJ with limited number of blocks on a GPU.
-    # Profiling suggests that only a fraction of blocks out of the original
-    # d.njmax blocks do the actual work. It aims to minimize #CTAs with no
-    # effective work. It launches with #blocks that's proportional to the number
-    # of SMs on the GPU. We can now query the SM count:
-    # https://github.com/NVIDIA/warp/commit/f3814e7e5459e5fd13032cf0fddb3daddd510f30
-    if wp.get_device().is_cuda:
-      sm_count = wp.get_device().sm_count
-
-      # Here we assume one block has 256 threads. We use a factor of 6, which
-      # can be change in future to fine-tune the perf. The optimal factor will
-      # depend on the kernel's occupancy, which determines how many blocks can
-      # simultaneously run on the SM. TODO: This factor can be tuned further.
-      dim_x = int((sm_count * 6 * 256) / m.dof_tri_row.size)
-      dim_y = dim_x
-    else:  # fall back
-      dim_x = d.njmax
-      dim_y = d.nconmax
-
     wp.launch(
       _JTDAJ,
       dim=(dim_x, m.dof_tri_row.size),
-      inputs=[m, d, int((d.njmax + dim_x - 1) / dim_x), dim_x],
+      inputs=[m, d],
     )
 
     if m.opt.cone == types.ConeType.ELLIPTIC:
@@ -714,7 +757,7 @@ def _linesearch_iterative(m: types.Model, d: types.Data):
 
       active = d.efc.Jaref[efcid] < 0.0
 
-      nef = d.ne + d.nf
+      nef = d.ne[0] + d.nf[0]
       nefl = nef + d.nl[0]
       if efcid < nef:
         active = True
@@ -808,7 +851,7 @@ def _linesearch_iterative(m: types.Model, d: types.Data):
 
       active = d.efc.Jaref[efcid] + alpha * d.efc.jv[efcid] < 0.0
 
-      nef = d.ne + d.nf
+      nef = d.ne[0] + d.nf[0]
       nefl = nef + d.nl[0]
       if efcid < nef:
         active = True
@@ -861,8 +904,9 @@ def _linesearch_iterative(m: types.Model, d: types.Data):
 
       alpha = lo_alpha[worldid]
 
-      # TODO(team): active and conditionally active constraints
-      if d.efc.Jaref[efcid] + alpha * d.efc.jv[efcid] < 0.0:
+      if d.efc.Jaref[efcid] + alpha * d.efc.jv[efcid] < 0.0 or (
+        efcid < d.ne[0] + d.nf[0]
+      ):
         wp.atomic_add(lo, worldid, _eval_pt(d.efc.quad[efcid], alpha))
 
   @kernel
@@ -958,7 +1002,7 @@ def _linesearch_iterative(m: types.Model, d: types.Data):
       if done[worldid]:
         return
 
-      nef = d.ne + d.nf
+      nef = d.ne[0] + d.nf[0]
       nefl = nef + d.nl[0]
 
       quad = d.efc.quad[efcid]
@@ -1072,23 +1116,22 @@ def _linesearch_iterative(m: types.Model, d: types.Data):
       if done[worldid]:
         return
 
+      nef_active = efcid < d.ne[0] + d.nf[0]
+
       quad = d.efc.quad[efcid]
       jaref = d.efc.Jaref[efcid]
       jv = d.efc.jv[efcid]
 
       alpha = lo_next_alpha[worldid]
-      # TODO(team): active and conditionally active constraints
-      if jaref + alpha * jv < 0.0:
+      if jaref + alpha * jv < 0.0 or nef_active:
         wp.atomic_add(lo_next, worldid, _eval_pt(quad, alpha))
 
       alpha = hi_next_alpha[worldid]
-      # TODO(team): active and conditionally active constraints
-      if jaref + alpha * jv < 0.0:
+      if jaref + alpha * jv < 0.0 or nef_active:
         wp.atomic_add(hi_next, worldid, _eval_pt(quad, alpha))
 
       alpha = mid_alpha[worldid]
-      # TODO(team): active and conditionally active constraints
-      if jaref + alpha * jv < 0.0:
+      if jaref + alpha * jv < 0.0 or nef_active:
         wp.atomic_add(mid, worldid, _eval_pt(quad, alpha))
 
   @kernel
@@ -1262,10 +1305,14 @@ def _linesearch_parallel(m: types.Model, d: types.Data):
       if d.efc.done[worldid]:
         return
 
-    x = d.efc.Jaref[efcid] + m.alpha_candidate[alphaid] * d.efc.jv[efcid]
-    # TODO(team): active and conditionally active constraints
-    if x < 0.0:
-      wp.atomic_add(d.efc.quad_total_candidate[worldid], alphaid, d.efc.quad[efcid])
+    Jaref = d.efc.Jaref[efcid]
+    jv = d.efc.jv[efcid]
+    quad = d.efc.quad[efcid]
+
+    alpha = m.alpha_candidate[alphaid]
+
+    if (Jaref + alpha * jv) < 0.0 or (efcid < d.ne[0] + d.nf[0]):
+      wp.atomic_add(d.efc.quad_total_candidate[worldid], alphaid, quad)
 
   @kernel
   def _cost_alpha(m: types.Model, d: types.Data):
@@ -1299,7 +1346,9 @@ def _linesearch_parallel(m: types.Model, d: types.Data):
     d.efc.alpha[worldid] = m.alpha_candidate[bestid]
 
   wp.launch(_quad_total, dim=(d.nworld, m.nlsp), inputs=[m, d])
+
   wp.launch(_quad_total_candidate, dim=(d.njmax, m.nlsp), inputs=[m, d])
+
   wp.launch(_cost_alpha, dim=(d.nworld, m.nlsp), inputs=[m, d])
   wp.launch(_best_alpha, dim=(d.nworld), inputs=[d])
 
@@ -1307,6 +1356,7 @@ def _linesearch_parallel(m: types.Model, d: types.Data):
 @event_scope
 def _linesearch(m: types.Model, d: types.Data):
   ITERATIONS = m.opt.iterations
+  DSBL_FLOSS = m.opt.disableflags & types.DisableBit.FRICTIONLOSS
 
   @kernel
   def _zero_jv(d: types.Data):
@@ -1380,11 +1430,20 @@ def _linesearch(m: types.Model, d: types.Data):
     Jaref = d.efc.Jaref[efcid]
     jv = d.efc.jv[efcid]
     efc_D = d.efc.D[efcid]
-    quad = wp.vec3()
-    quad[0] = 0.5 * Jaref * Jaref * efc_D
-    quad[1] = jv * Jaref * efc_D
-    quad[2] = 0.5 * jv * jv * efc_D
-    d.efc.quad[efcid] = quad
+    floss = d.efc.frictionloss[efcid]
+
+    if floss > 0.0 and wp.static(not DSBL_FLOSS):
+      rf = _safe_div(floss, efc_D)
+      if Jaref <= -rf:
+        d.efc.quad[efcid] = wp.vec3(floss * (-0.5 * rf - Jaref), -floss * jv, 0.0)
+        return
+      elif Jaref >= rf:
+        d.efc.quad[efcid] = wp.vec3(floss * (-0.5 * rf + Jaref), floss * jv, 0.0)
+        return
+
+    d.efc.quad[efcid] = wp.vec3(
+      0.5 * Jaref * Jaref * efc_D, jv * Jaref * efc_D, 0.5 * jv * jv * efc_D
+    )
 
   if m.opt.cone == types.ConeType.ELLIPTIC:
 
