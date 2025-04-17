@@ -44,6 +44,7 @@ class SensorTest(parameterized.TestCase):
     mjm, mjd, m, d = test_util.fixture(
       xml="""
       <mujoco>
+        <option gravity="-1 -1 -1"/>
         <worldbody>
           <body name="body0" pos="0.1 0.2 0.3" quat=".05 .1 .15 .2">
             <joint name="slide" type="slide"/>
@@ -75,6 +76,16 @@ class SensorTest(parameterized.TestCase):
               <joint type="ball"/>
               <geom type="sphere" size="0.1" pos=".1 0 0"/>
             </body>
+          </body>
+          <body pos="10 0 0">
+            <joint type="hinge" axis="1 2 3"/>
+            <geom type="sphere" size="0.1"/>
+            <site name="force_site" pos="1 2 3"/>
+          </body>
+          <body pos="20 0 0">
+            <joint type="slide" axis="1 2 3"/>
+            <geom type="sphere" size="0.1"/>
+            <site name="torque_site" pos="1 2 3"/>
           </body>
         </worldbody>
         <actuator>
@@ -117,11 +128,14 @@ class SensorTest(parameterized.TestCase):
           <ballangvel joint="ballquat"/>
           <subtreelinvel body="body4"/>
           <subtreeangmom body="body4"/>
+          <accelerometer site="force_site"/>
+          <force site="force_site"/>
+          <torque site="torque_site"/>
           <actuatorfrc actuator="slide"/>
           <jointactuatorfrc joint="slide"/>                      
         </sensor>
         <keyframe>
-          <key qpos="1 .1 .2 .3 .4 1 1 1 1 0 0 0 .25 .35 1 0 0 0 1 0 0 0" qvel="2 .2 -.1 .4 .25 .35 .45 -0.1 -0.2 -0.3 .1 -.2 -.5 -0.75 -1 .1 .2 .3" ctrl="3"/>
+          <key qpos="1 .1 .2 .3 .4 1 1 1 1 0 0 0 .25 .35 1 0 0 0 1 0 0 0 0 0" qvel="2 .2 -.1 .4 .25 .35 .45 -0.1 -0.2 -0.3 .1 -.2 -.5 -0.75 -1 .1 .2 .3 0 0" ctrl="3"/>
         </keyframe>
       </mujoco>
     """
