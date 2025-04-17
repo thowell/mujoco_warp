@@ -157,7 +157,6 @@ class SmoothTest(parameterized.TestCase):
   @parameterized.parameters(True, False)
   def test_rne_postconstraint(self, gravity):
     """Tests rne_postconstraint."""
-    # TODO(team): test equality constraints
     mjm, mjd, m, d = test_util.fixture("pendula.xml", gravity=gravity)
 
     mjd.xfrc_applied = np.random.uniform(
@@ -179,7 +178,8 @@ class SmoothTest(parameterized.TestCase):
     _assert_eq(d.cfrc_ext.numpy()[0], mjd.cfrc_ext, "cfrc_ext")
 
     # test contact
-    mjm, mjd, m, d = test_util.fixture("constraints.xml", keyframe=1)
+    # TODO(team): test equality constraints once its implemented
+    mjm, mjd, m, d = test_util.fixture("constraints.xml", keyframe=1, equality=False)
 
     mujoco.mj_rnePostConstraint(mjm, mjd)
 
