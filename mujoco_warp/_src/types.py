@@ -247,6 +247,8 @@ class SensorType(enum.IntEnum):
     TORQUE: torque
     ACTUATORFRC: scalar actuator force
     JOINTACTFRC: scalar actuator force, measured at the joint
+    FRAMELINACC: 3D linear acceleration
+    FRAMEANGACC: 3D angular acceleration
   """
 
   JOINTPOS = mujoco.mjtSensor.mjSENS_JOINTPOS
@@ -272,25 +274,8 @@ class SensorType(enum.IntEnum):
   TORQUE = mujoco.mjtSensor.mjSENS_TORQUE
   ACTUATORFRC = mujoco.mjtSensor.mjSENS_ACTUATORFRC
   JOINTACTFRC = mujoco.mjtSensor.mjSENS_JOINTACTFRC
-
-
-class ObjType(enum.IntEnum):
-  """Type of object.
-
-  Members:
-    UNKNOWN: unknown object type
-    BODY: body
-    XBODY: body, used to access regular frame instead of i-frame
-    GEOM: geom
-    SITE: site
-  """
-
-  UNKNOWN = mujoco.mjtObj.mjOBJ_UNKNOWN
-  BODY = mujoco.mjtObj.mjOBJ_BODY
-  XBODY = mujoco.mjtObj.mjOBJ_XBODY
-  GEOM = mujoco.mjtObj.mjOBJ_GEOM
-  SITE = mujoco.mjtObj.mjOBJ_SITE
-  # unsupported: CAMERA
+  FRAMELINACC = mujoco.mjtSensor.mjSENS_FRAMELINACC
+  FRAMEANGACC = mujoco.mjtSensor.mjSENS_FRAMEANGACC
 
 
 class ObjType(enum.IntEnum):
