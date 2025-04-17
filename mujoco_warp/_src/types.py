@@ -366,6 +366,7 @@ class ObjType(enum.IntEnum):
   SITE = mujoco.mjtObj.mjOBJ_SITE
   CAMERA = mujoco.mjtObj.mjOBJ_CAMERA
 
+
 @wp.struct
 class Option:
   """Physics options.

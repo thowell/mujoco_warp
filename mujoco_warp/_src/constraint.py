@@ -23,6 +23,7 @@ from .warp_util import event_scope
 
 wp.set_module_options({"enable_backward": False})
 
+
 @wp.func
 def _update_efc_row(
   m: types.Model,
@@ -283,7 +284,7 @@ def _efc_equality_weld(
   efcid = wp.atomic_add(d.nefc, 0, 6)
   wp.atomic_add(d.ne, 0, 6)
   for i in range(wp.static(6)):
-    d.efc.worldid[efcid+i] = worldid
+    d.efc.worldid[efcid + i] = worldid
 
   is_site = m.eq_objtype[i_eq] == wp.static(types.ObjType.SITE.value) and m.nsite > 0
 
@@ -314,7 +315,6 @@ def _efc_equality_weld(
 
     quat = math.mul_quat(d.xquat[worldid, body1id], relpose)
     quat1 = math.quat_inv(d.xquat[worldid, body2id])
-
 
   # compute Jacobian difference (opposite of contact: 0 - 1)
   Jqvelp = wp.vec3f(0.0, 0.0, 0.0)
