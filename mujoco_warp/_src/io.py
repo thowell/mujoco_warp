@@ -619,6 +619,7 @@ def _constraint(
   efc.uu = wp.empty((nconmax,), dtype=wp.float32)
   efc.uv = wp.empty((nconmax,), dtype=wp.float32)
   efc.vv = wp.empty((nconmax,), dtype=wp.float32)
+  efc.condim = wp.empty((njmax,), dtype=wp.int32)
 
   return efc
 

@@ -147,13 +147,15 @@ def _update_constraint(m: types.Model, d: types.Data):
       if d.efc.done[d.contact.worldid[conid]]:
         return
 
+      efcid = d.contact.efc_address[conid, dimid]
+
       condim = d.contact.dim[conid]
+      d.efc.condim[efcid] = condim
 
       if condim == 1:
         return
 
       if dimid < condim:
-        efcid = d.contact.efc_address[conid, dimid]
         if dimid == 0:
           fri = d.contact.friction[conid][0] * wp.static(1.0 / m.opt.impratio)
         else:
@@ -346,6 +348,7 @@ def _update_constraint(m: types.Model, d: types.Data):
   if m.opt.cone == types.ConeType.ELLIPTIC:
     d.efc.uu.zero_()
     d.efc.active.zero_()
+    d.efc.condim.fill_(-1)
     wp.launch(_u_elliptic, dim=(d.nconmax, m.condim_max), inputs=[d])
     wp.launch(_active_bottom_zone, dim=(d.nconmax, m.condim_max), inputs=[d])
     wp.launch(_efc_elliptic0, dim=(d.njmax), inputs=[d])
@@ -762,8 +765,7 @@ def _linesearch_iterative(m: types.Model, d: types.Data):
       nefl = nef + d.nl[0]
       if efcid < nef:
         active = True
-      elif efcid >= nefl:
-        # TODO(team): condim=1 active
+      elif efcid >= nefl and d.efc.condim[efcid] > 1:
         active = False
 
       if active:
@@ -856,8 +858,7 @@ def _linesearch_iterative(m: types.Model, d: types.Data):
       nefl = nef + d.nl[0]
       if efcid < nef:
         active = True
-      elif efcid >= nefl:
-        # TODO(team): condim=1
+      elif efcid >= nefl and d.efc.condim[efcid] > 1:
         active = False
 
       if active:
@@ -1015,8 +1016,7 @@ def _linesearch_iterative(m: types.Model, d: types.Data):
       active = jaref + alpha * jv < 0.0
       if efcid < nef:
         active = True
-      elif efcid >= nefl:
-        # TODO(team): condim=1 active
+      elif efcid >= nefl and d.efc.condim[efcid] > 1:
         active = False
 
       if active:
@@ -1027,8 +1027,7 @@ def _linesearch_iterative(m: types.Model, d: types.Data):
       active = jaref + alpha * jv < 0.0
       if efcid < nef:
         active = True
-      elif efcid >= nefl:
-        # TODO(team): condim=1 active
+      elif efcid >= nefl and d.efc.condim[efcid] > 1:
         active = False
 
       if active:
@@ -1039,8 +1038,7 @@ def _linesearch_iterative(m: types.Model, d: types.Data):
       active = jaref + alpha * jv < 0.0
       if efcid < nef:
         active = True
-      elif efcid >= nefl:
-        # TODO(team): condim=1 active
+      elif efcid >= nefl and d.efc.condim[efcid] > 1:
         active = False
 
       if active:

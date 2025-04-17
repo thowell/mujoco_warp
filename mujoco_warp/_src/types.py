@@ -460,6 +460,7 @@ class Constraint:
     uu: elliptic cone variables                       (nconmax,)
     uv: elliptic cone variables                       (nconmax,)
     vv: elliptic cone variables                       (nconmax,)
+    condim: if contact: condim, else: -1              (njmax,)
   """
 
   worldid: wp.array(dtype=wp.int32, ndim=1)
@@ -515,6 +516,7 @@ class Constraint:
   uu: wp.array(dtype=wp.float32, ndim=1)
   uv: wp.array(dtype=wp.float32, ndim=1)
   vv: wp.array(dtype=wp.float32, ndim=1)
+  condim: wp.array(dtype=wp.int32, ndim=1)
 
 
 @wp.struct
