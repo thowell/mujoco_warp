@@ -804,8 +804,7 @@ def _linesearch_iterative(m: types.Model, d: types.Data):
         if d.efc.done[worldid]:
           return
 
-      # TODO(team): active and conditionally active constraints:
-      if d.efc.Jaref[efcid] >= 0.0:
+      if d.efc.Jaref[efcid] >= 0.0 and efcid >= d.ne[0] + d.nf[0]:
         return
 
       quad = d.efc.quad[efcid]
