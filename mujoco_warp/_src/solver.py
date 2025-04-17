@@ -164,8 +164,6 @@ def _update_constraint(m: types.Model, d: types.Data):
         d.efc.u[conid, dimid] = u
         if dimid > 0:
           wp.atomic_add(d.efc.uu, conid, u * u)
-      else:
-        d.efc.u[conid, dimid] = 0.0
 
     @kernel
     def _active_bottom_zone(d: types.Data):
