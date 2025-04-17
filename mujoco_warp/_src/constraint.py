@@ -20,7 +20,6 @@ import warp as wp
 from . import math
 from . import types
 from .warp_util import event_scope
-from .warp_util import kernel_copy
 
 
 @wp.func

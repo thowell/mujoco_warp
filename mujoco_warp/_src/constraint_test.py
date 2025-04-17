@@ -111,16 +111,31 @@ class ConstraintTest(parameterized.TestCase):
       mujoco.mj_forward(mjm, mjd)
       m = mjwarp.put_model(mjm)
       d = mjwarp.put_data(mjm, mjd)
+
+      for arr in (
+        d.efc.J,
+        d.efc.D,
+        d.efc.aref,
+        d.efc.pos,
+        d.efc.margin,
+        d.ne,
+        d.nefc,
+        d.nf,
+        d.nl,
+      ):
+        arr.zero_()
+
       mjwarp.make_constraint(m, d)
 
+      _assert_eq(d.ne.numpy()[0], mjd.ne, "ne")
       _assert_eq(d.nefc.numpy()[0], mjd.nefc, "nefc")
+      _assert_eq(d.nf.numpy()[0], mjd.nf, "nf")
       _assert_eq(d.nl.numpy()[0], mjd.nl, "nl")
       _assert_eq(d.efc.J.numpy()[: mjd.nefc, :].reshape(-1), mjd.efc_J, "efc_J")
       _assert_eq(d.efc.D.numpy()[: mjd.nefc], mjd.efc_D, "efc_D")
       _assert_eq(d.efc.aref.numpy()[: mjd.nefc], mjd.efc_aref, "efc_aref")
       _assert_eq(d.efc.pos.numpy()[: mjd.nefc], mjd.efc_pos, "efc_pos")
       _assert_eq(d.efc.margin.numpy()[: mjd.nefc], mjd.efc_margin, "efc_margin")
-      _assert_eq(d.ne.numpy()[0], mjd.ne, "ne")
 
 
 if __name__ == "__main__":
