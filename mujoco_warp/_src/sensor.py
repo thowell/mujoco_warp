@@ -13,7 +13,6 @@
 # limitations under the License.
 # ==============================================================================
 
-import mujoco
 import numpy as np
 import warp as wp
 
@@ -400,18 +399,16 @@ def _joint_actuator_force(m: Model, d: Data, worldid: int, objid: int) -> wp.flo
 
 @wp.func
 def _framelinacc(m: Model, d: Data, worldid: int, objid: int, objtype: int) -> wp.vec3:
-  # TODO(team): replace with types.ObjType
-
-  if objtype == int(mujoco.mjtObj.mjOBJ_BODY.value):
+  if objtype == int(ObjType.BODY.value):
     bodyid = objid
     pos = d.xipos[worldid, objid]
-  elif objtype == int(mujoco.mjtObj.mjOBJ_XBODY.value):
+  elif objtype == int(ObjType.XBODY.value):
     bodyid = objid
     pos = d.xpos[worldid, objid]
-  elif objtype == int(mujoco.mjtObj.mjOBJ_GEOM.value):
+  elif objtype == int(ObjType.GEOM.value):
     bodyid = m.geom_bodyid[objid]
     pos = d.geom_xpos[worldid, objid]
-  elif objtype == int(mujoco.mjtObj.mjOBJ_SITE.value):
+  elif objtype == int(ObjType.SITE.value):
     bodyid = m.site_bodyid[objid]
     pos = d.site_xpos[worldid, objid]
   # TODO(team): camera
@@ -432,15 +429,11 @@ def _framelinacc(m: Model, d: Data, worldid: int, objid: int, objtype: int) -> w
 
 @wp.func
 def _frameangacc(m: Model, d: Data, worldid: int, objid: int, objtype: int) -> wp.vec3:
-  # TODO(team): replace with types.ObjType
-
-  if objtype == int(mujoco.mjtObj.mjOBJ_BODY.value) or objtype == int(
-    mujoco.mjtObj.mjOBJ_XBODY.value
-  ):
+  if objtype == int(ObjType.BODY.value) or objtype == int(ObjType.XBODY.value):
     bodyid = objid
-  elif objtype == int(mujoco.mjtObj.mjOBJ_GEOM.value):
+  elif objtype == int(ObjType.GEOM.value):
     bodyid = m.geom_bodyid[objid]
-  elif objtype == int(mujoco.mjtObj.mjOBJ_SITE.value):
+  elif objtype == int(ObjType.SITE.value):
     bodyid = m.site_bodyid[objid]
   # TODO(team): camera
   else:  # UNKNOWN
