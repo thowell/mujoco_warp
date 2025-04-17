@@ -550,8 +550,6 @@ def make_constraint(m: types.Model, d: types.Data):
   d.nl.zero_()
 
   if not (m.opt.disableflags & types.DisableBit.CONSTRAINT.value):
-    d.nefc.zero_()
-    d.nl.zero_()
     d.efc.J.zero_()
 
     if not (m.opt.disableflags & types.DisableBit.EQUALITY.value):
