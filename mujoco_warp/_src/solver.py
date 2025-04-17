@@ -518,7 +518,23 @@ def _update_gradient(m: types.Model, d: types.Data):
 
         condim = d.contact.dim[conid]
 
+        if condim == 1:
+          return
+
         if (dim1id >= condim) or (dim2id >= condim):
+          return
+
+        mu = d.contact.friction[conid][0] / impratio
+        n = d.efc.u[conid, 0]
+        tt = d.efc.uu[conid]
+        if tt <= 0.0:
+          t = 0.0
+        else:
+          t = wp.sqrt(tt)
+
+        middle_zone = (t > 0) and (n < (mu * t)) and ((mu * n + t) > 0.0)
+
+        if not middle_zone:
           return
 
         worldid = d.contact.worldid[conid]
@@ -529,65 +545,50 @@ def _update_gradient(m: types.Model, d: types.Data):
         efc1id = d.contact.efc_address[conid, dim1id]
         efc2id = d.contact.efc_address[conid, dim2id]
 
-        # TODO(team): condim=1 case
-        hcone = float(0.0)
-        if condim > 1:
-          mu = d.contact.friction[conid][0] / impratio
-          n = d.efc.u[conid, 0]
-          tt = d.efc.uu[conid]
-          if tt <= 0.0:
-            t = 0.0
-          else:
-            t = wp.sqrt(tt)
+        t = wp.max(t, types.MJ_MINVAL)
+        ttt = wp.max(t * t * t, types.MJ_MINVAL)
 
-          middle_zone = (t > 0) and (n < (mu * t)) and ((mu * n + t) > 0.0)
+        ui = d.efc.u[conid, dim1id]
+        uj = d.efc.u[conid, dim2id]
 
-          if not middle_zone:
-            return
+        # set first row/column: (1, -mu/t * u)
+        if dim1id == 0 and dim2id == 0:
+          hcone = 1.0
+        elif dim1id == 0:
+          hcone = -mu / t * uj
+        elif dim2id == 0:
+          hcone = -mu / t * ui
+        else:
+          hcone = mu * n / ttt * ui * uj
 
-          t = wp.max(t, types.MJ_MINVAL)
-          ttt = wp.max(t * t * t, types.MJ_MINVAL)
+          # add to diagonal: mu^2 - mu * n / t
+          if dim1id == dim2id:
+            hcone += mu * mu - mu * n / t
 
-          ui = d.efc.u[conid, dim1id]
-          uj = d.efc.u[conid, dim2id]
+        # pre and post multiply by diag(mu, friction) scale by dm
+        if dim1id == 0:
+          fri1 = mu
+        else:
+          fri1 = d.contact.friction[conid][dim1id - 1]
 
-          # set first row/column: (1, -mu/t * u)
-          if dim1id == 0 and dim2id == 0:
-            hcone = 1.0
-          elif dim1id == 0:
-            hcone = -mu / t * uj
-          elif dim2id == 0:
-            hcone = -mu / t * ui
-          else:
-            hcone = mu * n / ttt * ui * uj
+        if dim2id == 0:
+          fri2 = mu
+        else:
+          fri2 = d.contact.friction[conid][dim2id - 1]
 
-            # add to diagonal: mu^2 - mu * n / t
-            if dim1id == dim2id:
-              hcone += mu * mu - mu * n / t
-
-          # pre and post multiply by diag(mu, friction) scale by dm
-          if dim1id == 0:
-            fri1 = mu
-          else:
-            fri1 = d.contact.friction[conid][dim1id - 1]
-
-          if dim2id == 0:
-            fri2 = mu
-          else:
-            fri2 = d.contact.friction[conid][dim2id - 1]
-
-          mu2 = mu * mu
-          dm = d.efc.D[d.contact.efc_address[conid, 0]] / wp.max(
-            mu2 * (1.0 + mu2), types.MJ_MINVAL
-          )
-
-          hcone *= dm * fri1 * fri2
-
-        wp.atomic_add(
-          d.efc.h[worldid, dof1id],
-          dof2id,
-          d.efc.J[efc1id, dof1id] * d.efc.J[efc2id, dof2id] * hcone,
+        mu2 = mu * mu
+        dm = d.efc.D[d.contact.efc_address[conid, 0]] / wp.max(
+          mu2 * (1.0 + mu2), types.MJ_MINVAL
         )
+
+        hcone *= dm * fri1 * fri2
+
+        if hcone:
+          wp.atomic_add(
+            d.efc.h[worldid, dof1id],
+            dof2id,
+            d.efc.J[efc1id, dof1id] * d.efc.J[efc2id, dof2id] * hcone,
+          )
 
   @kernel
   def _cholesky(d: types.Data):
