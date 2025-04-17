@@ -148,7 +148,7 @@ class ForwardTest(parameterized.TestCase):
     mjm, mjd, m, d = test_util.fixture(
       xml="""
         <mujoco>
-          <option integrator="RK4">
+          <option integrator="RK4" iterations="4" ls_iterations="4">
             <flag constraint="disable"/>
           </option>
           <worldbody>
