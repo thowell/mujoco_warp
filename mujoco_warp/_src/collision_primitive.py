@@ -797,6 +797,69 @@ def contact_params(m: Model, d: Data, cid: int):
   return geoms, margin, gap, condim, friction, solref, solreffriction, solimp
 
 
+@wp.func
+def sphere_box(
+  sphere: Geom,
+  box: Geom,
+  worldid: int,
+  d: Data,
+  margin: float,
+  gap: float,
+  condim: int,
+  friction: vec5,
+  solref: wp.vec2f,
+  solreffriction: wp.vec2f,
+  solimp: vec5,
+  geoms: wp.vec2i,
+):
+  center = wp.transpose(box.rot) @ (sphere.pos - box.pos)
+
+  clamped = wp.max(-box.size, wp.min(box.size, center))
+  clamped_dir, dist = normalize_with_norm(clamped - center)
+
+  if dist - sphere.size[0] > margin:
+    return
+
+  # sphere center inside box
+  if dist <= MJ_MINVAL:
+    closest = 2.0 * (box.size[0] + box.size[1] + box.size[2])
+    k = wp.int32(0)
+    for i in range(6):
+      face_dist = wp.abs(wp.where(i % 2, 1.0, -1.0) * box.size[i / 2] - center[i / 2])
+      if closest > face_dist:
+        closest = face_dist
+        k = i
+
+    nearest = wp.vec3(0.0)
+    nearest[k / 2] = wp.where(k % 2, -1.0, 1.0)
+    pos = center + nearest * (sphere.size[0] - closest) / 2.0
+    contact_normal = box.rot @ nearest
+    contact_dist = -closest - sphere.size[0]
+
+  else:
+    deepest = center + clamped_dir * sphere.size[0]
+    pos = 0.5 * (clamped + deepest)
+    contact_normal = box.rot @ clamped_dir
+    contact_dist = dist - sphere.size[0]
+
+  contact_pos = box.pos + box.rot @ pos
+  write_contact(
+    d,
+    contact_dist,
+    contact_pos,
+    make_frame(contact_normal),
+    margin,
+    gap,
+    condim,
+    friction,
+    solref,
+    solreffriction,
+    solimp,
+    geoms,
+    worldid,
+  )
+
+
 @wp.kernel
 def _primitive_narrowphase(
   m: Model,
@@ -914,6 +977,21 @@ def _primitive_narrowphase(
     )
   elif type1 == int(GeomType.SPHERE.value) and type2 == int(GeomType.CYLINDER.value):
     sphere_cylinder(
+      geom1,
+      geom2,
+      worldid,
+      d,
+      margin,
+      gap,
+      condim,
+      friction,
+      solref,
+      solreffriction,
+      solimp,
+      geoms,
+    )
+  elif type1 == int(GeomType.SPHERE.value) and type2 == int(GeomType.BOX.value):
+    sphere_box(
       geom1,
       geom2,
       worldid,
