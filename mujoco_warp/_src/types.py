@@ -347,26 +347,6 @@ array2df = wp.array2d(dtype=wp.float32)
 array3df = wp.array3d(dtype=wp.float32)
 
 
-class ObjType(enum.IntEnum):
-  """Type of object.
-
-  Members:
-    UNKNOWN: unknown object type
-    BODY: body
-    XBODY: body, used to access regular frame instead of i-frame
-    GEOM: geom
-    SITE: site
-    CAMERA: camera
-  """
-
-  UNKNOWN = mujoco.mjtObj.mjOBJ_UNKNOWN
-  BODY = mujoco.mjtObj.mjOBJ_BODY
-  XBODY = mujoco.mjtObj.mjOBJ_XBODY
-  GEOM = mujoco.mjtObj.mjOBJ_GEOM
-  SITE = mujoco.mjtObj.mjOBJ_SITE
-  CAMERA = mujoco.mjtObj.mjOBJ_CAMERA
-
-
 @wp.struct
 class Option:
   """Physics options.
