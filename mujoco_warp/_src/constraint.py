@@ -297,17 +297,17 @@ def _efc_equality_weld(
 
   if is_site:
     # body1id stores the index of site_bodyid.
-    body1id = m.site_bodyid[m.eq_obj1id[i_eq]]
-    body2id = m.site_bodyid[m.eq_obj2id[i_eq]]
-    pos1 = d.site_xpos[worldid, m.eq_obj1id[i_eq]]
-    pos2 = d.site_xpos[worldid, m.eq_obj2id[i_eq]]
+    body1id = m.site_bodyid[obj1id]
+    body2id = m.site_bodyid[obj2id]
+    pos1 = d.site_xpos[worldid, obj1id]
+    pos2 = d.site_xpos[worldid, obj2id]
 
     quat = math.mul_quat(d.xquat[worldid, body1id], m.site_quat[obj1id])
     quat1 = math.quat_inv(math.mul_quat(d.xquat[worldid, body2id], m.site_quat[obj2id]))
 
   else:
-    body1id = m.eq_obj1id[i_eq]
-    body2id = m.eq_obj2id[i_eq]
+    body1id = obj1id
+    body2id = obj2id
     pos1 = d.xpos[worldid, body1id] + d.xmat[worldid, body1id] @ anchor2
     pos2 = d.xpos[worldid, body2id] + d.xmat[worldid, body2id] @ anchor1
 
@@ -346,6 +346,9 @@ def _efc_equality_weld(
 
   pos_imp = wp.sqrt(wp.length_sq(cpos) + wp.length_sq(crot))
 
+  solref = m.eq_solref[i_eq]
+  solimp = m.eq_solimp[i_eq]
+
   for i in range(3):
     _update_efc_row(
       m,
@@ -354,9 +357,9 @@ def _efc_equality_weld(
       cpos[i],
       pos_imp,
       invweight_t,
-      m.eq_solref[i_eq],
-      m.eq_solimp[i_eq],
-      wp.float32(0.0),
+      solref,
+      solimp,
+      0.0,
       Jqvelp[i],
       0.0,
     )
@@ -371,9 +374,9 @@ def _efc_equality_weld(
       crot[i],
       pos_imp,
       invweight_r,
-      m.eq_solref[i_eq],
-      m.eq_solimp[i_eq],
-      wp.float32(0.0),
+      solref,
+      solimp,
+      0.0,
       Jqvelr[i],
       0.0,
     )
