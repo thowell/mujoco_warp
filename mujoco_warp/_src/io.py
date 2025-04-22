@@ -112,7 +112,6 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
     raise NotImplementedError("Wind is unsupported.")
 
   if mjm.opt.density > 0 or mjm.opt.viscosity > 0:
-    breakpoint()
     raise NotImplementedError("Fluid forces are unsupported.")
 
   # TODO(team): remove after solver._update_gradient for Newton solver utilizes tile operations for islands
