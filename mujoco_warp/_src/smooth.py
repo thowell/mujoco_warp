@@ -665,10 +665,12 @@ def rne_postconstraint(m: Model, d: Data):
   def _cfrc_ext_equality(m: Model, d: Data):
     eqid = wp.tid()
 
-    if eqid >= m.neq:
+    ne_connect = d.ne_connect[0]
+    ne_weld = d.ne_weld[0]
+
+    if eqid >= ne_connect // 3 + ne_weld // 6:
       return
 
-    ne_connect = d.ne_connect[0]
     is_connect = eqid < ne_connect // 3
     if is_connect:
       efcid = 3 * eqid
