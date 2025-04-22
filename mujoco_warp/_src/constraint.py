@@ -663,13 +663,13 @@ def make_constraint(m: types.Model, d: types.Data):
         inputs=[m, d],
       )
       wp.launch(
-        _efc_equality_joint,
-        dim=(d.nworld, m.eq_jnt_adr.size),
+        _efc_equality_weld,
+        dim=(d.nworld, m.eq_wld_adr.size),
         inputs=[m, d],
       )
       wp.launch(
-        _efc_equality_weld,
-        dim=(d.nworld, m.eq_wld_adr.size),
+        _efc_equality_joint,
+        dim=(d.nworld, m.eq_jnt_adr.size),
         inputs=[m, d],
       )
 
