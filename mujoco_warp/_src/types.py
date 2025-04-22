@@ -308,11 +308,13 @@ class EqType(enum.IntEnum):
   Members:
     CONNECT: connect two bodies at a point (ball joint)
     JOINT: couple the values of two scalar joints with cubic
+    WELD: fix relative position and orientation of two bodies
   """
 
   CONNECT = mujoco.mjtEq.mjEQ_CONNECT
+  WELD = mujoco.mjtEq.mjEQ_WELD
   JOINT = mujoco.mjtEq.mjEQ_JOINT
-  # unsupported: WELD, TENDON, FLEX, DISTANCE
+  # unsupported: TENDON, FLEX, DISTANCE
 
 
 class WrapType(enum.IntEnum):
@@ -649,8 +651,9 @@ class Model:
     eq_solref: constraint solver reference                   (neq, mjNREF)
     eq_solimp: constraint solver impedance                   (neq, mjNIMP)
     eq_data: numeric data for constraint                     (neq, mjNEQDATA)
-    eq_jnt_adr: eq_* addresses of type `JOINT`
     eq_connect_adr: eq_* addresses of type `CONNECT`
+    eq_wld_adr: eq_* addresses of type `WELD`
+    eq_jnt_adr: eq_* addresses of type `JOINT`
     actuator_trntype: transmission type (mjtTrn)             (nu,)
     actuator_dyntype: dynamics type (mjtDyn)                 (nu,)
     actuator_gaintype: gain type (mjtGain)                   (nu,)
@@ -844,8 +847,9 @@ class Model:
   eq_solref: wp.array(dtype=wp.vec2, ndim=1)
   eq_solimp: wp.array(dtype=vec5, ndim=1)
   eq_data: wp.array(dtype=vec11, ndim=1)
-  eq_jnt_adr: wp.array(dtype=wp.int32, ndim=1)
   eq_connect_adr: wp.array(dtype=wp.int32, ndim=1)
+  eq_wld_adr: wp.array(dtype=wp.int32, ndim=1)
+  eq_jnt_adr: wp.array(dtype=wp.int32, ndim=1)
   actuator_trntype: wp.array(dtype=wp.int32, ndim=1)
   actuator_dyntype: wp.array(dtype=wp.int32, ndim=1)
   actuator_gaintype: wp.array(dtype=wp.int32, ndim=1)
