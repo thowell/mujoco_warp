@@ -639,6 +639,7 @@ def make_data(
   d.ncon = wp.zeros(1, dtype=wp.int32)
   d.ne = wp.zeros(1, dtype=wp.int32, ndim=1)
   d.ne_connect = wp.zeros(1, dtype=wp.int32, ndim=1)
+  d.ne_weld = wp.zeros(1, dtype=wp.int32, ndim=1)
   d.ne_jnt = wp.zeros(1, dtype=wp.int32, ndim=1)
   d.nefc = wp.zeros(1, dtype=wp.int32, ndim=1)
   d.ne = wp.zeros(1, dtype=wp.int32)
@@ -803,6 +804,11 @@ def put_data(
   d.ne = wp.array([mjd.ne * nworld], dtype=wp.int32, ndim=1)
   d.ne_connect = wp.array(
     [3 * np.sum((mjm.eq_type == mujoco.mjtEq.mjEQ_CONNECT) & mjd.eq_active) * nworld],
+    dtype=wp.int32,
+    ndim=1,
+  )
+  d.ne_weld = wp.array(
+    [6 * np.sum((mjm.eq_type == mujoco.mjtEq.mjEQ_WELD) & mjd.eq_active) * nworld],
     dtype=wp.int32,
     ndim=1,
   )

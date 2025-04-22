@@ -191,7 +191,7 @@ def _efc_equality_joint(
     return
 
   nejid = wp.atomic_add(d.ne_jnt, 0, 1)
-  efcid = d.nefc[0] + d.ne_connect[0] + nejid
+  efcid = d.nefc[0] + d.ne_connect[0] + d.ne_weld[0] + nejid
   d.efc.worldid[efcid] = worldid
 
   jntid_1 = m.eq_obj1id[i_eq]
@@ -285,8 +285,8 @@ def _efc_equality_weld(
   if not d.eq_active[worldid, i_eq]:
     return
 
-  efcid = wp.atomic_add(d.nefc, 0, 6)
-  wp.atomic_add(d.ne, 0, 6)
+  newid = wp.atomic_add(d.ne_weld, 0, 6)
+  efcid = d.nefc[0] + d.ne_connect[0] + newid
   for i in range(wp.static(6)):
     d.efc.worldid[efcid + i] = worldid
 
@@ -368,6 +368,7 @@ def _efc_equality_weld(
       0.0,
       Jqvelp[i],
       0.0,
+      i_eq,
     )
 
   invweight_r = m.body_invweight0[body1id, 1] + m.body_invweight0[body2id, 1]
@@ -385,6 +386,7 @@ def _efc_equality_weld(
       0.0,
       Jqvelr[i],
       0.0,
+      i_eq,
     )
 
 
@@ -658,8 +660,7 @@ def _efc_contact_elliptic(
 
 @wp.kernel
 def _num_equality(d: types.Data):
-  ne = d.ne_connect[0] + d.ne_jnt[0]
-  # TODO(team): weld
+  ne = d.ne_connect[0] + d.ne_weld[0] + d.ne_jnt[0]
   d.ne[0] = ne
   d.nefc[0] += ne
 
@@ -670,6 +671,7 @@ def make_constraint(m: types.Model, d: types.Data):
 
   d.ne.zero_()
   d.ne_connect.zero_()
+  d.ne_weld.zero_()
   d.ne_jnt.zero_()
   d.nefc.zero_()
   d.nf.zero_()

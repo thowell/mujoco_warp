@@ -947,6 +947,7 @@ class Data:
     ncon: number of detected contacts                           ()
     ne: number of equality constraints                          ()
     ne_connect: number of equality connect constraints          ()
+    ne_weld: number of equality weld constraints                ()
     ne_jnt: number of equality joint constraints                ()
     nf: number of friction constraints                          ()
     nl: number of limit constraints                             ()
@@ -1045,6 +1046,7 @@ class Data:
   ncon: wp.array(dtype=wp.int32, ndim=1)
   ne: wp.array(dtype=wp.int32, ndim=1)
   ne_connect: wp.array(dtype=wp.int32, ndim=1)  # warp only
+  ne_weld: wp.array(dtype=wp.int32, ndim=1)  # warp only
   ne_jnt: wp.array(dtype=wp.int32, ndim=1)  # warp only
   nf: wp.array(dtype=wp.int32, ndim=1)
   nl: wp.array(dtype=wp.int32, ndim=1)
