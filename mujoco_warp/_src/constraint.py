@@ -126,7 +126,8 @@ def _efc_equality_connect(
 
   efcid = wp.atomic_add(d.nefc, 0, 3)
   wp.atomic_add(d.ne, 0, 3)
-  d.efc.worldid[efcid] = worldid
+  for i in range(wp.static(3)):
+    d.efc.worldid[efcid + i] = worldid
 
   data = m.eq_data[i_eq]
   anchor1 = wp.vec3f(data[0], data[1], data[2])
