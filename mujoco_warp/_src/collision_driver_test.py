@@ -203,6 +203,28 @@ class CollisionTest(parameterized.TestCase):
           </worldbody>
         </mujoco>
         """,
+    "sphere_box_shallow": """
+        <mujoco>
+          <worldbody>
+            <geom type="box" pos="0 0 0" size=".5 .5 .5" />
+            <body pos="-0.6 -0.6 0.7">
+              <geom type="sphere" size="0.5"/>
+              <freejoint/>
+            </body>
+          </worldbody>
+        </mujoco>
+        """,
+    "sphere_box_deep": """
+        <mujoco>
+          <worldbody>
+            <geom type="box" pos="0 0 0" size=".5 .5 .5" />
+            <body pos="-0.6 -0.6 0.7">
+              <geom type="sphere" size="0.5"/>
+              <freejoint/>
+            </body>
+          </worldbody>
+        </mujoco>
+        """,
   }
 
   @parameterized.parameters(_FIXTURES.keys())
@@ -295,7 +317,8 @@ class CollisionTest(parameterized.TestCase):
     # generate contact
     m = mjwarp.put_model(mjm)
     d = mjwarp.make_data(mjm)
-    mjwarp.forward(m, d)
+    mjwarp.kinematics(m, d)
+    mjwarp.collision(m, d)
 
     self.assertEqual(d.ncon.numpy()[0], 1)
     self.assertEqual(d.contact.includemargin.numpy()[0], -1)
@@ -333,7 +356,8 @@ class CollisionTest(parameterized.TestCase):
     # generate contact
     m = mjwarp.put_model(mjm)
     d = mjwarp.make_data(mjm)
-    mjwarp.forward(m, d)
+    mjwarp.kinematics(m, d)
+    mjwarp.collision(m, d)
 
     self.assertEqual(d.ncon.numpy()[0], 1)
     self.assertEqual(d.contact.includemargin.numpy()[0], -1)
@@ -372,7 +396,8 @@ class CollisionTest(parameterized.TestCase):
     # generate contact
     m = mjwarp.put_model(mjm)
     d = mjwarp.make_data(mjm)
-    mjwarp.forward(m, d)
+    mjwarp.kinematics(m, d)
+    mjwarp.collision(m, d)
 
     self.assertEqual(d.ncon.numpy()[0], 1)
     self.assertEqual(d.contact.includemargin.numpy()[0], -1)
@@ -415,7 +440,8 @@ class CollisionTest(parameterized.TestCase):
     # generate contact
     m = mjwarp.put_model(mjm)
     d = mjwarp.make_data(mjm)
-    mjwarp.forward(m, d)
+    mjwarp.kinematics(m, d)
+    mjwarp.collision(m, d)
 
     self.assertEqual(d.ncon.numpy()[0], 2)
     self.assertEqual(d.contact.includemargin.numpy()[1], -1)
