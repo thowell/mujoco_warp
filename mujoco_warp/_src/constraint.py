@@ -274,7 +274,6 @@ def _efc_friction(
 def _efc_equality_weld(
   m: types.Model,
   d: types.Data,
-  refsafe: bool,
 ):
   worldid, i_eq_weld_adr = wp.tid()
   i_eq = m.eq_wld_adr[i_eq_weld_adr]
@@ -344,7 +343,8 @@ def _efc_equality_weld(
   crotq = math.mul_quat(quat1, quat)  # copy axis components
   crot = wp.vec3(crotq[1], crotq[2], crotq[3]) * torquescale
 
-  invweight = m.body_invweight0[body1id, 0] + m.body_invweight0[body2id, 0]
+  invweight_t = m.body_invweight0[body1id, 0] + m.body_invweight0[body2id, 0]
+
   pos_imp = wp.sqrt(wp.length_sq(cpos) + wp.length_sq(crot))
 
   for i in range(3):
@@ -354,14 +354,15 @@ def _efc_equality_weld(
       efcid + i,
       cpos[i],
       pos_imp,
-      invweight,
+      invweight_t,
       m.eq_solref[i_eq],
       m.eq_solimp[i_eq],
       wp.float32(0.0),
-      refsafe,
       Jqvelp[i],
       0.0,
     )
+
+  invweight_r = m.body_invweight0[body1id, 1] + m.body_invweight0[body2id, 1]
 
   for i in range(3):
     _update_efc_row(
@@ -370,11 +371,10 @@ def _efc_equality_weld(
       efcid + 3 + i,
       crot[i],
       pos_imp,
-      invweight,
+      invweight_r,
       m.eq_solref[i_eq],
       m.eq_solimp[i_eq],
       wp.float32(0.0),
-      refsafe,
       Jqvelr[i],
       0.0,
     )
@@ -670,7 +670,7 @@ def make_constraint(m: types.Model, d: types.Data):
       wp.launch(
         _efc_equality_weld,
         dim=(d.nworld, m.eq_wld_adr.size),
-        inputs=[m, d, refsafe],
+        inputs=[m, d],
       )
 
     if not (m.opt.disableflags & types.DisableBit.FRICTIONLOSS.value):
