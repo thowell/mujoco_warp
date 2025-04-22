@@ -21,8 +21,6 @@ from . import math
 from . import types
 from .warp_util import event_scope
 
-wp.set_module_options({"enable_backward": False})
-
 
 @wp.func
 def _update_efc_row(
