@@ -193,13 +193,24 @@ class SmoothTest(parameterized.TestCase):
             <site name="site1"/>
             <freejoint/>
           </body>
+          <body name="body2">
+            <geom type="sphere" size=".1"/>
+            <freejoint/>
+          </body>
+          <body name="body3">
+            <geom type="sphere" size=".1"/>
+            <site name="site3" quat="0 1 0 0"/>
+            <freejoint/>
+          </body>
         </worldbody>
         <equality>
           <connect body1="body0" anchor="1 1 1"/>
           <connect site1="siteworld" site2="site1"/>
+          <weld body1="body2" relpose="1 1 1 0 1 0 0"/>
+          <weld site1="siteworld" site2="site3"/>
         </equality>
         <keyframe>
-          <key qpos="0 0 0 1 0 0 0 1 1 1 1 0 0 0"/>
+          <key qpos="0 0 0 1 0 0 0 1 1 1 1 0 0 0 0 0 0 1 0 0 0 1 1 1 1 0 0 0"/>
         </keyframe>
       </mujoco>
       """
@@ -217,6 +228,11 @@ class SmoothTest(parameterized.TestCase):
     mujoco.mj_rnePostConstraint(mjm, mjd)
 
     d.cfrc_ext.zero_()
+
+    # clear equality constraint counts
+    d.ne_connect.zero_()
+    d.ne_weld.zero_()
+    d.ne_jnt.zero_()
 
     mjwarp.rne_postconstraint(m, d)
 
