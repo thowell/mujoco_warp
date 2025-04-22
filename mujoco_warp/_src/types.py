@@ -410,6 +410,7 @@ class Constraint:
 
   Attributes:
     worldid: world id                                 (njmax,)
+    id: id of object of specific type                 (njmax,)
     J: constraint Jacobian                            (njmax, nv)
     pos: constraint position (equality, contact)      (njmax,)
     margin: inclusion margin (contact)                (njmax,)
@@ -459,6 +460,7 @@ class Constraint:
   """
 
   worldid: wp.array(dtype=wp.int32, ndim=1)
+  id: wp.array(dtype=wp.int32, ndim=1)
   J: wp.array(dtype=wp.float32, ndim=2)
   pos: wp.array(dtype=wp.float32, ndim=1)
   margin: wp.array(dtype=wp.float32, ndim=1)
@@ -943,6 +945,8 @@ class Data:
   Attributes:
     ncon: number of detected contacts                           ()
     ne: number of equality constraints                          ()
+    ne_connect: number of equality connect constraints          ()
+    ne_jnt: number of equality joint constraints                ()
     nf: number of friction constraints                          ()
     nl: number of limit constraints                             ()
     nefc: number of constraints                                 (1,)
@@ -1039,6 +1043,8 @@ class Data:
 
   ncon: wp.array(dtype=wp.int32, ndim=1)
   ne: wp.array(dtype=wp.int32, ndim=1)
+  ne_connect: wp.array(dtype=wp.int32, ndim=1)  # warp only
+  ne_jnt: wp.array(dtype=wp.int32, ndim=1)  # warp only
   nf: wp.array(dtype=wp.int32, ndim=1)
   nl: wp.array(dtype=wp.int32, ndim=1)
   nefc: wp.array(dtype=wp.int32, ndim=1)

@@ -157,7 +157,7 @@ class SmoothTest(parameterized.TestCase):
   @parameterized.parameters(True, False)
   def test_rne_postconstraint(self, gravity):
     """Tests rne_postconstraint."""
-    # TODO(team): test: contact, equality constraints
+    # TODO(team): test: contact
     mjm, mjd, m, d = test_util.fixture("pendula.xml", gravity=gravity)
 
     mjd.xfrc_applied = np.random.uniform(
@@ -175,8 +175,43 @@ class SmoothTest(parameterized.TestCase):
     mjwarp.rne_postconstraint(m, d)
 
     _assert_eq(d.cacc.numpy()[0], mjd.cacc, "cacc")
-    _assert_eq(d.cfrc_int.numpy()[0][1:], mjd.cfrc_int[1:], "cfrc_int")
+    _assert_eq(d.cfrc_int.numpy()[0], mjd.cfrc_int, "cfrc_int")
     _assert_eq(d.cfrc_ext.numpy()[0], mjd.cfrc_ext, "cfrc_ext")
+
+    _EQUALITY = """
+      <mujoco>
+        <option gravity="1 1 -1">
+          <flag contact="disable"/>
+        </option>
+        <worldbody>
+          <site name="siteworld"/>
+          <body name="body0">
+            <geom type="sphere" size=".1"/>
+            <freejoint/>
+          </body>
+          <body name="body1">
+            <geom type="sphere" size=".1"/>
+            <site name="site1"/>
+            <freejoint/>
+          </body>
+        </worldbody>
+        <equality>
+          <connect body1="body0" anchor="1 1 1"/>
+          <connect site1="siteworld" site2="site1"/>
+        </equality>
+        <keyframe>
+          <key qpos="0 0 0 1 0 0 0 1 1 1 1 0 0 0"/>
+        </keyframe>
+      </mujoco>
+      """
+    mjm, mjd, m, d = test_util.fixture(xml=_EQUALITY, kick=True, keyframe=0)
+
+    mujoco.mj_rnePostConstraint(mjm, mjd)
+
+    d.cfrc_ext.zero_()
+    mjwarp.rne_postconstraint(m, d)
+
+    _assert_eq(d.cfrc_ext.numpy()[0], mjd.cfrc_ext, "cfrc_ext (equality)")
 
   def test_com_vel(self):
     """Tests com_vel."""

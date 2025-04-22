@@ -567,6 +567,7 @@ def _constraint(mjm: mujoco.MjModel, nworld: int, njmax: int) -> types.Constrain
   efc.force = wp.zeros((njmax,), dtype=wp.float32)
   efc.margin = wp.zeros((njmax,), dtype=wp.float32)
   efc.worldid = wp.zeros((njmax,), dtype=wp.int32)
+  efc.id = wp.zeros((njmax,), dtype=wp.int32)
 
   efc.Jaref = wp.empty(shape=(njmax,), dtype=wp.float32)
   efc.Ma = wp.empty(shape=(nworld, mjm.nv), dtype=wp.float32)
@@ -633,6 +634,8 @@ def make_data(
 
   d.ncon = wp.zeros(1, dtype=wp.int32)
   d.ne = wp.zeros(1, dtype=wp.int32, ndim=1)
+  d.ne_connect = wp.zeros(1, dtype=wp.int32, ndim=1)
+  d.ne_jnt = wp.zeros(1, dtype=wp.int32, ndim=1)
   d.nefc = wp.zeros(1, dtype=wp.int32, ndim=1)
   d.ne = wp.zeros(1, dtype=wp.int32)
   d.nf = wp.zeros(1, dtype=wp.int32)
@@ -794,6 +797,16 @@ def put_data(
 
   d.ncon = wp.array([mjd.ncon * nworld], dtype=wp.int32, ndim=1)
   d.ne = wp.array([mjd.ne * nworld], dtype=wp.int32, ndim=1)
+  d.ne_connect = wp.array(
+    [3 * np.sum((mjm.eq_type == mujoco.mjtEq.mjEQ_CONNECT) & mjd.eq_active) * nworld],
+    dtype=wp.int32,
+    ndim=1,
+  )
+  d.ne_jnt = wp.array(
+    [np.sum((mjm.eq_type == mujoco.mjtEq.mjEQ_JOINT) & mjd.eq_active) * nworld],
+    dtype=wp.int32,
+    ndim=1,
+  )
   d.nf = wp.array([mjd.nf * nworld], dtype=wp.int32, ndim=1)
   d.nl = wp.array([mjd.nl * nworld], dtype=wp.int32, ndim=1)
   d.nefc = wp.array([mjd.nefc * nworld], dtype=wp.int32, ndim=1)
@@ -906,6 +919,9 @@ def put_data(
   efc_margin_fill = np.concatenate(
     [np.repeat(mjd.efc_margin, nworld, axis=0), np.zeros(nefc_fill)]
   )
+  efc_id_fill = np.concatenate(
+    [np.repeat(mjd.efc_id, nworld, axis=0), np.zeros(nefc_fill)]
+  )
 
   ncon = mjd.ncon
   condim_max = np.max(mjm.geom_condim)
@@ -976,6 +992,7 @@ def put_data(
   d.efc.force = wp.array(efc_force_fill, dtype=wp.float32, ndim=1)
   d.efc.margin = wp.array(efc_margin_fill, dtype=wp.float32, ndim=1)
   d.efc.worldid = wp.from_numpy(efc_worldid, dtype=wp.int32)
+  d.efc.id = wp.from_numpy(efc_id_fill, dtype=wp.int32)
 
   d.xfrc_applied = wp.array(tile(mjd.xfrc_applied), dtype=wp.spatial_vector, ndim=2)
   d.eq_active = wp.array(tile(mjm.eq_active0), dtype=wp.bool, ndim=2)
