@@ -662,7 +662,7 @@ def rne_postconstraint(m: Model, d: Data):
 
   # cfrc_ext += contacts
   @kernel
-  def _contact_force_to_cfrc_ext(m: Model, d: Data):
+  def _cfrc_ext_contact(m: Model, d: Data):
     conid = wp.tid()
 
     if conid >= d.ncon[0]:
@@ -684,13 +684,17 @@ def rne_postconstraint(m: Model, d: Data):
     # contact force on bodies
     if id1:
       com1 = d.subtree_com[worldid, m.body_rootid[id1]]
-      d.cfrc_ext[worldid, id1] -= support.transform_force(force, com1 - pos)
+      wp.atomic_sub(
+        d.cfrc_ext[worldid], id1, support.transform_force(force, com1 - pos)
+      )
 
     if id2:
       com2 = d.subtree_com[worldid, m.body_rootid[id2]]
-      d.cfrc_ext[worldid, id2] += support.transform_force(force, com2 - pos)
+      wp.atomic_add(
+        d.cfrc_ext[worldid], id2, support.transform_force(force, com2 - pos)
+      )
 
-  wp.launch(_contact_force_to_cfrc_ext, dim=(d.nconmax,), inputs=[m, d])
+  wp.launch(_cfrc_ext_contact, dim=(d.nconmax,), inputs=[m, d])
 
   # TODO(team): cfrc_ext += equality
 
