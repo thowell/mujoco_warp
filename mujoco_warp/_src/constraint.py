@@ -534,6 +534,7 @@ def _efc_limit_tendon(
       ten_margin,
       Jqvel,
       0.0,
+      tenid,
     )
 
 
