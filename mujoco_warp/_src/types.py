@@ -244,6 +244,7 @@ class SensorType(enum.IntEnum):
     TENDONVEL: scalar tendon velocity
     ACTUATORVEL: actuator velocity
     BALLANGVEL: ball joint angular velocity
+    FRAMELINVEL: 3D linear velocity
     SUBTREELINVEL: subtree linear velocity
     SUBTREEANGMOM: subtree angular momentum
     ACCELEROMETER: accelerometer
@@ -271,6 +272,7 @@ class SensorType(enum.IntEnum):
   TENDONVEL = mujoco.mjtSensor.mjSENS_TENDONVEL
   ACTUATORVEL = mujoco.mjtSensor.mjSENS_ACTUATORVEL
   BALLANGVEL = mujoco.mjtSensor.mjSENS_BALLANGVEL
+  FRAMELINVEL = mujoco.mjtSensor.mjSENS_FRAMELINVEL
   SUBTREELINVEL = mujoco.mjtSensor.mjSENS_SUBTREELINVEL
   SUBTREEANGMOM = mujoco.mjtSensor.mjSENS_SUBTREEANGMOM
   ACCELEROMETER = mujoco.mjtSensor.mjSENS_ACCELEROMETER
