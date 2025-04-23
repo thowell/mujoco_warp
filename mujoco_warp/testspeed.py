@@ -121,7 +121,6 @@ def _main(argv: Sequence[str]):
   d = mjwarp.put_data(
     mjm, mjd, nworld=_BATCH_SIZE.value, nconmax=_NCONMAX.value, njmax=_NJMAX.value
   )
-  mjwarp.forward(m, d)
 
   if _CLEAR_KERNEL_CACHE.value:
     wp.clear_kernel_cache()

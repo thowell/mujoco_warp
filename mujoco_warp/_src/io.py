@@ -779,6 +779,8 @@ def put_data(
 ) -> types.Data:
   d = types.Data()
 
+  # TODO(team): confirm that Data is set correctly for solver with elliptic friction cones
+
   nworld = nworld or 1
   # TODO(team): better heuristic for nconmax
   nconmax = nconmax or max(512, mjd.ncon * nworld)
@@ -965,8 +967,6 @@ def put_data(
   con_geom_fill = np.vstack(
     [np.repeat(mjd.contact.geom, nworld, axis=0), np.zeros((ncon_fill, 2))]
   )
-  con_efc_address_fill = np.vstack([con_efc_address, np.zeros((ncon_fill, condim_max))])
-
   con_efc_address_fill = np.vstack([con_efc_address, np.zeros((ncon_fill, condim_max))])
 
   d.contact.dist = wp.array(con_dist_fill, dtype=wp.float32, ndim=1)
