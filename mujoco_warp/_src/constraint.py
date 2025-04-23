@@ -21,6 +21,8 @@ from . import math
 from . import types
 from .warp_util import event_scope
 
+wp.config.enable_backward = False
+
 
 @wp.func
 def _update_efc_row(
@@ -474,6 +476,58 @@ def _efc_limit_ball(
 
 
 @wp.kernel
+def _efc_limit_tendon(
+  m: types.Model,
+  d: types.Data,
+):
+  worldid, tenlimitedid = wp.tid()
+  tenid = m.tendon_limited_adr[tenlimitedid]
+
+  ten_range = m.tendon_range[tenid]
+  length = d.ten_length[worldid, tenid]
+  dist_min, dist_max = length - ten_range[0], ten_range[1] - length
+  ten_margin = m.tendon_margin[tenid]
+  pos = wp.min(dist_min, dist_max) - ten_margin
+  active = pos < 0
+
+  if active:
+    lid = wp.atomic_add(d.nl, 0, 1)
+    efcid = d.nefc[0] + lid
+    d.efc.worldid[efcid] = worldid
+
+    Jqvel = float(0.0)
+    scl = float(dist_min < dist_max) * 2.0 - 1.0
+
+    adr = m.tendon_adr[tenid]
+    if m.wrap_type[adr] == wp.static(types.WrapType.JOINT.value):
+      ten_num = m.tendon_num[tenid]
+      for i in range(ten_num):
+        dofadr = m.jnt_dofadr[m.wrap_objid[adr + i]]
+        J = scl * d.ten_J[worldid, tenid, dofadr]
+        d.efc.J[efcid, dofadr] = J
+        Jqvel += J * d.qvel[worldid, dofadr]
+    else:
+      for i in range(m.nv):
+        J = scl * d.ten_J[worldid, tenid, i]
+        d.efc.J[efcid, i] = J
+        Jqvel += J * d.qvel[worldid, i]
+
+    _update_efc_row(
+      m,
+      d,
+      efcid,
+      pos,
+      pos,
+      m.tendon_invweight0[tenid],
+      m.tendon_solref_lim[tenid],
+      m.tendon_solimp_lim[tenid],
+      ten_margin,
+      Jqvel,
+      0.0,
+    )
+
+
+@wp.kernel
 def _efc_contact_pyramidal(
   m: types.Model,
   d: types.Data,
@@ -684,14 +738,6 @@ def make_constraint(m: types.Model, d: types.Data):
 
     # limit
     if not (m.opt.disableflags & types.DisableBit.LIMIT.value):
-      limit_slide_hinge = m.jnt_limited_slide_hinge_adr.size > 0
-      if limit_slide_hinge:
-        wp.launch(
-          _efc_limit_slide_hinge,
-          dim=(d.nworld, m.jnt_limited_slide_hinge_adr.size),
-          inputs=[m, d],
-        )
-
       limit_ball = m.jnt_limited_ball_adr.size > 0
       if limit_ball:
         wp.launch(
@@ -700,7 +746,23 @@ def make_constraint(m: types.Model, d: types.Data):
           inputs=[m, d],
         )
 
-      if limit_slide_hinge or limit_ball:
+      limit_slide_hinge = m.jnt_limited_slide_hinge_adr.size > 0
+      if limit_slide_hinge:
+        wp.launch(
+          _efc_limit_slide_hinge,
+          dim=(d.nworld, m.jnt_limited_slide_hinge_adr.size),
+          inputs=[m, d],
+        )
+
+      limit_tendon = m.tendon_limited_adr.size > 0
+      if limit_tendon:
+        wp.launch(
+          _efc_limit_tendon,
+          dim=(d.nworld, m.tendon_limited_adr.size),
+          inputs=[m, d],
+        )
+
+      if limit_ball or limit_slide_hinge or limit_tendon:
 
         @wp.kernel
         def _update_nefc(d: types.Data):
