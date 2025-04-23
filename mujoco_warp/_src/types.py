@@ -97,12 +97,16 @@ class DynType(enum.IntEnum):
 
   Members:
     NONE: no internal dynamics; ctrl specifies force
+    INTEGRATOR: integrator: da/dt = u
+    FILTER: linear filter: da/dt = (u-a) / tau
     FILTEREXACT: linear filter: da/dt = (u-a) / tau, with exact integration
   """
 
   NONE = mujoco.mjtDyn.mjDYN_NONE
+  INTEGRATOR = mujoco.mjtDyn.mjDYN_INTEGRATOR
+  FILTER = mujoco.mjtDyn.mjDYN_FILTER
   FILTEREXACT = mujoco.mjtDyn.mjDYN_FILTEREXACT
-  # unsupported: INTEGRATOR, FILTER, MUSCLE, USER
+  # unsupported: MUSCLE, USER
 
 
 class GainType(enum.IntEnum):
@@ -242,8 +246,13 @@ class SensorType(enum.IntEnum):
     BALLANGVEL: ball joint angular velocity
     SUBTREELINVEL: subtree linear velocity
     SUBTREEANGMOM: subtree angular momentum
+    ACCELEROMETER: accelerometer
+    FORCE: force
+    TORQUE: torque
     ACTUATORFRC: scalar actuator force
     JOINTACTFRC: scalar actuator force, measured at the joint
+    FRAMELINACC: 3D linear acceleration
+    FRAMEANGACC: 3D angular acceleration
   """
 
   JOINTPOS = mujoco.mjtSensor.mjSENS_JOINTPOS
@@ -264,27 +273,13 @@ class SensorType(enum.IntEnum):
   BALLANGVEL = mujoco.mjtSensor.mjSENS_BALLANGVEL
   SUBTREELINVEL = mujoco.mjtSensor.mjSENS_SUBTREELINVEL
   SUBTREEANGMOM = mujoco.mjtSensor.mjSENS_SUBTREEANGMOM
+  ACCELEROMETER = mujoco.mjtSensor.mjSENS_ACCELEROMETER
+  FORCE = mujoco.mjtSensor.mjSENS_FORCE
+  TORQUE = mujoco.mjtSensor.mjSENS_TORQUE
   ACTUATORFRC = mujoco.mjtSensor.mjSENS_ACTUATORFRC
   JOINTACTFRC = mujoco.mjtSensor.mjSENS_JOINTACTFRC
-
-
-class ObjType(enum.IntEnum):
-  """Type of object.
-
-  Members:
-    UNKNOWN: unknown object type
-    BODY: body
-    XBODY: body, used to access regular frame instead of i-frame
-    GEOM: geom
-    SITE: site
-  """
-
-  UNKNOWN = mujoco.mjtObj.mjOBJ_UNKNOWN
-  BODY = mujoco.mjtObj.mjOBJ_BODY
-  XBODY = mujoco.mjtObj.mjOBJ_XBODY
-  GEOM = mujoco.mjtObj.mjOBJ_GEOM
-  SITE = mujoco.mjtObj.mjOBJ_SITE
-  # unsupported: CAMERA
+  FRAMELINACC = mujoco.mjtSensor.mjSENS_FRAMELINACC
+  FRAMEANGACC = mujoco.mjtSensor.mjSENS_FRAMEANGACC
 
 
 class ObjType(enum.IntEnum):
@@ -313,11 +308,13 @@ class EqType(enum.IntEnum):
   Members:
     CONNECT: connect two bodies at a point (ball joint)
     JOINT: couple the values of two scalar joints with cubic
+    WELD: fix relative position and orientation of two bodies
   """
 
   CONNECT = mujoco.mjtEq.mjEQ_CONNECT
+  WELD = mujoco.mjtEq.mjEQ_WELD
   JOINT = mujoco.mjtEq.mjEQ_JOINT
-  # unsupported: WELD, TENDON, FLEX, DISTANCE
+  # unsupported: TENDON, FLEX, DISTANCE
 
 
 class WrapType(enum.IntEnum):
@@ -665,14 +662,16 @@ class Model:
     eq_solref: constraint solver reference                   (neq, mjNREF)
     eq_solimp: constraint solver impedance                   (neq, mjNIMP)
     eq_data: numeric data for constraint                     (neq, mjNEQDATA)
-    eq_jnt_adr: eq_* addresses of type `JOINT`
     eq_connect_adr: eq_* addresses of type `CONNECT`
+    eq_wld_adr: eq_* addresses of type `WELD`
+    eq_jnt_adr: eq_* addresses of type `JOINT`
     actuator_trntype: transmission type (mjtTrn)             (nu,)
     actuator_dyntype: dynamics type (mjtDyn)                 (nu,)
     actuator_gaintype: gain type (mjtGain)                   (nu,)
     actuator_biastype: bias type (mjtBias)                   (nu,)
     actuator_trnid: transmission id: joint, tendon, site     (nu, 2)
     actuator_actadr: first activation address; -1: stateless (nu,)
+    actuator_actnum: number of activation variables          (nu,)
     actuator_ctrllimited: is control limited                 (nu,)
     actuator_forcelimited: is force limited                  (nu,)
     actuator_actlimited: is activation limited               (nu,)
@@ -859,20 +858,22 @@ class Model:
   eq_solref: wp.array(dtype=wp.vec2, ndim=1)
   eq_solimp: wp.array(dtype=vec5, ndim=1)
   eq_data: wp.array(dtype=vec11, ndim=1)
-  eq_jnt_adr: wp.array(dtype=wp.int32, ndim=1)
   eq_connect_adr: wp.array(dtype=wp.int32, ndim=1)
+  eq_wld_adr: wp.array(dtype=wp.int32, ndim=1)
+  eq_jnt_adr: wp.array(dtype=wp.int32, ndim=1)
   actuator_trntype: wp.array(dtype=wp.int32, ndim=1)
   actuator_dyntype: wp.array(dtype=wp.int32, ndim=1)
   actuator_gaintype: wp.array(dtype=wp.int32, ndim=1)
   actuator_biastype: wp.array(dtype=wp.int32, ndim=1)
   actuator_trnid: wp.array(dtype=wp.int32, ndim=2)
   actuator_actadr: wp.array(dtype=wp.int32, ndim=1)
+  actuator_actnum: wp.array(dtype=wp.int32, ndim=1)
   actuator_ctrllimited: wp.array(dtype=wp.bool, ndim=1)
   actuator_forcelimited: wp.array(dtype=wp.bool, ndim=1)
   actuator_actlimited: wp.array(dtype=wp.bool, ndim=1)
   actuator_dynprm: wp.array(dtype=vec10f, ndim=1)
-  actuator_gainprm: wp.array(dtype=wp.float32, ndim=2)
-  actuator_biasprm: wp.array(dtype=wp.float32, ndim=2)
+  actuator_gainprm: wp.array(dtype=vec10f, ndim=1)
+  actuator_biasprm: wp.array(dtype=vec10f, ndim=1)
   actuator_ctrlrange: wp.array(dtype=wp.vec2, ndim=1)
   actuator_forcerange: wp.array(dtype=wp.vec2, ndim=1)
   actuator_actrange: wp.array(dtype=wp.vec2, ndim=1)
