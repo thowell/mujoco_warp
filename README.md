@@ -47,13 +47,14 @@ The following features are implemented:
 | ----------------- | ---------------------------------- |
 | Dynamics          | Forward only                       |
 | Transmission      | `JOINT`, `JOINTINPARENT`           |
-| Actuator Dynamics | `NONE`                             |
+| Actuator Dynamics | `NONE`, `INTEGRATOR`, `FILTER`     |
+|                   | `FILTEREXACT`                      |
 | Actuator Gain     | `FIXED`, `AFFINE`                  |
 | Actuator Bias     | `NONE`, `AFFINE`                   |
 | Geom              | `PLANE`, `SPHERE`, `CAPSULE`       |
 | Constraint        | `LIMIT_JOINT`, `CONTACT_PYRAMIDAL` |
 |                   | `CONTACT_ELLIPTIC`                 |
-| Equality          | `JOINT`                            |
+| Equality          | `CONNECT`, `WELD`, `JOINT`         |
 | Integrator        | `EULER`, `IMPLICITFAST`, `RK4`     |
 | Cone              | `PYRAMIDAL`, `ELLIPTIC`            |
 | Condim            | (1, 3, 4, 6), (1, 3)               |
