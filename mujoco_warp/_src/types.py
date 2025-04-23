@@ -982,7 +982,7 @@ class Data:
     nf: number of friction constraints                          ()
     nl: number of limit constraints                             ()
     nefc: number of constraints                                 (1,)
-    time: simulation time                                       ()
+    time: simulation time                                       (nworld,)
     qpos: position                                              (nworld, nq)
     qvel: velocity                                              (nworld, nv)
     act: actuator activation                                    (nworld, na)
@@ -1085,7 +1085,7 @@ class Data:
   nf: wp.array(dtype=wp.int32, ndim=1)
   nl: wp.array(dtype=wp.int32, ndim=1)
   nefc: wp.array(dtype=wp.int32, ndim=1)
-  time: float
+  time: wp.array(dtype=wp.float32, ndim=1)
   qpos: wp.array(dtype=wp.float32, ndim=2)
   qvel: wp.array(dtype=wp.float32, ndim=2)
   act: wp.array(dtype=wp.float32, ndim=2)

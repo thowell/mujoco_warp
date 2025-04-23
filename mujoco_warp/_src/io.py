@@ -691,7 +691,7 @@ def make_data(
   d.nf = wp.zeros(1, dtype=wp.int32)
   d.nl = wp.zeros(1, dtype=wp.int32)
 
-  d.time = 0.0
+  d.time = wp.zeros(nworld, dtype=wp.float32, ndim=1)
 
   qpos0 = np.tile(mjm.qpos0, (nworld, 1))
   d.qpos = wp.array(qpos0, dtype=wp.float32, ndim=2)
@@ -871,7 +871,8 @@ def put_data(
   d.nf = wp.array([mjd.nf * nworld], dtype=wp.int32, ndim=1)
   d.nl = wp.array([mjd.nl * nworld], dtype=wp.int32, ndim=1)
   d.nefc = wp.array([mjd.nefc * nworld], dtype=wp.int32, ndim=1)
-  d.time = mjd.time
+
+  d.time = wp.array(mjd.time * np.ones(nworld), dtype=wp.float32, ndim=1)
 
   # TODO(erikfrey): would it be better to tile on the gpu?
   def tile(x):
@@ -1134,7 +1135,7 @@ def get_data_into(
   if ncon != result.ncon or nefc != result.nefc:
     mujoco._functions._realloc_con_efc(result, ncon=ncon, nefc=nefc)
 
-  result.time = d.time
+  result.time = d.time.numpy()[0]
   result.ne = d.ne.numpy()[0]
   result.qpos[:] = d.qpos.numpy()[0]
   result.qvel[:] = d.qvel.numpy()[0]
