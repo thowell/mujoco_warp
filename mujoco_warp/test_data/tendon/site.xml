@@ -2,7 +2,7 @@
   <worldbody>
     <site name="siteworld"/>
     <body>
-      <joint name="slide" type="slide" axis="1 0 0"/>
+      <joint type="slide" axis="1 0 0"/>
       <geom type="sphere" size="0.1"/>
       <site name="site0" pos="0 0 .1"/>
       <body>
