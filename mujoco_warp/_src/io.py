@@ -299,7 +299,7 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
     tree_id = mjm.dof_treeid[tile_corners]
     num_trees = int(np.max(tree_id))
     bodyid = []
-    for i in range(m.nu):
+    for i in range(mjm.nu):
       trntype = mjm.actuator_trntype[i]
       if trntype == mujoco.mjtTrn.mjTRN_JOINT or trntype == mujoco.mjtTrn.mjTRN_JOINTINPARENT:
         jntid = mjm.actuator_trnid[i, 0]
