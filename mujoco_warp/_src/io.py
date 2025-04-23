@@ -301,7 +301,10 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
     bodyid = []
     for i in range(mjm.nu):
       trntype = mjm.actuator_trntype[i]
-      if trntype == mujoco.mjtTrn.mjTRN_JOINT or trntype == mujoco.mjtTrn.mjTRN_JOINTINPARENT:
+      if (
+        trntype == mujoco.mjtTrn.mjTRN_JOINT
+        or trntype == mujoco.mjtTrn.mjTRN_JOINTINPARENT
+      ):
         jntid = mjm.actuator_trnid[i, 0]
         bodyid.append(mjm.jnt_bodyid[jntid])
       elif trntype == mujoco.mjtTrn.mjTRN_TENDON:
@@ -315,7 +318,7 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
           for i in range(mjm.nv):
             bodyid.append(mjm.dof_bodyid[i])
       else:
-        raise NotImplementedError(f'Transmission type {trntype} not implemented.')
+        raise NotImplementedError(f"Transmission type {trntype} not implemented.")
 
     tree = mjm.body_treeid[np.array(bodyid, dtype=int)]
     counts, ids = np.histogram(tree, bins=np.arange(0, num_trees + 2))
