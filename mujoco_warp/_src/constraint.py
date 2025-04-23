@@ -479,7 +479,6 @@ def _efc_limit_ball(
 def _efc_limit_tendon(
   m: types.Model,
   d: types.Data,
-  refsafe: bool,
 ):
   worldid, tenlimitedid = wp.tid()
   tenid = m.tendon_limited_adr[tenlimitedid]
@@ -492,8 +491,8 @@ def _efc_limit_tendon(
   active = pos < 0
 
   if active:
-    wp.atomic_add(d.nl, 0, 1)
-    efcid = wp.atomic_add(d.nefc, 0, 1)
+    lid = wp.atomic_add(d.nl, 0, 1)
+    efcid = d.nefc[0] + lid
     d.efc.worldid[efcid] = worldid
 
     Jqvel = float(0.0)
@@ -739,14 +738,6 @@ def make_constraint(m: types.Model, d: types.Data):
 
     # limit
     if not (m.opt.disableflags & types.DisableBit.LIMIT.value):
-      limit_slide_hinge = m.jnt_limited_slide_hinge_adr.size > 0
-      if limit_slide_hinge:
-        wp.launch(
-          _efc_limit_slide_hinge,
-          dim=(d.nworld, m.jnt_limited_slide_hinge_adr.size),
-          inputs=[m, d],
-        )
-
       limit_ball = m.jnt_limited_ball_adr.size > 0
       if limit_ball:
         wp.launch(
@@ -755,16 +746,23 @@ def make_constraint(m: types.Model, d: types.Data):
           inputs=[m, d],
         )
 
-      refsafe = not m.opt.disableflags & types.DisableBit.REFSAFE.value
-      
-      if m.tendon_limited_adr.size != 0:
+      limit_slide_hinge = m.jnt_limited_slide_hinge_adr.size > 0
+      if limit_slide_hinge:
+        wp.launch(
+          _efc_limit_slide_hinge,
+          dim=(d.nworld, m.jnt_limited_slide_hinge_adr.size),
+          inputs=[m, d],
+        )
+
+      limit_tendon = m.tendon_limited_adr.size > 0
+      if limit_tendon:
         wp.launch(
           _efc_limit_tendon,
           dim=(d.nworld, m.tendon_limited_adr.size),
-          inputs=[m, d, refsafe],
+          inputs=[m, d],
         )
 
-      if limit_slide_hinge or limit_ball:
+      if limit_ball or limit_slide_hinge or limit_tendon:
 
         @wp.kernel
         def _update_nefc(d: types.Data):
