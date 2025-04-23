@@ -514,6 +514,16 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
   # tendon
   m.tendon_adr = wp.array(mjm.tendon_adr, dtype=wp.int32, ndim=1)
   m.tendon_num = wp.array(mjm.tendon_num, dtype=wp.int32, ndim=1)
+  m.tendon_limited = wp.array(mjm.tendon_limited, dtype=wp.int32, ndim=1)
+  m.tendon_limited_adr = wp.array(
+    np.nonzero(mjm.tendon_limited)[0], dtype=wp.int32, ndim=1
+  )
+  m.tendon_solref_lim = wp.array(mjm.tendon_solref_lim, dtype=wp.vec2f, ndim=1)
+  m.tendon_solimp_lim = wp.array(mjm.tendon_solimp_lim, dtype=types.vec5, ndim=1)
+  m.tendon_range = wp.array(mjm.tendon_range, dtype=wp.vec2f, ndim=1)
+  m.tendon_margin = wp.array(mjm.tendon_margin, dtype=wp.float32, ndim=1)
+  m.tendon_length0 = wp.array(mjm.tendon_length0, dtype=wp.float32, ndim=1)
+  m.tendon_invweight0 = wp.array(mjm.tendon_invweight0, dtype=wp.float32, ndim=1)
   m.wrap_objid = wp.array(mjm.wrap_objid, dtype=wp.int32, ndim=1)
   m.wrap_prm = wp.array(mjm.wrap_prm, dtype=wp.float32, ndim=1)
   m.wrap_type = wp.array(mjm.wrap_type, dtype=wp.int32, ndim=1)
