@@ -25,6 +25,7 @@ from .types import Data
 from .types import DisableBit
 from .types import JointType
 from .types import Model
+from .types import ObjType
 from .types import TrnType
 from .types import WrapType
 from .types import array2df
@@ -660,6 +661,94 @@ def rne_postconstraint(m: Model, d: Data):
 
   wp.launch(_cfrc_ext, dim=(d.nworld, m.nbody), inputs=[m, d])
 
+  @kernel
+  def _cfrc_ext_equality(m: Model, d: Data):
+    eqid = wp.tid()
+
+    ne_connect = d.ne_connect[0]
+    ne_weld = d.ne_weld[0]
+    num_connect = ne_connect // 3
+
+    if eqid >= num_connect + ne_weld // 6:
+      return
+
+    is_connect = eqid < num_connect
+    if is_connect:
+      efcid = 3 * eqid
+      cfrc_torque = wp.vec3(0.0, 0.0, 0.0)  # no torque from connect
+    else:
+      efcid = 6 * eqid - ne_connect
+      cfrc_torque = wp.vec3(
+        d.efc.force[efcid + 3], d.efc.force[efcid + 4], d.efc.force[efcid + 5]
+      )
+
+    cfrc_force = wp.vec3(
+      d.efc.force[efcid + 0],
+      d.efc.force[efcid + 1],
+      d.efc.force[efcid + 2],
+    )
+
+    worldid = d.efc.worldid[efcid]
+    id = d.efc.id[efcid]
+    eq_data = m.eq_data[id]
+    body_semantic = m.eq_objtype[id] == wp.static(ObjType.BODY.value)
+
+    obj1 = m.eq_obj1id[id]
+    obj2 = m.eq_obj2id[id]
+
+    if body_semantic:
+      bodyid1 = obj1
+      bodyid2 = obj2
+    else:
+      bodyid1 = m.site_bodyid[obj1]
+      bodyid2 = m.site_bodyid[obj2]
+
+    # body 1
+    if bodyid1:
+      if body_semantic:
+        if is_connect:
+          offset = wp.vec3(eq_data[0], eq_data[1], eq_data[2])
+        else:
+          offset = wp.vec3(eq_data[3], eq_data[4], eq_data[5])
+      else:
+        offset = m.site_pos[obj1]
+
+      # transform point on body1: local -> global
+      pos = d.xmat[worldid, bodyid1] @ offset + d.xpos[worldid, bodyid1]
+
+      # subtree CoM-based torque_force vector
+      newpos = d.subtree_com[worldid, m.body_rootid[bodyid1]]
+
+      dif = newpos - pos
+      cfrc_com = wp.spatial_vector(cfrc_torque - wp.cross(dif, cfrc_force), cfrc_force)
+
+      # apply (opposite for body 1)
+      wp.atomic_add(d.cfrc_ext[worldid], bodyid1, cfrc_com)
+
+    # body 2
+    if bodyid2:
+      if body_semantic:
+        if is_connect:
+          offset = wp.vec3(eq_data[3], eq_data[4], eq_data[5])
+        else:
+          offset = wp.vec3(eq_data[0], eq_data[1], eq_data[2])
+      else:
+        offset = m.site_pos[obj2]
+
+      # transform point on body2: local -> global
+      pos = d.xmat[worldid, bodyid2] @ offset + d.xpos[worldid, bodyid2]
+
+      # subtree CoM-based torque_force vector
+      newpos = d.subtree_com[worldid, m.body_rootid[bodyid2]]
+
+      dif = newpos - pos
+      cfrc_com = wp.spatial_vector(cfrc_torque - wp.cross(dif, cfrc_force), cfrc_force)
+
+      # apply
+      wp.atomic_sub(d.cfrc_ext[worldid], bodyid2, cfrc_com)
+
+  wp.launch(_cfrc_ext_equality, dim=(d.nworld * m.neq,), inputs=[m, d])
+
   # cfrc_ext += contacts
   @kernel
   def _contact_force_to_cfrc_ext(m: Model, d: Data):
@@ -691,8 +780,6 @@ def rne_postconstraint(m: Model, d: Data):
       d.cfrc_ext[worldid, id2] += support.transform_force(force, com2 - pos)
 
   wp.launch(_contact_force_to_cfrc_ext, dim=(d.nconmax,), inputs=[m, d])
-
-  # TODO(team): cfrc_ext += equality
 
   # forward pass over bodies: compute cacc, cfrc_int
   _rne_cacc_world(m, d)

@@ -37,6 +37,7 @@ def _update_efc_row(
   margin: wp.float32,
   Jqvel: float,
   frictionloss: float,
+  id: int,
 ):
   # Calculate kbi
   timeconst = solref[0]
@@ -77,6 +78,7 @@ def _update_efc_row(
   d.efc.pos[efcid] = pos_aref + margin
   d.efc.margin[efcid] = margin
   d.efc.frictionloss[efcid] = frictionloss
+  d.efc.id[efcid] = id
 
 
 @wp.func
@@ -124,8 +126,9 @@ def _efc_equality_connect(
   if not d.eq_active[worldid, i_eq]:
     return
 
-  efcid = wp.atomic_add(d.nefc, 0, 3)
-  wp.atomic_add(d.ne, 0, 3)
+  necid = wp.atomic_add(d.ne_connect, 0, 3)
+  efcid = d.nefc[0] + necid
+
   for i in range(wp.static(3)):
     d.efc.worldid[efcid + i] = worldid
 
@@ -175,6 +178,7 @@ def _efc_equality_connect(
       wp.float32(0.0),
       Jqvel[i],
       0.0,
+      i_eq,
     )
 
 
@@ -188,8 +192,8 @@ def _efc_equality_joint(
   if not d.eq_active[worldid, i_eq]:
     return
 
-  efcid = wp.atomic_add(d.nefc, 0, 1)
-  wp.atomic_add(d.ne, 0, 1)
+  nejid = wp.atomic_add(d.ne_jnt, 0, 1)
+  efcid = d.nefc[0] + d.ne_connect[0] + d.ne_weld[0] + nejid
   d.efc.worldid[efcid] = worldid
 
   jntid_1 = m.eq_obj1id[i_eq]
@@ -235,6 +239,7 @@ def _efc_equality_joint(
     wp.float32(0.0),
     Jqvel,
     0.0,
+    i_eq,
   )
 
 
@@ -268,6 +273,7 @@ def _efc_friction(
     0.0,
     Jqvel,
     m.dof_frictionloss[dofid],
+    dofid,
   )
 
 
@@ -281,8 +287,8 @@ def _efc_equality_weld(
   if not d.eq_active[worldid, i_eq]:
     return
 
-  efcid = wp.atomic_add(d.nefc, 0, 6)
-  wp.atomic_add(d.ne, 0, 6)
+  newid = wp.atomic_add(d.ne_weld, 0, 6)
+  efcid = d.nefc[0] + d.ne_connect[0] + newid
   for i in range(wp.static(6)):
     d.efc.worldid[efcid + i] = worldid
 
@@ -364,6 +370,7 @@ def _efc_equality_weld(
       0.0,
       Jqvelp[i],
       0.0,
+      i_eq,
     )
 
   invweight_r = m.body_invweight0[body1id, 1] + m.body_invweight0[body2id, 1]
@@ -381,6 +388,7 @@ def _efc_equality_weld(
       0.0,
       Jqvelr[i],
       0.0,
+      i_eq,
     )
 
 
@@ -421,6 +429,7 @@ def _efc_limit_slide_hinge(
       m.jnt_margin[jntid],
       Jqvel,
       0.0,
+      dofadr,
     )
 
 
@@ -472,6 +481,7 @@ def _efc_limit_ball(
       jnt_margin,
       Jqvel,
       0.0,
+      jntid,
     )
 
 
@@ -524,6 +534,7 @@ def _efc_limit_tendon(
       ten_margin,
       Jqvel,
       0.0,
+      tenid,
     )
 
 
@@ -609,6 +620,7 @@ def _efc_contact_pyramidal(
       includemargin,
       Jqvel,
       0.0,
+      conid,
     )
 
 
@@ -697,7 +709,15 @@ def _efc_contact_elliptic(
       includemargin,
       Jqvel,
       0.0,
+      conid,
     )
+
+
+@wp.kernel
+def _num_equality(d: types.Data):
+  ne = d.ne_connect[0] + d.ne_weld[0] + d.ne_jnt[0]
+  d.ne[0] = ne
+  d.nefc[0] += ne
 
 
 @event_scope
@@ -705,6 +725,9 @@ def make_constraint(m: types.Model, d: types.Data):
   """Creates constraint jacobians and other supporting data."""
 
   d.ne.zero_()
+  d.ne_connect.zero_()
+  d.ne_weld.zero_()
+  d.ne_jnt.zero_()
   d.nefc.zero_()
   d.nf.zero_()
   d.nl.zero_()
@@ -728,6 +751,8 @@ def make_constraint(m: types.Model, d: types.Data):
         dim=(d.nworld, m.eq_jnt_adr.size),
         inputs=[m, d],
       )
+
+      wp.launch(_num_equality, dim=(1,), inputs=[d])
 
     if not (m.opt.disableflags & types.DisableBit.FRICTIONLOSS.value):
       wp.launch(
