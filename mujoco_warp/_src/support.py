@@ -13,11 +13,12 @@
 # limitations under the License.
 # ==============================================================================
 
-from typing import Any
+from typing import Tuple
 
 import mujoco
 import warp as wp
 
+from .types import ConeType
 from .types import Data
 from .types import Model
 from .types import array2df
@@ -259,25 +260,27 @@ def contact_force(
   m: Model, d: Data, contact_id: int, to_world_frame: bool = False
 ) -> wp.spatial_vector:
   """Extract 6D force:torque for one contact, in contact frame by default."""
-  efc_address = d.contact.efc_address[
-    contact_id, 0
-  ]  # 0 in second dimension to get the normal force
   force = wp.spatial_vector(0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+  condim = d.contact.dim[contact_id]
+  efc_address = d.contact.efc_address[contact_id, 0]
 
-  if efc_address >= 0:
-    condim = d.contact.dim[contact_id]
-
-    # TODO(team): add support for elliptical cone type
-    if m.opt.cone == int(mujoco.mjtCone.mjCONE_PYRAMIDAL.value):
+  if contact_id >= 0 and contact_id <= d.ncon[0] and efc_address >= 0:
+    if m.opt.cone == int(ConeType.PYRAMIDAL.value):
       force = _decode_pyramid(
-        d.efc.force, efc_address, d.contact.friction[contact_id], condim
+        d.efc.force,
+        efc_address,
+        d.contact.friction[contact_id],
+        condim,
       )
+    else:
+      for i in range(condim):
+        force[i] = d.efc.force[d.contact.efc_address[contact_id, i]]
 
-    if to_world_frame:
-      # Transform both top and bottom parts of spatial vector by the full contact frame matrix
-      t = wp.spatial_top(force) @ d.contact.frame[contact_id]
-      b = wp.spatial_bottom(force) @ d.contact.frame[contact_id]
-      force = wp.spatial_vector(t, b)
+  if to_world_frame:
+    # Transform both top and bottom parts of spatial vector by the full contact frame matrix
+    t = wp.spatial_top(force) @ d.contact.frame[contact_id]
+    b = wp.spatial_bottom(force) @ d.contact.frame[contact_id]
+    force = wp.spatial_vector(t, b)
 
   return force
 
@@ -313,3 +316,36 @@ def transform_force(frc: wp.spatial_vector, offset: wp.vec3) -> wp.spatial_vecto
   force = wp.spatial_top(frc)
   torque = wp.spatial_bottom(frc)
   return transform_force(force, torque, offset)
+
+
+@wp.func
+def jac(
+  m: Model,
+  d: Data,
+  point: wp.vec3,
+  bodyid: wp.int32,
+  dofid: wp.int32,
+  worldid: wp.int32,
+) -> Tuple[wp.vec3, wp.vec3]:
+  dof_bodyid = m.dof_bodyid[dofid]
+  in_tree = int(dof_bodyid == 0)
+  parentid = bodyid
+  while parentid != 0:
+    if parentid == dof_bodyid:
+      in_tree = 1
+      break
+    parentid = m.body_parentid[parentid]
+
+  if not in_tree:
+    return wp.vec3(0.0), wp.vec3(0.0)
+
+  offset = point - wp.vec3(d.subtree_com[worldid, m.body_rootid[bodyid]])
+
+  cdof = d.cdof[worldid, dofid]
+  cdof_ang = wp.spatial_top(cdof)
+  cdof_lin = wp.spatial_bottom(cdof)
+
+  jacp = cdof_lin + wp.cross(cdof_ang, offset)
+  jacr = cdof_ang
+
+  return jacp, jacr

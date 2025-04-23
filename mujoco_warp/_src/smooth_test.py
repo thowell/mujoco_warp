@@ -157,7 +157,6 @@ class SmoothTest(parameterized.TestCase):
   @parameterized.parameters(True, False)
   def test_rne_postconstraint(self, gravity):
     """Tests rne_postconstraint."""
-    # TODO(team): test: contact, equality constraints
     mjm, mjd, m, d = test_util.fixture("pendula.xml", gravity=gravity)
 
     mjd.xfrc_applied = np.random.uniform(
@@ -175,8 +174,69 @@ class SmoothTest(parameterized.TestCase):
     mjwarp.rne_postconstraint(m, d)
 
     _assert_eq(d.cacc.numpy()[0], mjd.cacc, "cacc")
-    _assert_eq(d.cfrc_int.numpy()[0][1:], mjd.cfrc_int[1:], "cfrc_int")
+    _assert_eq(d.cfrc_int.numpy()[0], mjd.cfrc_int, "cfrc_int")
     _assert_eq(d.cfrc_ext.numpy()[0], mjd.cfrc_ext, "cfrc_ext")
+
+    _EQUALITY = """
+      <mujoco>
+        <option gravity="1 1 -1">
+          <flag contact="disable"/>
+        </option>
+        <worldbody>
+          <site name="siteworld"/>
+          <body name="body0">
+            <geom type="sphere" size=".1"/>
+            <freejoint/>
+          </body>
+          <body name="body1">
+            <geom type="sphere" size=".1"/>
+            <site name="site1"/>
+            <freejoint/>
+          </body>
+          <body name="body2">
+            <geom type="sphere" size=".1"/>
+            <freejoint/>
+          </body>
+          <body name="body3">
+            <geom type="sphere" size=".1"/>
+            <site name="site3" quat="0 1 0 0"/>
+            <freejoint/>
+          </body>
+        </worldbody>
+        <equality>
+          <connect body1="body0" anchor="1 1 1"/>
+          <connect site1="siteworld" site2="site1"/>
+          <weld body1="body2" relpose="1 1 1 0 1 0 0"/>
+          <weld site1="siteworld" site2="site3"/>
+        </equality>
+        <keyframe>
+          <key qpos="0 0 0 1 0 0 0 1 1 1 1 0 0 0 0 0 0 1 0 0 0 1 1 1 1 0 0 0"/>
+        </keyframe>
+      </mujoco>
+      """
+    mjm, mjd, m, d = test_util.fixture(xml=_EQUALITY, kick=True, keyframe=0)
+
+    mujoco.mj_rnePostConstraint(mjm, mjd)
+
+    d.cfrc_ext.zero_()
+    mjwarp.rne_postconstraint(m, d)
+
+    _assert_eq(d.cfrc_ext.numpy()[0], mjd.cfrc_ext, "cfrc_ext (equality)")
+
+    mjm, mjd, m, d = test_util.fixture("constraints.xml", keyframe=1, equality=False)
+
+    mujoco.mj_rnePostConstraint(mjm, mjd)
+
+    d.cfrc_ext.zero_()
+
+    # clear equality constraint counts
+    d.ne_connect.zero_()
+    d.ne_weld.zero_()
+    d.ne_jnt.zero_()
+
+    mjwarp.rne_postconstraint(m, d)
+
+    _assert_eq(d.cfrc_ext.numpy()[0], mjd.cfrc_ext, "cfrc_ext (contact)")
 
   def test_com_vel(self):
     """Tests com_vel."""
@@ -222,17 +282,38 @@ class SmoothTest(parameterized.TestCase):
     _assert_eq(d.subtree_linvel.numpy()[0], mjd.subtree_linvel, "subtree_linvel")
     _assert_eq(d.subtree_angmom.numpy()[0], mjd.subtree_angmom, "subtree_angmom")
 
-  def test_fixed_tendon(self):
-    """Tests fixed tendon."""
-    mjm, mjd, m, d = test_util.fixture("tendon.xml", keyframe=0)
+  @parameterized.parameters(
+    ("tendon/fixed.xml"),
+    ("tendon/site.xml"),
+    ("tendon/fixed_site.xml"),
+    ("tendon/site_fixed.xml"),
+  )
+  def test_tendon(self, xml):
+    """Tests tendon."""
+    mjm, mjd, m, d = test_util.fixture(xml, keyframe=0)
 
-    for arr in (d.ten_length, d.ten_J):
+    for arr in (d.ten_length, d.ten_J, d.actuator_length, d.actuator_moment):
       arr.zero_()
 
     mjwarp.tendon(m, d)
+    mjwarp.transmission(m, d)
 
     _assert_eq(d.ten_length.numpy()[0], mjd.ten_length, "ten_length")
     _assert_eq(d.ten_J.numpy()[0], mjd.ten_J.reshape((mjm.ntendon, mjm.nv)), "ten_J")
+    _assert_eq(d.wrap_xpos.numpy()[0], mjd.wrap_xpos, "wrap_xpos")
+    _assert_eq(d.wrap_obj.numpy()[0], mjd.wrap_obj, "wrap_obj")
+    _assert_eq(d.ten_wrapnum.numpy()[0], mjd.ten_wrapnum, "ten_wrapnum")
+    _assert_eq(d.ten_wrapadr.numpy()[0], mjd.ten_wrapadr, "ten_wrapadr")
+    _assert_eq(d.actuator_length.numpy()[0], mjd.actuator_length, "actuator_length")
+    actuator_moment = np.zeros((mjm.nu, mjm.nv))
+    mujoco.mju_sparse2dense(
+      actuator_moment,
+      mjd.actuator_moment,
+      mjd.moment_rownnz,
+      mjd.moment_rowadr,
+      mjd.moment_colind,
+    )
+    _assert_eq(d.actuator_moment.numpy()[0], actuator_moment, "actuator_moment")
 
 
 if __name__ == "__main__":

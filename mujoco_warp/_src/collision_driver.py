@@ -25,7 +25,6 @@ from .types import MJ_MINVAL
 from .types import Data
 from .types import DisableBit
 from .types import Model
-from .types import vec5
 from .warp_util import event_scope
 
 wp.set_module_options({"enable_backward": False})
@@ -60,32 +59,7 @@ def _sphere_filter(m: Model, d: Data, geom1: int, geom2: int, worldid: int) -> b
 
 
 @wp.func
-def _geom_filter(m: Model, geom1: int, geom2: int, filterparent: bool) -> bool:
-  bodyid1 = m.geom_bodyid[geom1]
-  bodyid2 = m.geom_bodyid[geom2]
-  contype1 = m.geom_contype[geom1]
-  contype2 = m.geom_contype[geom2]
-  conaffinity1 = m.geom_conaffinity[geom1]
-  conaffinity2 = m.geom_conaffinity[geom2]
-  weldid1 = m.body_weldid[bodyid1]
-  weldid2 = m.body_weldid[bodyid2]
-  weld_parentid1 = m.body_weldid[m.body_parentid[weldid1]]
-  weld_parentid2 = m.body_weldid[m.body_parentid[weldid2]]
-
-  self_collision = weldid1 == weldid2
-  parent_child_collision = (
-    filterparent
-    and (weldid1 != 0)
-    and (weldid2 != 0)
-    and ((weldid1 == weld_parentid2) or (weldid2 == weld_parentid1))
-  )
-  mask = (contype1 & conaffinity2) or (contype2 & conaffinity1)
-
-  return mask and (not self_collision) and (not parent_child_collision)
-
-
-@wp.func
-def _add_geom_pair(m: Model, d: Data, geom1: int, geom2: int, worldid: int):
+def _add_geom_pair(m: Model, d: Data, geom1: int, geom2: int, worldid: int, nxnid: int):
   pairid = wp.atomic_add(d.ncollision, 0, 1)
 
   if pairid >= d.nconmax:
@@ -100,6 +74,7 @@ def _add_geom_pair(m: Model, d: Data, geom1: int, geom2: int, worldid: int):
     pair = wp.vec2i(geom1, geom2)
 
   d.collision_pair[pairid] = pair
+  d.collision_pairid[pairid] = m.nxn_pairid[nxnid]
   d.collision_worldid[pairid] = worldid
 
 
@@ -177,12 +152,14 @@ def _sap_broadphase(m: Model, d: Data, nsweep: int, filterparent: bool):
     # geom indices
     geom1 = d.sap_sort_index[worldid, i]
     geom2 = d.sap_sort_index[worldid, j]
+    idx = (m.ngeom - geom1 // 2) * wp.max(0, geom1 - 1) + geom2 - m.ngeom // 2 - 1
 
-    sphere_filter = _sphere_filter(m, d, geom1, geom2, worldid)
-    geom_filter = _geom_filter(m, geom1, geom2, filterparent)
+    if m.nxn_pairid[idx] < -1:
+      worldgeomid += nsweep
+      continue
 
-    if sphere_filter and geom_filter:
-      _add_geom_pair(m, d, geom1, geom2, worldid)
+    if _sphere_filter(m, d, geom1, geom2, worldid):
+      _add_geom_pair(m, d, geom1, geom2, worldid, idx)
 
     worldgeomid += nsweep
 
@@ -234,86 +211,24 @@ def sap_broadphase(m: Model, d: Data):
 
 def nxn_broadphase(m: Model, d: Data):
   """Broadphase collision detective via brute-force search."""
-  filterparent = not (m.opt.disableflags & DisableBit.FILTERPARENT.value)
 
   @wp.kernel
   def _nxn_broadphase(m: Model, d: Data):
     worldid, elementid = wp.tid()
-    geom1 = (
-      m.ngeom
-      - 2
-      - int(
-        wp.sqrt(float(-8 * elementid + 4 * m.ngeom * (m.ngeom - 1) - 7)) / 2.0 - 0.5
-      )
-    )
-    geom2 = (
-      elementid
-      + geom1
-      + 1
-      - m.ngeom * (m.ngeom - 1) // 2
-      + (m.ngeom - geom1) * ((m.ngeom - geom1) - 1) // 2
-    )
 
-    sphere_filter = _sphere_filter(m, d, geom1, geom2, worldid)
-    geom_filter = _geom_filter(m, geom1, geom2, filterparent)
-
-    if sphere_filter and geom_filter:
-      _add_geom_pair(m, d, geom1, geom2, worldid)
-
-  wp.launch(
-    _nxn_broadphase, dim=(d.nworld, m.ngeom * (m.ngeom - 1) // 2), inputs=[m, d]
-  )
-
-
-def contact_params(m: Model, d: Data):
-  @wp.kernel
-  def _contact_params(
-    m: Model,
-    d: Data,
-  ):
-    tid = wp.tid()
-
-    n_contact_pts = d.ncon[0]
-    if tid >= n_contact_pts:
+    # check for valid geom pair
+    if m.nxn_pairid[elementid] < -1:
       return
 
-    geoms = d.contact.geom[tid]
-    g1 = geoms.x
-    g2 = geoms.y
+    geom = m.nxn_geom_pair[elementid]
+    geom1 = geom[0]
+    geom2 = geom[1]
 
-    margin = wp.max(m.geom_margin[g1], m.geom_margin[g2])
-    gap = wp.max(m.geom_gap[g1], m.geom_gap[g2])
-    solmix1 = m.geom_solmix[g1]
-    solmix2 = m.geom_solmix[g2]
-    mix = solmix1 / (solmix1 + solmix2)
-    mix = wp.where((solmix1 < MJ_MINVAL) and (solmix2 < MJ_MINVAL), 0.5, mix)
-    mix = wp.where((solmix1 < MJ_MINVAL) and (solmix2 >= MJ_MINVAL), 0.0, mix)
-    mix = wp.where((solmix1 >= MJ_MINVAL) and (solmix2 < MJ_MINVAL), 1.0, mix)
+    if _sphere_filter(m, d, geom1, geom2, worldid):
+      _add_geom_pair(m, d, geom1, geom2, worldid, elementid)
 
-    p1 = m.geom_priority[g1]
-    p2 = m.geom_priority[g2]
-    mix = wp.where(p1 == p2, mix, wp.where(p1 > p2, 1.0, 0.0))
-
-    condim1 = m.geom_condim[g1]
-    condim2 = m.geom_condim[g2]
-    condim = wp.where(
-      p1 == p2, wp.max(condim1, condim2), wp.where(p1 > p2, condim1, condim2)
-    )
-    d.contact.dim[tid] = condim
-
-    if m.geom_solref[g1].x > 0.0 and m.geom_solref[g2].x > 0.0:
-      d.contact.solref[tid] = mix * m.geom_solref[g1] + (1.0 - mix) * m.geom_solref[g2]
-    else:
-      d.contact.solref[tid] = wp.min(m.geom_solref[g1], m.geom_solref[g2])
-    d.contact.includemargin[tid] = margin - gap
-    friction_ = wp.max(m.geom_friction[g1], m.geom_friction[g2])
-    friction5 = vec5(
-      friction_[0], friction_[0], friction_[1], friction_[2], friction_[2]
-    )
-    d.contact.friction[tid] = friction5
-    d.contact.solimp[tid] = mix * m.geom_solimp[g1] + (1.0 - mix) * m.geom_solimp[g2]
-
-  wp.launch(_contact_params, dim=[d.nconmax], inputs=[m, d])
+  if m.nxn_geom_pair.shape[0]:
+    wp.launch(_nxn_broadphase, dim=(d.nworld, m.nxn_geom_pair.shape[0]), inputs=[m, d])
 
 
 @event_scope
@@ -342,8 +257,7 @@ def collision(m: Model, d: Data):
 
   # TODO(team): we should reject far-away contacts in the narrowphase instead of constraint
   #             partitioning because we can move some pressure of the atomics
+  # TODO(team) switch between collision functions and GJK/EPA here
   gjk_narrowphase(m, d)
   primitive_narrowphase(m, d)
   box_box_narrowphase(m, d)
-
-  contact_params(m, d)

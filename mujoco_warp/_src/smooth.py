@@ -25,13 +25,17 @@ from .types import Data
 from .types import DisableBit
 from .types import JointType
 from .types import Model
+from .types import ObjType
 from .types import TrnType
+from .types import WrapType
 from .types import array2df
 from .types import array3df
 from .types import vec10
 from .warp_util import event_scope
 from .warp_util import kernel
 from .warp_util import kernel_copy
+
+wp.set_module_options({"enable_backward": False})
 
 
 @event_scope
@@ -657,8 +661,125 @@ def rne_postconstraint(m: Model, d: Data):
 
   wp.launch(_cfrc_ext, dim=(d.nworld, m.nbody), inputs=[m, d])
 
-  # TODO(team): cfrc_ext += contacts
-  # TODO(team): cfrc_ext += equality
+  @kernel
+  def _cfrc_ext_equality(m: Model, d: Data):
+    eqid = wp.tid()
+
+    ne_connect = d.ne_connect[0]
+    ne_weld = d.ne_weld[0]
+    num_connect = ne_connect // 3
+
+    if eqid >= num_connect + ne_weld // 6:
+      return
+
+    is_connect = eqid < num_connect
+    if is_connect:
+      efcid = 3 * eqid
+      cfrc_torque = wp.vec3(0.0, 0.0, 0.0)  # no torque from connect
+    else:
+      efcid = 6 * eqid - ne_connect
+      cfrc_torque = wp.vec3(
+        d.efc.force[efcid + 3], d.efc.force[efcid + 4], d.efc.force[efcid + 5]
+      )
+
+    cfrc_force = wp.vec3(
+      d.efc.force[efcid + 0],
+      d.efc.force[efcid + 1],
+      d.efc.force[efcid + 2],
+    )
+
+    worldid = d.efc.worldid[efcid]
+    id = d.efc.id[efcid]
+    eq_data = m.eq_data[id]
+    body_semantic = m.eq_objtype[id] == wp.static(ObjType.BODY.value)
+
+    obj1 = m.eq_obj1id[id]
+    obj2 = m.eq_obj2id[id]
+
+    if body_semantic:
+      bodyid1 = obj1
+      bodyid2 = obj2
+    else:
+      bodyid1 = m.site_bodyid[obj1]
+      bodyid2 = m.site_bodyid[obj2]
+
+    # body 1
+    if bodyid1:
+      if body_semantic:
+        if is_connect:
+          offset = wp.vec3(eq_data[0], eq_data[1], eq_data[2])
+        else:
+          offset = wp.vec3(eq_data[3], eq_data[4], eq_data[5])
+      else:
+        offset = m.site_pos[obj1]
+
+      # transform point on body1: local -> global
+      pos = d.xmat[worldid, bodyid1] @ offset + d.xpos[worldid, bodyid1]
+
+      # subtree CoM-based torque_force vector
+      newpos = d.subtree_com[worldid, m.body_rootid[bodyid1]]
+
+      dif = newpos - pos
+      cfrc_com = wp.spatial_vector(cfrc_torque - wp.cross(dif, cfrc_force), cfrc_force)
+
+      # apply (opposite for body 1)
+      wp.atomic_add(d.cfrc_ext[worldid], bodyid1, cfrc_com)
+
+    # body 2
+    if bodyid2:
+      if body_semantic:
+        if is_connect:
+          offset = wp.vec3(eq_data[3], eq_data[4], eq_data[5])
+        else:
+          offset = wp.vec3(eq_data[0], eq_data[1], eq_data[2])
+      else:
+        offset = m.site_pos[obj2]
+
+      # transform point on body2: local -> global
+      pos = d.xmat[worldid, bodyid2] @ offset + d.xpos[worldid, bodyid2]
+
+      # subtree CoM-based torque_force vector
+      newpos = d.subtree_com[worldid, m.body_rootid[bodyid2]]
+
+      dif = newpos - pos
+      cfrc_com = wp.spatial_vector(cfrc_torque - wp.cross(dif, cfrc_force), cfrc_force)
+
+      # apply
+      wp.atomic_sub(d.cfrc_ext[worldid], bodyid2, cfrc_com)
+
+  wp.launch(_cfrc_ext_equality, dim=(d.nworld * m.neq,), inputs=[m, d])
+
+  # cfrc_ext += contacts
+  @kernel
+  def _contact_force_to_cfrc_ext(m: Model, d: Data):
+    conid = wp.tid()
+
+    if conid >= d.ncon[0]:
+      return
+
+    geom = d.contact.geom[conid]
+    id1 = m.geom_bodyid[geom[0]]
+    id2 = m.geom_bodyid[geom[1]]
+
+    if id1 == 0 and id2 == 0:
+      return
+
+    # contact force in world frame
+    force = support.contact_force(m, d, conid, to_world_frame=True)
+
+    worldid = d.contact.worldid[conid]
+    pos = d.contact.pos[conid]
+
+    # contact force on bodies
+    if id1:
+      com1 = d.subtree_com[worldid, m.body_rootid[id1]]
+      d.cfrc_ext[worldid, id1] -= support.transform_force(force, com1 - pos)
+
+    if id2:
+      com2 = d.subtree_com[worldid, m.body_rootid[id2]]
+      d.cfrc_ext[worldid, id2] += support.transform_force(force, com2 - pos)
+
+  wp.launch(_contact_force_to_cfrc_ext, dim=(d.nconmax,), inputs=[m, d])
 
   # forward pass over bodies: compute cacc, cfrc_int
   _rne_cacc_world(m, d)
@@ -686,16 +807,16 @@ def transmission(m: Model, d: Data):
     moment: array3df,
   ):
     worldid, actid = wp.tid()
-    qpos = d.qpos[worldid]
-    jntid = m.actuator_trnid[actid, 0]
-    jnt_typ = m.jnt_type[jntid]
-    qadr = m.jnt_qposadr[jntid]
-    vadr = m.jnt_dofadr[jntid]
     trntype = m.actuator_trntype[actid]
     gear = m.actuator_gear[actid]
     if trntype == wp.static(TrnType.JOINT.value) or trntype == wp.static(
       TrnType.JOINTINPARENT.value
     ):
+      qpos = d.qpos[worldid]
+      jntid = m.actuator_trnid[actid, 0]
+      jnt_typ = m.jnt_type[jntid]
+      qadr = m.jnt_qposadr[jntid]
+      vadr = m.jnt_dofadr[jntid]
       if jnt_typ == wp.static(JointType.FREE.value):
         length[worldid, actid] = 0.0
         if trntype == wp.static(TrnType.JOINTINPARENT.value):
@@ -734,8 +855,22 @@ def transmission(m: Model, d: Data):
         moment[worldid, actid, vadr] = gear[0]
       else:
         wp.printf("unrecognized joint type")
+    elif trntype == wp.static(TrnType.TENDON.value):
+      tenid = m.actuator_trnid[actid, 0]
+
+      gear0 = gear[0]
+      length[worldid, actid] = d.ten_length[worldid, tenid] * gear0
+
+      # fixed
+      adr = m.tendon_adr[tenid]
+      if m.wrap_type[adr] == wp.static(WrapType.JOINT.value):
+        ten_num = m.tendon_num[tenid]
+        for i in range(ten_num):
+          dofadr = m.jnt_dofadr[m.wrap_objid[adr + i]]
+          moment[worldid, actid, dofadr] = d.ten_J[worldid, tenid, dofadr] * gear0
+      # TODO(team): spatial
     else:
-      # TODO handle site, tendon transmission types
+      # TODO(team): site, slidercrank, body
       wp.printf("unhandled transmission type %d\n", trntype)
 
   wp.launch(
@@ -1067,8 +1202,79 @@ def tendon(m: Model, d: Data):
       wp.atomic_add(d.ten_length[worldid], tendon_jnt_adr, L)
 
       # add to moment
-      d.ten_J[worldid, tendon_jnt_adr, m.jnt_dofadr[wrap_jnt_adr]] = prm
+      d.ten_J[worldid, tendon_jnt_adr, m.jnt_dofadr[wrap_objid]] = prm
 
     wp.launch(_joint_tendon, dim=(d.nworld, m.wrap_jnt_adr.size), inputs=[m, d])
 
-  # TODO(team): spatial
+  # process spatial site tendons
+  if m.wrap_site_adr.size:
+    d.wrap_xpos.zero_()
+    d.wrap_obj.zero_()
+
+    N_SITE_PAIR = m.wrap_site_pair_adr.size
+
+    @kernel
+    def _spatial_site_tendon(m: Model, d: Data):
+      worldid, elementid = wp.tid()
+      site_adr = m.wrap_site_adr[elementid]
+
+      site_xpos = d.site_xpos[worldid, m.wrap_objid[site_adr]]
+
+      rowid = elementid // 2
+      colid = elementid % 2
+      if colid == 0:
+        d.wrap_xpos[worldid, rowid][0] = site_xpos[0]
+        d.wrap_xpos[worldid, rowid][1] = site_xpos[1]
+        d.wrap_xpos[worldid, rowid][2] = site_xpos[2]
+      else:
+        d.wrap_xpos[worldid, rowid][3] = site_xpos[0]
+        d.wrap_xpos[worldid, rowid][4] = site_xpos[1]
+        d.wrap_xpos[worldid, rowid][5] = site_xpos[2]
+
+      d.wrap_obj[worldid, rowid][colid] = -1
+
+      if elementid < N_SITE_PAIR:
+        # site pairs
+        site_pair_adr = m.wrap_site_pair_adr[elementid]
+        ten_adr = m.tendon_site_pair_adr[elementid]
+
+        id0 = m.wrap_objid[site_pair_adr + 0]
+        id1 = m.wrap_objid[site_pair_adr + 1]
+
+        pnt0 = d.site_xpos[worldid, id0]
+        pnt1 = d.site_xpos[worldid, id1]
+        dif = pnt1 - pnt0
+        vec, length = math.normalize_with_norm(dif)
+        wp.atomic_add(d.ten_length[worldid], ten_adr, length)
+
+        if length < MJ_MINVAL:
+          vec = wp.vec3(1.0, 0.0, 0.0)
+
+        body0 = m.site_bodyid[id0]
+        body1 = m.site_bodyid[id1]
+        if body0 != body1:
+          for i in range(m.nv):
+            J = float(0.0)
+            jacp1, _ = support.jac(m, d, pnt0, body0, i, worldid)
+            jacp2, _ = support.jac(m, d, pnt1, body1, i, worldid)
+            dif = jacp2 - jacp1
+            for xyz in range(3):
+              J += vec[xyz] * dif[xyz]
+            if J:
+              wp.atomic_add(d.ten_J[worldid, ten_adr], i, J)
+
+    wp.launch(_spatial_site_tendon, dim=(d.nworld, m.wrap_site_adr.size), inputs=[m, d])
+
+    @kernel
+    def _spatial_tendon(m: Model, d: Data):
+      worldid, tenid = wp.tid()
+
+      d.ten_wrapnum[worldid, tenid] = m.ten_wrapnum_site[tenid]
+      # TODO(team): geom wrap
+
+      d.ten_wrapadr[worldid, tenid] = m.ten_wrapadr_site[tenid]
+      # TODO(team): geom wrap
+
+    wp.launch(_spatial_tendon, dim=(d.nworld, m.ntendon), inputs=[m, d])
+
+  # TODO(team): geom wrap, pulleys
