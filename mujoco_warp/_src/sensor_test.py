@@ -166,7 +166,6 @@ class SensorTest(parameterized.TestCase):
     mjwarp.sensor_vel(m, d)
     mjwarp.sensor_acc(m, d)
 
-    print(f"d.time: {mjd.time}")
     _assert_eq(d.sensordata.numpy()[0], mjd.sensordata, "sensordata")
 
   def test_tendon_sensor(self):
