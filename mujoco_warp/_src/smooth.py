@@ -667,11 +667,12 @@ def rne_postconstraint(m: Model, d: Data):
 
     ne_connect = d.ne_connect[0]
     ne_weld = d.ne_weld[0]
+    num_connect = ne_connect // 3
 
-    if eqid >= ne_connect // 3 + ne_weld // 6:
+    if eqid >= num_connect + ne_weld // 6:
       return
 
-    is_connect = eqid < ne_connect // 3
+    is_connect = eqid < num_connect
     if is_connect:
       efcid = 3 * eqid
       cfrc_torque = wp.vec3(0.0, 0.0, 0.0)  # no torque from connect
