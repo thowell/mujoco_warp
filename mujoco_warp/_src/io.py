@@ -298,7 +298,26 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
     tile_corners = [i for i in range(mjm.nv) if mjm.dof_parentid[i] == -1]
     tree_id = mjm.dof_treeid[tile_corners]
     num_trees = int(np.max(tree_id))
-    tree = mjm.body_treeid[mjm.jnt_bodyid[mjm.actuator_trnid[:, 0]]]
+    bodyid = []
+    for i in range(m.nu):
+      trntype = mjm.actuator_trntype[i]
+      if trntype == mujoco.mjtTrn.mjTRN_JOINT or trntype == mujoco.mjtTrn.mjTRN_JOINTINPARENT:
+        jntid = mjm.actuator_trnid[i, 0]
+        bodyid.append(mjm.jnt_bodyid[jntid])
+      elif trntype == mujoco.mjtTrn.mjTRN_TENDON:
+        tenid = mjm.actuator_trnid[i, 0]
+        adr = mjm.tendon_adr[tenid]
+        if mjm.wrap_type[adr] == mujoco.mjtWrap.mjWRAP_JOINT:
+          ten_num = mjm.tendon_num[tenid]
+          for i in range(ten_num):
+            bodyid.append(mjm.jnt_bodyid[mjm.wrap_objid[adr + i]])
+        else:
+          for i in range(mjm.nv):
+            bodyid.append(mjm.dof_bodyid[i])
+      else:
+        raise NotImplementedError(f'Transmission type {trntype} not implemented.')
+
+    tree = mjm.body_treeid[np.array(bodyid, dtype=int)]
     counts, ids = np.histogram(tree, bins=np.arange(0, num_trees + 2))
     acts_per_tree = dict(zip([int(i) for i in ids], [int(i) for i in counts]))
 
