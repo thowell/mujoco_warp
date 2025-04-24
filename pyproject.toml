@@ -27,6 +27,7 @@ classifiers = [
 ]
 requires-python = ">=3.9"
 dependencies = [
+    "absl-py",
     "etils[epath]",
     "mujoco",
     "numpy",
@@ -35,11 +36,11 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
-    "absl-py",
     "pytest",
     "pytest-xdist",
     "ruff",
 ]
+# TODO(team): cpu and cuda JAX optional dependencies are temporary, remove after we land MJX:Warp
 cpu = [
     "jax"
 ]

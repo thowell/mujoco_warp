@@ -17,61 +17,67 @@ import os
 
 import jax
 import warp as wp
+from absl.testing import absltest
 from jax import numpy as jp
 from warp.jax_experimental.ffi import jax_callable
 
 import mujoco_warp as mjwarp
 from mujoco_warp._src.test_util import fixture
 
-if jax.default_backend() == "gpu":
-  os.environ["XLA_FLAGS"] = "--xla_gpu_graph_min_graph_size=1"
+# TODO(team): JAX test is temporary, remove after we land MJX:Warp
 
-  NWORLDS = 1
-  NCONTACTS = 16
-  UNROLL_LENGTH = 1
 
-  def warp_step(
-    qpos_in: wp.array(dtype=wp.float32, ndim=2),
-    qvel_in: wp.array(dtype=wp.float32, ndim=2),
-    qpos_out: wp.array(dtype=wp.float32, ndim=2),
-    qvel_out: wp.array(dtype=wp.float32, ndim=2),
-  ):
-    wp.copy(d.qpos, qpos_in)
-    wp.copy(d.qvel, qvel_in)
-    mjwarp.step(m, d)
-    wp.copy(qpos_out, d.qpos)
-    wp.copy(qvel_out, d.qvel)
+class JAXTest(absltest.TestCase):
+  def test_jax(self):
+    if jax.default_backend() == "gpu":
+      os.environ["XLA_FLAGS"] = "--xla_gpu_graph_min_graph_size=1"
 
-  def unroll(qpos, qvel):
-    def step(carry, _):
-      qpos, qvel = carry
-      qpos, qvel = warp_step_fn(qpos, qvel)
-      return (qpos, qvel), None
+      NWORLDS = 1
+      NCONTACTS = 16
+      UNROLL_LENGTH = 1
 
-    (qpos, qvel), _ = jax.lax.scan(step, (qpos, qvel), length=UNROLL_LENGTH)
+      def warp_step(
+        qpos_in: wp.array(dtype=wp.float32, ndim=2),
+        qvel_in: wp.array(dtype=wp.float32, ndim=2),
+        qpos_out: wp.array(dtype=wp.float32, ndim=2),
+        qvel_out: wp.array(dtype=wp.float32, ndim=2),
+      ):
+        wp.copy(d.qpos, qpos_in)
+        wp.copy(d.qvel, qvel_in)
+        mjwarp.step(m, d)
+        wp.copy(qpos_out, d.qpos)
+        wp.copy(qvel_out, d.qvel)
 
-    return qpos, qvel
+      def unroll(qpos, qvel):
+        def step(carry, _):
+          qpos, qvel = carry
+          qpos, qvel = warp_step_fn(qpos, qvel)
+          return (qpos, qvel), None
 
-  wp.clear_kernel_cache()
+        (qpos, qvel), _ = jax.lax.scan(step, (qpos, qvel), length=UNROLL_LENGTH)
 
-  mjm, mjd, m, d = fixture(
-    "humanoid/humanoid.xml",
-    nworld=NWORLDS,
-    nconmax=NWORLDS * NCONTACTS,
-    njmax=NWORLDS * NCONTACTS * 4,
-    iterations=1,
-    ls_iterations=4,
-    kick=True,
-  )
+        return qpos, qvel
 
-  warp_step_fn = jax_callable(
-    warp_step,
-    num_outputs=2,
-    output_dims={"qpos_out": (NWORLDS, mjm.nq), "qvel_out": (NWORLDS, mjm.nv)},
-  )
+      wp.clear_kernel_cache()
 
-  jax_qpos = jp.tile(jp.array(m.qpos0.numpy()), (NWORLDS, 1))
-  jax_qvel = jp.zeros((NWORLDS, m.nv))
+      mjm, mjd, m, d = fixture(
+        "humanoid/humanoid.xml",
+        nworld=NWORLDS,
+        nconmax=NWORLDS * NCONTACTS,
+        njmax=NWORLDS * NCONTACTS * 4,
+        iterations=1,
+        ls_iterations=4,
+        kick=True,
+      )
 
-  jax_unroll_fn = jax.jit(unroll).lower(jax_qpos, jax_qvel).compile()
-  jax_unroll_fn(jax_qpos, jax_qvel)
+      warp_step_fn = jax_callable(
+        warp_step,
+        num_outputs=2,
+        output_dims={"qpos_out": (NWORLDS, mjm.nq), "qvel_out": (NWORLDS, mjm.nv)},
+      )
+
+      jax_qpos = jp.tile(jp.array(m.qpos0.numpy()), (NWORLDS, 1))
+      jax_qvel = jp.zeros((NWORLDS, m.nv))
+
+      jax_unroll_fn = jax.jit(unroll).lower(jax_qpos, jax_qvel).compile()
+      jax_unroll_fn(jax_qpos, jax_qvel)
