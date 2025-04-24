@@ -35,6 +35,9 @@ _CLEAR_KERNEL_CACHE = flags.DEFINE_bool(
   "clear_kernel_cache", False, "Clear kernel cache (to calculate full JIT time)"
 )
 _ENGINE = flags.DEFINE_enum("engine", "mjwarp", ["mjwarp", "mjc"], "Simulation engine")
+_CONE = flags.DEFINE_enum(
+  "cone", "pyramidal", ["pyramidal", "elliptic"], "Friction cone type"
+)
 _LS_PARALLEL = flags.DEFINE_bool(
   "ls_parallel", False, "Engine solver with parallel linesearch"
 )
@@ -62,6 +65,10 @@ def _main(argv: Sequence[str]) -> None:
     mjm = mujoco.MjModel.from_binary_path(_MODEL_PATH.value)
   else:
     mjm = mujoco.MjModel.from_xml_path(_MODEL_PATH.value)
+  if _CONE.value == "pyramidal":
+    mjm.opt.cone = mujoco.mjtCone.mjCONE_PYRAMIDAL
+  elif _CONE.value == "elliptic":
+    mjm.opt.cone = mujoco.mjtCone.mjCONE_ELLIPTIC
   mjd = mujoco.MjData(mjm)
   mujoco.mj_forward(mjm, mjd)
 
@@ -102,7 +109,7 @@ def _main(argv: Sequence[str]) -> None:
         wp.copy(d.xfrc_applied, wp.array([mjd.xfrc_applied.astype(np.float32)]))
         wp.copy(d.qpos, wp.array([mjd.qpos.astype(np.float32)]))
         wp.copy(d.qvel, wp.array([mjd.qvel.astype(np.float32)]))
-        d.time = mjd.time
+        wp.copy(d.time, wp.array([mjd.time], dtype=wp.float32))
 
         if _VIEWER_GLOBAL_STATE["running"]:
           wp.capture_launch(graph)

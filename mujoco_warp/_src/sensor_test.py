@@ -130,6 +130,7 @@ class SensorTest(parameterized.TestCase):
           <framequat objtype="geom" objname="geom0"/>    
           <framequat objtype="site" objname="site0"/>
           <subtreecom body="body3"/>
+          <clock/>
           <velocimeter site="site2"/>                           
           <gyro site="site2"/>       
           <jointvel joint="slide"/>
@@ -165,6 +166,7 @@ class SensorTest(parameterized.TestCase):
       </mujoco>
     """,
       keyframe=0,
+      kick=True,
     )
 
     d.sensordata.zero_()

@@ -33,7 +33,6 @@ from .types import array3df
 from .types import vec10
 from .warp_util import event_scope
 from .warp_util import kernel
-from .warp_util import kernel_copy
 
 wp.set_module_options({"enable_backward": False})
 
@@ -354,7 +353,7 @@ def camlight(m: Model, d: Data):
 def crb(m: Model, d: Data):
   """Composite rigid body inertia algorithm."""
 
-  kernel_copy(d.crb, d.cinert)
+  wp.copy(d.crb, d.cinert)
 
   @kernel
   def crb_accumulate(m: Model, d: Data, leveladr: int):
@@ -441,7 +440,7 @@ def _factor_i_sparse_legacy(m: Model, d: Data, M: array3df, L: array3df, D: arra
     worldid, dofid = wp.tid()
     D[worldid, dofid] = 1.0 / L[worldid, 0, m.dof_Madr[dofid]]
 
-  kernel_copy(L, M)
+  wp.copy(L, M)
 
   qLD_update_treeadr = m.qLD_update_treeadr.numpy()
 
@@ -751,7 +750,7 @@ def rne_postconstraint(m: Model, d: Data):
 
   # cfrc_ext += contacts
   @kernel
-  def _contact_force_to_cfrc_ext(m: Model, d: Data):
+  def _cfrc_ext_contact(m: Model, d: Data):
     conid = wp.tid()
 
     if conid >= d.ncon[0]:
@@ -773,13 +772,17 @@ def rne_postconstraint(m: Model, d: Data):
     # contact force on bodies
     if id1:
       com1 = d.subtree_com[worldid, m.body_rootid[id1]]
-      d.cfrc_ext[worldid, id1] -= support.transform_force(force, com1 - pos)
+      wp.atomic_sub(
+        d.cfrc_ext[worldid], id1, support.transform_force(force, com1 - pos)
+      )
 
     if id2:
       com2 = d.subtree_com[worldid, m.body_rootid[id2]]
-      d.cfrc_ext[worldid, id2] += support.transform_force(force, com2 - pos)
+      wp.atomic_add(
+        d.cfrc_ext[worldid], id2, support.transform_force(force, com2 - pos)
+      )
 
-  wp.launch(_contact_force_to_cfrc_ext, dim=(d.nconmax,), inputs=[m, d])
+  wp.launch(_cfrc_ext_contact, dim=(d.nconmax,), inputs=[m, d])
 
   # forward pass over bodies: compute cacc, cfrc_int
   _rne_cacc_world(m, d)
@@ -975,7 +978,7 @@ def _solve_LD_sparse(
     i, k, Madr_ki = update[0], update[1], update[2]
     wp.atomic_sub(x[worldid], k, L[worldid, 0, Madr_ki] * x[worldid, i])
 
-  kernel_copy(x, y)
+  wp.copy(x, y)
 
   qLD_update_treeadr = m.qLD_update_treeadr.numpy()
 
