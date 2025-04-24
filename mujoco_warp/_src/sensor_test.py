@@ -135,6 +135,14 @@ class SensorTest(parameterized.TestCase):
           <jointvel joint="slide"/>
           <actuatorvel actuator="slide"/>
           <ballangvel joint="ballquat"/>
+          <framelinvel objtype="body" objname="body9"/>
+          <frameangvel objtype="body" objname="body9"/>
+          <framelinvel objtype="xbody" objname="body9"/>
+          <frameangvel objtype="xbody" objname="body9"/>
+          <framelinvel objtype="geom" objname="geom9"/>
+          <frameangvel objtype="geom" objname="geom9"/>
+          <framelinvel objtype="site" objname="site9"/>
+          <frameangvel objtype="site" objname="site9"/>
           <subtreelinvel body="body4"/>
           <subtreeangmom body="body4"/>
           <accelerometer site="force_site"/>
@@ -155,7 +163,8 @@ class SensorTest(parameterized.TestCase):
           <key qpos="1 .1 .2 .3 .4 1 1 1 1 0 0 0 .25 .35 1 0 0 0 1 0 0 0 0 0 1 1" qvel="2 .2 -.1 .4 .25 .35 .45 -0.1 -0.2 -0.3 .1 -.2 -.5 -0.75 -1 .1 .2 .3 0 0 2 2" ctrl="3"/>
         </keyframe>
       </mujoco>
-    """
+    """,
+      keyframe=0,
     )
 
     d.sensordata.zero_()
