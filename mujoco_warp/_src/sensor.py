@@ -13,6 +13,8 @@
 # limitations under the License.
 # ==============================================================================
 
+from typing import Tuple
+
 import numpy as np
 import warp as wp
 
@@ -291,6 +293,114 @@ def _ball_ang_vel(m: Model, d: Data, worldid: int, objid: int) -> wp.vec3:
 
 
 @wp.func
+def _cvel_offset(
+  m: Model, d: Data, worldid: int, objtype: int, objid: int
+) -> Tuple[wp.spatial_vector, wp.vec3]:
+  if objtype == int(ObjType.BODY.value):
+    pos = d.xipos[worldid, objid]
+    bodyid = objid
+  elif objtype == int(ObjType.XBODY.value):
+    pos = d.xpos[worldid, objid]
+    bodyid = objid
+  elif objtype == int(ObjType.GEOM.value):
+    pos = d.geom_xpos[worldid, objid]
+    bodyid = m.geom_bodyid[objid]
+  elif objtype == int(ObjType.SITE.value):
+    pos = d.site_xpos[worldid, objid]
+    bodyid = m.site_bodyid[objid]
+  elif objtype == int(ObjType.CAMERA.value):
+    pos = d.cam_xpos[worldid, objid]
+    bodyid = m.cam_bodyid[objid]
+  else:  # UNKNOWN
+    pos = wp.vec3(0.0)
+    bodyid = 0
+
+  return d.cvel[worldid, bodyid], pos - d.subtree_com[worldid, m.body_rootid[bodyid]]
+
+
+@wp.func
+def _frame_linvel(
+  m: Model, d: Data, worldid: int, objid: int, objtype: int, refid: int, reftype: int
+) -> wp.vec3:
+  if objtype == int(ObjType.BODY.value):
+    xpos = d.xipos[worldid, objid]
+  elif objtype == int(ObjType.XBODY.value):
+    xpos = d.xpos[worldid, objid]
+  elif objtype == int(ObjType.GEOM.value):
+    xpos = d.geom_xpos[worldid, objid]
+  elif objtype == int(ObjType.SITE.value):
+    xpos = d.site_xpos[worldid, objid]
+  elif objtype == int(ObjType.CAMERA.value):
+    xpos = d.cam_xpos[worldid, objid]
+  else:  # UNKNOWN
+    xpos = wp.vec3(0.0)
+
+  if reftype == int(ObjType.BODY.value):
+    xposref = d.xipos[worldid, refid]
+    xmatref = d.ximat[worldid, refid]
+  elif reftype == int(ObjType.XBODY.value):
+    xposref = d.xpos[worldid, refid]
+    xmatref = d.xmat[worldid, refid]
+  elif reftype == int(ObjType.GEOM.value):
+    xposref = d.geom_xpos[worldid, refid]
+    xmatref = d.geom_xmat[worldid, refid]
+  elif reftype == int(ObjType.SITE.value):
+    xposref = d.site_xpos[worldid, refid]
+    xmatref = d.site_xmat[worldid, refid]
+  elif reftype == int(ObjType.CAMERA.value):
+    xposref = d.cam_xpos[worldid, refid]
+    xmatref = d.cam_xmat[worldid, refid]
+  else:  # UNKNOWN
+    xposref = wp.vec3(0.0)
+    xmatref = wp.identity(3, dtype=wp.float32)
+
+  cvel, offset = _cvel_offset(m, d, worldid, objtype, objid)
+  cvelref, offsetref = _cvel_offset(m, d, worldid, reftype, refid)
+  clinvel = wp.spatial_bottom(cvel)
+  cangvel = wp.spatial_top(cvel)
+  cangvelref = wp.spatial_top(cvelref)
+  xlinvel = clinvel - wp.cross(offset, cangvel)
+
+  if refid > -1:
+    clinvelref = wp.spatial_bottom(cvelref)
+    xlinvelref = clinvelref - wp.cross(offsetref, cangvelref)
+    rvec = xpos - xposref
+    rel_vel = xlinvel - xlinvelref + wp.cross(rvec, cangvelref)
+    return wp.transpose(xmatref) @ rel_vel
+  else:
+    return xlinvel
+
+
+@wp.func
+def _frame_angvel(
+  m: Model, d: Data, worldid: int, objid: int, objtype: int, refid: int, reftype: int
+) -> wp.vec3:
+  cvel, _ = _cvel_offset(m, d, worldid, objtype, objid)
+  cangvel = wp.spatial_top(cvel)
+
+  if refid > -1:
+    if reftype == int(ObjType.BODY.value):
+      xmatref = d.ximat[worldid, refid]
+    elif reftype == int(ObjType.XBODY.value):
+      xmatref = d.xmat[worldid, refid]
+    elif reftype == int(ObjType.GEOM.value):
+      xmatref = d.geom_xmat[worldid, refid]
+    elif reftype == int(ObjType.SITE.value):
+      xmatref = d.site_xmat[worldid, refid]
+    elif reftype == int(ObjType.CAMERA.value):
+      xmatref = d.cam_xmat[worldid, refid]
+    else:  # UNKNOWN
+      xmatref = wp.identity(3, dtype=wp.float32)
+
+    cvelref, _ = _cvel_offset(m, d, worldid, reftype, refid)
+    cangvelref = wp.spatial_top(cvelref)
+
+    return wp.transpose(xmatref) @ (cangvel - cangvelref)
+  else:
+    return cangvel
+
+
+@wp.func
 def _subtree_linvel(m: Model, d: Data, worldid: int, objid: int) -> wp.vec3:
   return d.subtree_linvel[worldid, objid]
 
@@ -333,6 +443,22 @@ def sensor_vel(m: Model, d: Data):
       d.sensordata[worldid, adr + 0] = angvel[0]
       d.sensordata[worldid, adr + 1] = angvel[1]
       d.sensordata[worldid, adr + 2] = angvel[2]
+    elif sensortype == int(SensorType.FRAMELINVEL.value):
+      objtype = m.sensor_objtype[veladr]
+      refid = m.sensor_refid[veladr]
+      reftype = m.sensor_reftype[veladr]
+      frame_linvel = _frame_linvel(m, d, worldid, objid, objtype, refid, reftype)
+      d.sensordata[worldid, adr + 0] = frame_linvel[0]
+      d.sensordata[worldid, adr + 1] = frame_linvel[1]
+      d.sensordata[worldid, adr + 2] = frame_linvel[2]
+    elif sensortype == int(SensorType.FRAMEANGVEL.value):
+      objtype = m.sensor_objtype[veladr]
+      refid = m.sensor_refid[veladr]
+      reftype = m.sensor_reftype[veladr]
+      frame_angvel = _frame_angvel(m, d, worldid, objid, objtype, refid, reftype)
+      d.sensordata[worldid, adr + 0] = frame_angvel[0]
+      d.sensordata[worldid, adr + 1] = frame_angvel[1]
+      d.sensordata[worldid, adr + 2] = frame_angvel[2]
     elif sensortype == int(SensorType.SUBTREELINVEL.value):
       subtree_linvel = _subtree_linvel(m, d, worldid, objid)
       d.sensordata[worldid, adr + 0] = subtree_linvel[0]
