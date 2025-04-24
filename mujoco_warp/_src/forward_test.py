@@ -172,7 +172,7 @@ class ForwardTest(parameterized.TestCase):
     _assert_eq(d.qpos.numpy()[0], mjd.qpos, "qpos")
     _assert_eq(d.qvel.numpy()[0], mjd.qvel, "qvel")
     _assert_eq(d.act.numpy()[0], mjd.act, "act")
-    _assert_eq(d.time, mjd.time, "time")
+    _assert_eq(d.time.numpy()[0], mjd.time, "time")
     _assert_eq(d.xpos.numpy()[0], mjd.xpos, "xpos")
 
 

@@ -605,7 +605,9 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
   return m
 
 
-def _constraint(mjm: mujoco.MjModel, nworld: int, njmax: int) -> types.Constraint:
+def _constraint(
+  mjm: mujoco.MjModel, nworld: int, nconmax: int, njmax: int
+) -> types.Constraint:
   efc = types.Constraint()
 
   efc.J = wp.zeros((njmax, mjm.nv), dtype=wp.float32)
@@ -662,6 +664,13 @@ def _constraint(mjm: mujoco.MjModel, nworld: int, njmax: int) -> types.Constrain
     shape=(nworld, mjm.opt.ls_iterations), dtype=wp.vec3f
   )
 
+  # TODO(team): skip allocation if not elliptic?
+  efc.u = wp.empty((nconmax, 6), dtype=wp.float32)
+  efc.uu = wp.empty((nconmax,), dtype=wp.float32)
+  efc.uv = wp.empty((nconmax,), dtype=wp.float32)
+  efc.vv = wp.empty((nconmax,), dtype=wp.float32)
+  efc.condim = wp.empty((njmax,), dtype=wp.int32)
+
   return efc
 
 
@@ -674,11 +683,11 @@ def make_data(
   # TODO(team): move to Model?
   if nconmax == -1:
     # TODO(team): heuristic for nconmax
-    nconmax = 512
+    nconmax = nworld * 20
   d.nconmax = nconmax
   if njmax == -1:
     # TODO(team): heuristic for njmax
-    njmax = 512
+    njmax = nworld * 20 * 6
   d.njmax = njmax
 
   d.ncon = wp.zeros(1, dtype=wp.int32)
@@ -691,7 +700,7 @@ def make_data(
   d.nf = wp.zeros(1, dtype=wp.int32)
   d.nl = wp.zeros(1, dtype=wp.int32)
 
-  d.time = 0.0
+  d.time = wp.zeros(nworld, dtype=wp.float32, ndim=1)
 
   qpos0 = np.tile(mjm.qpos0, (nworld, 1))
   d.qpos = wp.array(qpos0, dtype=wp.float32, ndim=2)
@@ -751,7 +760,7 @@ def make_data(
   d.contact.geom = wp.zeros((nconmax,), dtype=wp.vec2i)
   d.contact.efc_address = wp.zeros((nconmax, np.max(mjm.geom_condim)), dtype=wp.int32)
   d.contact.worldid = wp.zeros((nconmax,), dtype=wp.int32)
-  d.efc = _constraint(mjm, d.nworld, d.njmax)
+  d.efc = _constraint(mjm, d.nworld, d.nconmax, d.njmax)
   d.qfrc_passive = wp.zeros((nworld, mjm.nv), dtype=wp.float32)
   d.subtree_linvel = wp.zeros((nworld, mjm.nbody), dtype=wp.vec3)
   d.subtree_angmom = wp.zeros((nworld, mjm.nbody), dtype=wp.vec3)
@@ -780,7 +789,6 @@ def make_data(
   d.act_dot_rk = wp.zeros((nworld, mjm.na), dtype=wp.float32)
 
   # sweep-and-prune broadphase
-  d.sap_geom_sort = wp.zeros((nworld, mjm.ngeom), dtype=wp.vec4)
   d.sap_projection_lower = wp.zeros((2 * nworld, mjm.ngeom), dtype=wp.float32)
   d.sap_projection_upper = wp.zeros((nworld, mjm.ngeom), dtype=wp.float32)
   d.sap_sort_index = wp.zeros((2 * nworld, mjm.ngeom), dtype=wp.int32)
@@ -824,6 +832,8 @@ def put_data(
   njmax: Optional[int] = None,
 ) -> types.Data:
   d = types.Data()
+
+  # TODO(team): confirm that Data is set correctly for solver with elliptic friction cones
 
   nworld = nworld or 1
   # TODO(team): better heuristic for nconmax
@@ -871,7 +881,8 @@ def put_data(
   d.nf = wp.array([mjd.nf * nworld], dtype=wp.int32, ndim=1)
   d.nl = wp.array([mjd.nl * nworld], dtype=wp.int32, ndim=1)
   d.nefc = wp.array([mjd.nefc * nworld], dtype=wp.int32, ndim=1)
-  d.time = mjd.time
+
+  d.time = wp.array(mjd.time * np.ones(nworld), dtype=wp.float32, ndim=1)
 
   # TODO(erikfrey): would it be better to tile on the gpu?
   def tile(x):
@@ -1044,7 +1055,7 @@ def put_data(
   d.contact.efc_address = wp.array(con_efc_address_fill, dtype=wp.int32, ndim=2)
   d.contact.worldid = wp.array(con_worldid, dtype=wp.int32, ndim=1)
 
-  d.efc = _constraint(mjm, d.nworld, d.njmax)
+  d.efc = _constraint(mjm, d.nworld, d.nconmax, d.njmax)
   d.efc.J = wp.array(efc_J_fill, dtype=wp.float32, ndim=2)
   d.efc.D = wp.array(efc_D_fill, dtype=wp.float32, ndim=1)
   d.efc.pos = wp.array(efc_pos_fill, dtype=wp.float32, ndim=1)
@@ -1073,14 +1084,12 @@ def put_data(
   d.act_dot_rk = wp.zeros((nworld, mjm.na), dtype=wp.float32)
 
   # broadphase sweep and prune
-  d.sap_geom_sort = wp.zeros((nworld, mjm.ngeom), dtype=wp.vec4)
   d.sap_projection_lower = wp.zeros((2 * nworld, mjm.ngeom), dtype=wp.float32)
   d.sap_projection_upper = wp.zeros((nworld, mjm.ngeom), dtype=wp.float32)
   d.sap_sort_index = wp.zeros((2 * nworld, mjm.ngeom), dtype=wp.int32)
   d.sap_range = wp.zeros((nworld, mjm.ngeom), dtype=wp.int32)
   d.sap_cumulative_sum = wp.zeros(nworld * mjm.ngeom, dtype=wp.int32)
-  segment_indices_list = [i * mjm.ngeom for i in range(nworld + 1)]
-  d.sap_segment_index = wp.array(segment_indices_list, dtype=int)
+  d.sap_segment_index = wp.array([i * mjm.ngeom for i in range(nworld + 1)], dtype=int)
 
   # collision driver
   d.collision_pair = wp.empty(nconmax, dtype=wp.vec2i, ndim=1)
@@ -1134,7 +1143,7 @@ def get_data_into(
   if ncon != result.ncon or nefc != result.nefc:
     mujoco._functions._realloc_con_efc(result, ncon=ncon, nefc=nefc)
 
-  result.time = d.time
+  result.time = d.time.numpy()[0]
   result.ne = d.ne.numpy()[0]
   result.qpos[:] = d.qpos.numpy()[0]
   result.qvel[:] = d.qvel.numpy()[0]

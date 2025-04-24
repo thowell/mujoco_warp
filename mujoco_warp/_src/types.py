@@ -18,6 +18,7 @@ import mujoco
 import warp as wp
 
 MJ_MINVAL = mujoco.mjMINVAL
+MJ_MAXVAL = mujoco.mjMAXVAL
 MJ_MINIMP = mujoco.mjMINIMP  # minimum constraint impedance
 MJ_MAXIMP = mujoco.mjMAXIMP  # maximum constraint impedance
 MJ_NREF = mujoco.mjNREF
@@ -458,6 +459,11 @@ class Constraint:
     mid_alpha: midpoint between lo_alpha and hi_alpha (nworld,)
     cost_candidate: costs associated with step sizes  (nworld, nlsp)
     quad_total_candidate: quad_total for step sizes   (nworld, nlsp, 3)
+    u: friction cone (normal and tangents)            (nconmax, 6)
+    uu: elliptic cone variables                       (nconmax,)
+    uv: elliptic cone variables                       (nconmax,)
+    vv: elliptic cone variables                       (nconmax,)
+    condim: if contact: condim, else: -1              (njmax,)
   """
 
   worldid: wp.array(dtype=wp.int32, ndim=1)
@@ -509,6 +515,12 @@ class Constraint:
   mid_alpha: wp.array(dtype=wp.float32, ndim=1)
   cost_candidate: wp.array(dtype=wp.float32, ndim=2)
   quad_total_candidate: wp.array(dtype=wp.vec3f, ndim=2)
+  # elliptic cone
+  u: wp.array(dtype=wp.float32, ndim=2)
+  uu: wp.array(dtype=wp.float32, ndim=1)
+  uv: wp.array(dtype=wp.float32, ndim=1)
+  vv: wp.array(dtype=wp.float32, ndim=1)
+  condim: wp.array(dtype=wp.int32, ndim=1)
 
 
 @wp.struct
@@ -984,7 +996,7 @@ class Data:
     nf: number of friction constraints                          ()
     nl: number of limit constraints                             ()
     nefc: number of constraints                                 (1,)
-    time: simulation time                                       ()
+    time: simulation time                                       (nworld,)
     qpos: position                                              (nworld, nq)
     qvel: velocity                                              (nworld, nv)
     act: actuator activation                                    (nworld, na)
@@ -1087,7 +1099,7 @@ class Data:
   nf: wp.array(dtype=wp.int32, ndim=1)
   nl: wp.array(dtype=wp.int32, ndim=1)
   nefc: wp.array(dtype=wp.int32, ndim=1)
-  time: float
+  time: wp.array(dtype=wp.float32, ndim=1)
   qpos: wp.array(dtype=wp.float32, ndim=2)
   qvel: wp.array(dtype=wp.float32, ndim=2)
   act: wp.array(dtype=wp.float32, ndim=2)
@@ -1161,7 +1173,6 @@ class Data:
   qLDiagInv_integration: wp.array(dtype=wp.float32, ndim=2)
 
   # sweep-and-prune broadphase
-  sap_geom_sort: wp.array(dtype=wp.vec4, ndim=2)
   sap_projection_lower: wp.array(dtype=wp.float32, ndim=2)
   sap_projection_upper: wp.array(dtype=wp.float32, ndim=2)
   sap_sort_index: wp.array(dtype=wp.int32, ndim=2)
