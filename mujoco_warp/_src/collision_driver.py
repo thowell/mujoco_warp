@@ -95,6 +95,11 @@ def _binary_search(
   return upper
 
 
+@wp.func
+def _upper_tri_index(n: int, i: int, j: int) -> int:
+  return (n * (n - 1) - (n - i) * (n - i - 1)) / 2 + j - i - 1
+
+
 @wp.kernel
 def _sap_project(m: Model, d: Data, direction: wp.vec3):
   worldid, geomid = wp.tid()
@@ -149,10 +154,16 @@ def _sap_broadphase(m: Model, d: Data, nsweep: int, filterparent: bool):
     i = i % m.ngeom
     j = j % m.ngeom
 
-    # geom indices
+    # get geom indices and swap if necessary
     geom1 = d.sap_sort_index[worldid, i]
     geom2 = d.sap_sort_index[worldid, j]
-    idx = (m.ngeom - geom1 // 2) * wp.max(0, geom1 - 1) + geom2 - m.ngeom // 2 - 1
+    if geom2 < geom1:
+      tmp = geom1
+      geom1 = geom2
+      geom2 = tmp
+
+    # find linear index of (geom1, geom2) in upper triangular nxn_pairid
+    idx = _upper_tri_index(m.ngeom, geom1, geom2)
 
     if m.nxn_pairid[idx] < -1:
       worldgeomid += nsweep
@@ -210,7 +221,7 @@ def sap_broadphase(m: Model, d: Data):
 
 
 def nxn_broadphase(m: Model, d: Data):
-  """Broadphase collision detective via brute-force search."""
+  """Broadphase collision detection via brute-force search."""
 
   @wp.kernel
   def _nxn_broadphase(m: Model, d: Data):
