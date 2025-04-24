@@ -13,13 +13,14 @@
 # limitations under the License.
 # ==============================================================================
 
-from typing import Tuple
-
 import warp as wp
 
 from . import math
+from . import support
 from . import types
 from .warp_util import event_scope
+
+wp.config.enable_backward = False
 
 
 @wp.func
@@ -35,6 +36,7 @@ def _update_efc_row(
   margin: wp.float32,
   Jqvel: float,
   frictionloss: float,
+  id: int,
 ):
   # Calculate kbi
   timeconst = solref[0]
@@ -75,39 +77,7 @@ def _update_efc_row(
   d.efc.pos[efcid] = pos_aref + margin
   d.efc.margin[efcid] = margin
   d.efc.frictionloss[efcid] = frictionloss
-
-
-@wp.func
-def _jac(
-  m: types.Model,
-  d: types.Data,
-  point: wp.vec3,
-  bodyid: wp.int32,
-  dofid: wp.int32,
-  worldid: wp.int32,
-) -> Tuple[wp.vec3f, wp.vec3f]:
-  dof_bodyid = m.dof_bodyid[dofid]
-  in_tree = int(dof_bodyid == 0)
-  parentid = bodyid
-  while parentid != 0:
-    if parentid == dof_bodyid:
-      in_tree = 1
-      break
-    parentid = m.body_parentid[parentid]
-
-  if not in_tree:
-    return wp.vec3f(0.0, 0.0, 0.0), wp.vec3f(0.0, 0.0, 0.0)
-
-  offset = point - wp.vec3(d.subtree_com[worldid, m.body_rootid[bodyid]])
-
-  cdof = d.cdof[worldid, dofid]
-  cdof_ang = wp.spatial_top(cdof)
-  cdof_lin = wp.spatial_bottom(cdof)
-
-  jacp = cdof_lin + wp.cross(cdof_ang, offset)
-  jacr = cdof_ang
-
-  return jacp, jacr
+  d.efc.id[efcid] = id
 
 
 @wp.kernel
@@ -122,8 +92,11 @@ def _efc_equality_connect(
   if not d.eq_active[worldid, i_eq]:
     return
 
-  efcid = wp.atomic_add(d.nefc, 0, 3)
-  wp.atomic_add(d.ne, 0, 3)
+  necid = wp.atomic_add(d.ne_connect, 0, 3)
+  efcid = d.nefc[0] + necid
+
+  for i in range(wp.static(3)):
+    d.efc.worldid[efcid + i] = worldid
 
   data = m.eq_data[i_eq]
   anchor1 = wp.vec3f(data[0], data[1], data[2])
@@ -150,8 +123,8 @@ def _efc_equality_connect(
   # compute Jacobian difference (opposite of contact: 0 - 1)
   Jqvel = wp.vec3f(0.0, 0.0, 0.0)
   for dofid in range(m.nv):  # TODO: parallelize
-    jacp1, _ = _jac(m, d, pos1, body1id, dofid, worldid)
-    jacp2, _ = _jac(m, d, pos2, body2id, dofid, worldid)
+    jacp1, _ = support.jac(m, d, pos1, body1id, dofid, worldid)
+    jacp2, _ = support.jac(m, d, pos2, body2id, dofid, worldid)
     j1mj2 = jacp1 - jacp2
     d.efc.J[efcid + 0, dofid] = j1mj2[0]
     d.efc.J[efcid + 1, dofid] = j1mj2[1]
@@ -180,6 +153,7 @@ def _efc_equality_connect(
       wp.float32(0.0),
       Jqvel[i],
       0.0,
+      i_eq,
     )
 
 
@@ -193,8 +167,8 @@ def _efc_equality_joint(
   if not d.eq_active[worldid, i_eq]:
     return
 
-  efcid = wp.atomic_add(d.nefc, 0, 1)
-  wp.atomic_add(d.ne, 0, 1)
+  nejid = wp.atomic_add(d.ne_jnt, 0, 1)
+  efcid = d.nefc[0] + d.ne_connect[0] + d.ne_weld[0] + nejid
   d.efc.worldid[efcid] = worldid
 
   jntid_1 = m.eq_obj1id[i_eq]
@@ -240,6 +214,7 @@ def _efc_equality_joint(
     wp.float32(0.0),
     Jqvel,
     0.0,
+    i_eq,
   )
 
 
@@ -273,6 +248,7 @@ def _efc_friction(
     0.0,
     Jqvel,
     m.dof_frictionloss[dofid],
+    dofid,
   )
 
 
@@ -286,8 +262,8 @@ def _efc_equality_weld(
   if not d.eq_active[worldid, i_eq]:
     return
 
-  efcid = wp.atomic_add(d.nefc, 0, 6)
-  wp.atomic_add(d.ne, 0, 6)
+  newid = wp.atomic_add(d.ne_weld, 0, 6)
+  efcid = d.nefc[0] + d.ne_connect[0] + newid
   for i in range(wp.static(6)):
     d.efc.worldid[efcid + i] = worldid
 
@@ -326,8 +302,8 @@ def _efc_equality_weld(
   Jqvelr = wp.vec3f(0.0, 0.0, 0.0)
 
   for dofid in range(m.nv):  # TODO: parallelize
-    jacp1, jacr1 = _jac(m, d, pos1, body1id, dofid, worldid)
-    jacp2, jacr2 = _jac(m, d, pos2, body2id, dofid, worldid)
+    jacp1, jacr1 = support.jac(m, d, pos1, body1id, dofid, worldid)
+    jacp2, jacr2 = support.jac(m, d, pos2, body2id, dofid, worldid)
 
     jacdifp = jacp1 - jacp2
     for i in range(wp.static(3)):
@@ -369,6 +345,7 @@ def _efc_equality_weld(
       0.0,
       Jqvelp[i],
       0.0,
+      i_eq,
     )
 
   invweight_r = m.body_invweight0[body1id, 1] + m.body_invweight0[body2id, 1]
@@ -386,6 +363,7 @@ def _efc_equality_weld(
       0.0,
       Jqvelr[i],
       0.0,
+      i_eq,
     )
 
 
@@ -426,6 +404,7 @@ def _efc_limit_slide_hinge(
       m.jnt_margin[jntid],
       Jqvel,
       0.0,
+      dofadr,
     )
 
 
@@ -477,6 +456,60 @@ def _efc_limit_ball(
       jnt_margin,
       Jqvel,
       0.0,
+      jntid,
+    )
+
+
+@wp.kernel
+def _efc_limit_tendon(
+  m: types.Model,
+  d: types.Data,
+):
+  worldid, tenlimitedid = wp.tid()
+  tenid = m.tendon_limited_adr[tenlimitedid]
+
+  ten_range = m.tendon_range[tenid]
+  length = d.ten_length[worldid, tenid]
+  dist_min, dist_max = length - ten_range[0], ten_range[1] - length
+  ten_margin = m.tendon_margin[tenid]
+  pos = wp.min(dist_min, dist_max) - ten_margin
+  active = pos < 0
+
+  if active:
+    lid = wp.atomic_add(d.nl, 0, 1)
+    efcid = d.nefc[0] + lid
+    d.efc.worldid[efcid] = worldid
+
+    Jqvel = float(0.0)
+    scl = float(dist_min < dist_max) * 2.0 - 1.0
+
+    adr = m.tendon_adr[tenid]
+    if m.wrap_type[adr] == wp.static(types.WrapType.JOINT.value):
+      ten_num = m.tendon_num[tenid]
+      for i in range(ten_num):
+        dofadr = m.jnt_dofadr[m.wrap_objid[adr + i]]
+        J = scl * d.ten_J[worldid, tenid, dofadr]
+        d.efc.J[efcid, dofadr] = J
+        Jqvel += J * d.qvel[worldid, dofadr]
+    else:
+      for i in range(m.nv):
+        J = scl * d.ten_J[worldid, tenid, i]
+        d.efc.J[efcid, i] = J
+        Jqvel += J * d.qvel[worldid, i]
+
+    _update_efc_row(
+      m,
+      d,
+      efcid,
+      pos,
+      pos,
+      m.tendon_invweight0[tenid],
+      m.tendon_solref_lim[tenid],
+      m.tendon_solimp_lim[tenid],
+      ten_margin,
+      Jqvel,
+      0.0,
+      tenid,
     )
 
 
@@ -529,8 +562,8 @@ def _efc_contact_pyramidal(
     for i in range(m.nv):
       J = float(0.0)
       Ji = float(0.0)
-      jac1p, jac1r = _jac(m, d, con_pos, body1, i, worldid)
-      jac2p, jac2r = _jac(m, d, con_pos, body2, i, worldid)
+      jac1p, jac1r = support.jac(m, d, con_pos, body1, i, worldid)
+      jac2p, jac2r = support.jac(m, d, con_pos, body2, i, worldid)
       jacp_dif = jac2p - jac1p
       for xyz in range(3):
         J += frame[0, xyz] * jacp_dif[xyz]
@@ -562,6 +595,7 @@ def _efc_contact_pyramidal(
       includemargin,
       Jqvel,
       0.0,
+      conid,
     )
 
 
@@ -601,8 +635,8 @@ def _efc_contact_elliptic(
     Jqvel = float(0.0)
     for i in range(m.nv):
       J = float(0.0)
-      jac1p, jac1r = _jac(m, d, cpos, body1, i, worldid)
-      jac2p, jac2r = _jac(m, d, cpos, body2, i, worldid)
+      jac1p, jac1r = support.jac(m, d, cpos, body1, i, worldid)
+      jac2p, jac2r = support.jac(m, d, cpos, body2, i, worldid)
       for xyz in range(3):
         if dimid < 3:
           jac_dif = jac2p[xyz] - jac1p[xyz]
@@ -650,7 +684,15 @@ def _efc_contact_elliptic(
       includemargin,
       Jqvel,
       0.0,
+      conid,
     )
+
+
+@wp.kernel
+def _num_equality(d: types.Data):
+  ne = d.ne_connect[0] + d.ne_weld[0] + d.ne_jnt[0]
+  d.ne[0] = ne
+  d.nefc[0] += ne
 
 
 @event_scope
@@ -658,6 +700,9 @@ def make_constraint(m: types.Model, d: types.Data):
   """Creates constraint jacobians and other supporting data."""
 
   d.ne.zero_()
+  d.ne_connect.zero_()
+  d.ne_weld.zero_()
+  d.ne_jnt.zero_()
   d.nefc.zero_()
   d.nf.zero_()
   d.nl.zero_()
@@ -682,6 +727,8 @@ def make_constraint(m: types.Model, d: types.Data):
         inputs=[m, d],
       )
 
+      wp.launch(_num_equality, dim=(1,), inputs=[d])
+
     if not (m.opt.disableflags & types.DisableBit.FRICTIONLOSS.value):
       wp.launch(
         _efc_friction,
@@ -691,14 +738,6 @@ def make_constraint(m: types.Model, d: types.Data):
 
     # limit
     if not (m.opt.disableflags & types.DisableBit.LIMIT.value):
-      limit_slide_hinge = m.jnt_limited_slide_hinge_adr.size > 0
-      if limit_slide_hinge:
-        wp.launch(
-          _efc_limit_slide_hinge,
-          dim=(d.nworld, m.jnt_limited_slide_hinge_adr.size),
-          inputs=[m, d],
-        )
-
       limit_ball = m.jnt_limited_ball_adr.size > 0
       if limit_ball:
         wp.launch(
@@ -707,7 +746,23 @@ def make_constraint(m: types.Model, d: types.Data):
           inputs=[m, d],
         )
 
-      if limit_slide_hinge or limit_ball:
+      limit_slide_hinge = m.jnt_limited_slide_hinge_adr.size > 0
+      if limit_slide_hinge:
+        wp.launch(
+          _efc_limit_slide_hinge,
+          dim=(d.nworld, m.jnt_limited_slide_hinge_adr.size),
+          inputs=[m, d],
+        )
+
+      limit_tendon = m.tendon_limited_adr.size > 0
+      if limit_tendon:
+        wp.launch(
+          _efc_limit_tendon,
+          dim=(d.nworld, m.tendon_limited_adr.size),
+          inputs=[m, d],
+        )
+
+      if limit_ball or limit_slide_hinge or limit_tendon:
 
         @wp.kernel
         def _update_nefc(d: types.Data):
