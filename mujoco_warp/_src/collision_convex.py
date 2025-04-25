@@ -25,7 +25,6 @@ from .math import orthonormal
 from .support import all_same
 from .support import any_different
 from .types import MJ_MINVAL
-from .types import NUM_GEOM_TYPES
 from .types import Data
 from .types import GeomType
 from .types import Model
