@@ -602,6 +602,20 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
     ndim=1,
   )
 
+  m.sensor_subtree_vel = np.isin(
+    mjm.sensor_type,
+    [mujoco.mjtSensor.mjSENS_SUBTREELINVEL, mujoco.mjtSensor.mjSENS_SUBTREEANGMOM],
+  ).any()
+  m.sensor_rne_postconstraint = np.isin(
+    mjm.sensor_type,
+    [
+      mujoco.mjtSensor.mjSENS_ACCELEROMETER,
+      mujoco.mjtSensor.mjSENS_FORCE,
+      mujoco.mjtSensor.mjSENS_TORQUE,
+      mujoco.mjtSensor.mjSENS_FRAMELINACC,
+      mujoco.mjtSensor.mjSENS_FRAMEANGACC,
+    ],
+  ).any()
   return m
 
 

@@ -473,11 +473,7 @@ def sensor_vel(m: Model, d: Data):
   if (m.sensor_vel_adr.size == 0) or (m.opt.disableflags & DisableBit.SENSOR):
     return
 
-  if wp.static(
-    np.isin(
-      m.sensor_type.numpy(), [SensorType.SUBTREELINVEL, SensorType.SUBTREEANGMOM]
-    ).any()
-  ):
+  if m.sensor_subtree_vel:
     smooth.subtree_vel(m, d)
 
   wp.launch(_sensor_vel, dim=(d.nworld, m.sensor_vel_adr.size), inputs=[m, d])
@@ -623,12 +619,7 @@ def sensor_acc(m: Model, d: Data):
   if (m.sensor_acc_adr.size == 0) or (m.opt.disableflags & DisableBit.SENSOR):
     return
 
-  if wp.static(
-    np.isin(
-      m.sensor_type.numpy(),
-      [SensorType.ACCELEROMETER, SensorType.FORCE, SensorType.TORQUE],
-    ).any()
-  ):
+  if m.sensor_rne_postconstraint:
     smooth.rne_postconstraint(m, d)
 
   wp.launch(_sensor_acc, dim=(d.nworld, m.sensor_acc_adr.size), inputs=[m, d])
