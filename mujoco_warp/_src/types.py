@@ -370,8 +370,8 @@ class Option:
     ls_iterations: maximum number of CG/Newton linesearch iterations
     disableflags: bit flags for disabling standard features
     is_sparse: whether to use sparse representations
-    gjk_iteration_count: number of Gjk iterations in the convex narrowphase
-    epa_iteration_count: number of Epa iterations in the convex narrowphase
+    gjk_iterations: number of Gjk iterations in the convex narrowphase
+    epa_iterations: number of Epa iterations in the convex narrowphase
     epa_exact_neg_distance: flag for enabling the distance calculation for non-intersecting case in the convex narrowphase
     depth_extension: distance for which the closest point is not calculated for non-intersecting case in the convex narrowphase
     ls_parallel: evaluate engine solver step sizes in parallel
@@ -389,8 +389,8 @@ class Option:
   ls_iterations: int
   disableflags: int
   is_sparse: bool
-  gjk_iteration_count: int  # warp only
-  epa_iteration_count: int  # warp only
+  gjk_iterations: int  # warp only
+  epa_iterations: int  # warp only
   epa_exact_neg_distance: bool  # warp only
   depth_extension: float  # warp only
   ls_parallel: bool
