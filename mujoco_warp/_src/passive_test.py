@@ -18,6 +18,7 @@
 import numpy as np
 import warp as wp
 from absl.testing import absltest
+from absl.testing import parameterized
 
 import mujoco_warp as mjwarp
 
@@ -34,7 +35,7 @@ def _assert_eq(a, b, name):
   np.testing.assert_allclose(a, b, err_msg=err_msg, atol=tol, rtol=tol)
 
 
-class PassiveTest(absltest.TestCase):
+class PassiveTest(parameterized.TestCase):
   def test_passive(self):
     """Tests passive."""
     _, mjd, m, d = test_util.fixture("pendula.xml")
@@ -49,6 +50,43 @@ class PassiveTest(absltest.TestCase):
     _assert_eq(d.qfrc_passive.numpy()[0], mjd.qfrc_passive, "qfrc_passive")
 
   # TODO(team): test DisableBit.PASSIVE
+
+  @parameterized.parameters(
+    (1, 0, 0, 0, 0),
+    (0, 1, 0, 0, 0),
+    (0, 0, 1, 0, 0),
+    (0, 0, 0, 1, 0),
+    (0, 0, 0, 0, 1),
+    (1, 1, 1, 1, 1),
+  )
+  def test_fluid(self, density, viscosity, wind0, wind1, wind2):
+    """Tests fluid model."""
+
+    _, mjd, m, d = test_util.fixture(
+      xml=f"""
+      <mujoco>
+        <option density="{density}" viscosity="{viscosity}" wind="{wind0} {wind1} {wind2}"/>
+        <worldbody>
+          <body>
+            <geom type="box" size=".1 .1 .1"/>
+            <freejoint/>
+          </body>
+        </worldbody>
+        <keyframe>
+          <key qvel="1 1 1 1 1 1"/>
+        </keyframe>
+      </mujoco>
+    """,
+      keyframe=0,
+    )
+
+    for arr in (d.qfrc_passive, d.qfrc_fluid):
+      arr.zero_()
+
+    mjwarp.passive(m, d)
+
+    _assert_eq(d.qfrc_passive.numpy()[0], mjd.qfrc_passive, "qfrc_passive")
+    _assert_eq(d.qfrc_fluid.numpy()[0], mjd.qfrc_fluid, "qfrc_fluid")
 
 
 if __name__ == "__main__":

@@ -375,6 +375,9 @@ class Option:
     epa_exact_neg_distance: flag for enabling the distance calculation for non-intersecting case in the convex narrowphase
     depth_extension: distance for which the closest point is not calculated for non-intersecting case in the convex narrowphase
     ls_parallel: evaluate engine solver step sizes in parallel
+    wind: wind (for lift, drag, and viscosity)
+    density: density of medium
+    viscosity: viscosity of medium
   """
 
   timestep: float
@@ -394,6 +397,9 @@ class Option:
   epa_exact_neg_distance: bool  # warp only
   depth_extension: float  # warp only
   ls_parallel: bool
+  wind: wp.vec3f
+  density: wp.float32
+  viscosity: wp.float32
 
 
 @wp.struct
@@ -1005,6 +1011,7 @@ class Data:
     ctrl: control                                               (nworld, nu)
     qfrc_applied: applied generalized force                     (nworld, nv)
     xfrc_applied: applied Cartesian force/torque                (nworld, nbody, 6)
+    fluid_applied: applied fluid force/torque                   (nworld, nbody, 6)
     eq_active: enable/disable constraints                       (nworld, neq)
     mocap_pos: position of mocap bodies                         (nworld, nmocap, 3)
     mocap_quat: orientation of mocap bodies                     (nworld, nmocap, 4)
@@ -1041,6 +1048,7 @@ class Data:
     qfrc_bias: C(qpos,qvel)                                     (nworld, nv)
     qfrc_spring: passive spring force                           (nworld, nv)
     qfrc_damper: passive damper force                           (nworld, nv)
+    qfrc_fluid: passive fluid force                             (nworld, nv)
     qfrc_passive: total passive force                           (nworld, nv)
     subtree_linvel: linear velocity of subtree com              (nworld, nbody, 3)
     subtree_angmom: angular momentum about subtree com          (nworld, nbody, 3)
@@ -1108,6 +1116,7 @@ class Data:
   ctrl: wp.array(dtype=wp.float32, ndim=2)
   qfrc_applied: wp.array(dtype=wp.float32, ndim=2)
   xfrc_applied: wp.array(dtype=wp.spatial_vector, ndim=2)
+  fluid_applied: wp.array(dtype=wp.spatial_vector, ndim=2)  # warp only
   eq_active: wp.array(dtype=wp.bool, ndim=2)
   mocap_pos: wp.array(dtype=wp.vec3, ndim=2)
   mocap_quat: wp.array(dtype=wp.quat, ndim=2)
@@ -1144,6 +1153,7 @@ class Data:
   qfrc_bias: wp.array(dtype=wp.float32, ndim=2)
   qfrc_spring: wp.array(dtype=wp.float32, ndim=2)
   qfrc_damper: wp.array(dtype=wp.float32, ndim=2)
+  qfrc_fluid: wp.array(dtype=wp.float32, ndim=2)
   qfrc_passive: wp.array(dtype=wp.float32, ndim=2)
   subtree_linvel: wp.array(dtype=wp.vec3, ndim=2)
   subtree_angmom: wp.array(dtype=wp.vec3, ndim=2)

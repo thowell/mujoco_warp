@@ -143,10 +143,13 @@ def mul_m(
     )
 
 
-@event_scope
-def xfrc_accumulate(m: Model, d: Data, qfrc: array2df):
+def apply_ft(
+  m: Model, d: Data, ft: wp.array(dtype=wp.spatial_vector, ndim=2), qfrc: array2df
+):
   @wp.kernel
-  def _accumulate(m: Model, d: Data, qfrc: array2df):
+  def _accumulate(
+    m: Model, d: Data, ft: wp.array(dtype=wp.spatial_vector, ndim=2), qfrc: array2df
+  ):
     worldid, dofid = wp.tid()
     cdof = d.cdof[worldid, dofid]
     rotational_cdof = wp.vec3(cdof[0], cdof[1], cdof[2])
@@ -164,18 +167,17 @@ def xfrc_accumulate(m: Model, d: Data, qfrc: array2df):
         continue  # body is not part of the subtree
       offset = d.xipos[worldid, bodyid] - d.subtree_com[worldid, m.body_rootid[bodyid]]
       cross_term = wp.cross(rotational_cdof, offset)
-      accumul += wp.dot(jac, d.xfrc_applied[worldid, bodyid]) + wp.dot(
-        cross_term,
-        wp.vec3(
-          d.xfrc_applied[worldid, bodyid][0],
-          d.xfrc_applied[worldid, bodyid][1],
-          d.xfrc_applied[worldid, bodyid][2],
-        ),
-      )
+      ft_body = ft[worldid, bodyid]
+      accumul += wp.dot(jac, ft_body) + wp.dot(cross_term, wp.spatial_top(ft_body))
 
     qfrc[worldid, dofid] += accumul
 
-  wp.launch(kernel=_accumulate, dim=(d.nworld, m.nv), inputs=[m, d, qfrc])
+  wp.launch(kernel=_accumulate, dim=(d.nworld, m.nv), inputs=[m, d, ft, qfrc])
+
+
+@event_scope
+def xfrc_accumulate(m: Model, d: Data, qfrc: array2df):
+  apply_ft(m, d, d.xfrc_applied, qfrc)
 
 
 @wp.func

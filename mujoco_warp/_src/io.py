@@ -108,12 +108,6 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
     if opt not in set(opt_types):
       raise NotImplementedError(f"{msg} {opt} is unsupported.")
 
-  if mjm.opt.wind.any():
-    raise NotImplementedError("Wind is unsupported.")
-
-  if mjm.opt.density > 0 or mjm.opt.viscosity > 0:
-    raise NotImplementedError("Fluid forces are unsupported.")
-
   # TODO(team): remove after solver._update_gradient for Newton solver utilizes tile operations for islands
   nv_max = 60
   if mjm.nv > nv_max and (not mjm.opt.jacobian == mujoco.mjtJacobian.mjJAC_SPARSE):
@@ -159,6 +153,9 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
   m.opt.epa_iteration_count = wp.int32(12)  # warp only
   m.opt.epa_exact_neg_distance = wp.bool(False)  # warp only
   m.opt.depth_extension = wp.float32(0.1)  # warp only
+  m.opt.wind = wp.vec3f(mjm.opt.wind[0], mjm.opt.wind[1], mjm.opt.wind[2])
+  m.opt.density = mjm.opt.density
+  m.opt.viscosity = mjm.opt.viscosity
   m.stat.meaninertia = mjm.stat.meaninertia
 
   m.qpos0 = wp.array(mjm.qpos0, dtype=wp.float32, ndim=1)
@@ -761,6 +758,7 @@ def make_data(
   d.contact.efc_address = wp.zeros((nconmax, np.max(mjm.geom_condim)), dtype=wp.int32)
   d.contact.worldid = wp.zeros((nconmax,), dtype=wp.int32)
   d.efc = _constraint(mjm, d.nworld, d.nconmax, d.njmax)
+  d.qfrc_fluid = wp.zeros((nworld, mjm.nv), dtype=wp.float32)
   d.qfrc_passive = wp.zeros((nworld, mjm.nv), dtype=wp.float32)
   d.subtree_linvel = wp.zeros((nworld, mjm.nbody), dtype=wp.vec3)
   d.subtree_angmom = wp.zeros((nworld, mjm.nbody), dtype=wp.vec3)
@@ -772,6 +770,7 @@ def make_data(
   d.qfrc_constraint = wp.zeros((nworld, mjm.nv), dtype=wp.float32)
   d.qacc_smooth = wp.zeros((nworld, mjm.nv), dtype=wp.float32)
   d.xfrc_applied = wp.zeros((nworld, mjm.nbody), dtype=wp.spatial_vector)
+  d.fluid_applied = wp.zeros((nworld, mjm.nbody), dtype=wp.spatial_vector)
   d.eq_active = wp.array(np.tile(mjm.eq_active0, (nworld, 1)), dtype=wp.bool, ndim=2)
 
   # internal tmp arrays
@@ -949,6 +948,7 @@ def put_data(
   d.cvel = wp.array(tile(mjd.cvel), dtype=wp.spatial_vector, ndim=2)
   d.cdof_dot = wp.array(tile(mjd.cdof_dot), dtype=wp.spatial_vector, ndim=2)
   d.qfrc_bias = wp.array(tile(mjd.qfrc_bias), dtype=wp.float32, ndim=2)
+  d.qfrc_fluid = wp.array(tile(mjd.qfrc_fluid), dtype=wp.float32, ndim=2)
   d.qfrc_passive = wp.array(tile(mjd.qfrc_passive), dtype=wp.float32, ndim=2)
   d.subtree_linvel = wp.array(tile(mjd.subtree_linvel), dtype=wp.vec3, ndim=2)
   d.subtree_angmom = wp.array(tile(mjd.subtree_angmom), dtype=wp.vec3, ndim=2)
@@ -1067,6 +1067,7 @@ def put_data(
   d.efc.id = wp.from_numpy(efc_id_fill, dtype=wp.int32)
 
   d.xfrc_applied = wp.array(tile(mjd.xfrc_applied), dtype=wp.spatial_vector, ndim=2)
+  d.fluid_applied = wp.zeros((nworld, mjm.nbody), dtype=wp.spatial_vector)
   d.eq_active = wp.array(tile(mjm.eq_active0), dtype=wp.bool, ndim=2)
 
   # internal tmp arrays
@@ -1187,6 +1188,7 @@ def get_data_into(
   result.cvel = d.cvel.numpy()[0]
   result.cdof_dot = d.cdof_dot.numpy()[0]
   result.qfrc_bias = d.qfrc_bias.numpy()[0]
+  result.qfrc_fluid = d.qfrc_fluid.numpy()[0]
   result.qfrc_passive = d.qfrc_passive.numpy()[0]
   result.subtree_linvel = d.subtree_linvel.numpy()[0]
   result.subtree_angmom = d.subtree_angmom.numpy()[0]
