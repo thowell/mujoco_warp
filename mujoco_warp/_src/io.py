@@ -132,6 +132,7 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
   m.ncam = mjm.ncam
   m.nlight = mjm.nlight
   m.nmocap = mjm.nmocap
+  m.ngravcomp = mjm.ngravcomp
   m.nM = mjm.nM
   m.ntendon = mjm.ntendon
   m.nwrap = mjm.nwrap
@@ -204,6 +205,8 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
   jnt_limited_ball_adr = np.nonzero(
     mjm.jnt_limited & (mjm.jnt_type == mujoco.mjtJoint.mjJNT_BALL)
   )[0]
+
+  m.jnt_actgravcomp = wp.array(mjm.jnt_actgravcomp, dtype=wp.int32)
 
   # body_tree is BFS ordering of body ids
   # body_treeadr contains starting index of each body tree level
@@ -383,6 +386,7 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
   m.body_geomadr = wp.array(mjm.body_geomadr, dtype=wp.int32, ndim=1)
   m.body_contype = wp.array(mjm.body_contype, dtype=wp.int32, ndim=1)
   m.body_conaffinity = wp.array(mjm.body_conaffinity, dtype=wp.int32, ndim=1)
+  m.body_gravcomp = wp.array(mjm.body_gravcomp, dtype=wp.float32, ndim=1)
   m.jnt_bodyid = wp.array(mjm.jnt_bodyid, dtype=wp.int32, ndim=1)
   m.jnt_limited = wp.array(mjm.jnt_limited, dtype=wp.int32, ndim=1)
   m.jnt_limited_slide_hinge_adr = wp.array(
@@ -767,6 +771,7 @@ def make_data(
   d.subtree_bodyvel = wp.zeros((nworld, mjm.nbody), dtype=wp.spatial_vector)
   d.qfrc_spring = wp.zeros((nworld, mjm.nv), dtype=wp.float32)
   d.qfrc_damper = wp.zeros((nworld, mjm.nv), dtype=wp.float32)
+  d.qfrc_gravcomp = wp.zeros((nworld, mjm.nv), dtype=wp.float32)
   d.qfrc_actuator = wp.zeros((nworld, mjm.nv), dtype=wp.float32)
   d.qfrc_smooth = wp.zeros((nworld, mjm.nv), dtype=wp.float32)
   d.qfrc_constraint = wp.zeros((nworld, mjm.nv), dtype=wp.float32)
@@ -955,6 +960,7 @@ def put_data(
   d.subtree_bodyvel = wp.zeros((nworld, mjm.nbody), dtype=wp.spatial_vector)
   d.qfrc_spring = wp.array(tile(mjd.qfrc_spring), dtype=wp.float32, ndim=2)
   d.qfrc_damper = wp.array(tile(mjd.qfrc_damper), dtype=wp.float32, ndim=2)
+  d.qfrc_gravcomp = wp.array(tile(mjd.qfrc_gravcomp), dtype=wp.float32, ndim=2)
   d.qfrc_actuator = wp.array(tile(mjd.qfrc_actuator), dtype=wp.float32, ndim=2)
   d.qfrc_smooth = wp.array(tile(mjd.qfrc_smooth), dtype=wp.float32, ndim=2)
   d.qfrc_constraint = wp.array(tile(mjd.qfrc_constraint), dtype=wp.float32, ndim=2)
@@ -1192,6 +1198,7 @@ def get_data_into(
   result.subtree_angmom = d.subtree_angmom.numpy()[0]
   result.qfrc_spring = d.qfrc_spring.numpy()[0]
   result.qfrc_damper = d.qfrc_damper.numpy()[0]
+  result.qfrc_gravcomp = d.qfrc_gravcomp.numpy()[0]
   result.qfrc_actuator = d.qfrc_actuator.numpy()[0]
   result.qfrc_smooth = d.qfrc_smooth.numpy()[0]
   result.qfrc_constraint = d.qfrc_constraint.numpy()[0]
