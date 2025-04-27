@@ -19,12 +19,11 @@ import warp as wp
 
 from . import math
 from . import support
+from .types import MJ_MINVAL
 from .types import Data
 from .types import DisableBit
 from .types import JointType
-from .types import ObjType
 from .types import Model
-from .types import MJ_MINVAL
 from .warp_util import event_scope
 from .warp_util import kernel
 
