@@ -1106,7 +1106,7 @@ def put_data(
   d.ten_length = wp.array(tile(mjd.ten_length), dtype=wp.float32, ndim=2)
 
   if support.is_sparse(mjm) and mjm.ntendon:
-    ten_J = np.zeros((mjm.ntendon, mjm.nv), dtype=np.float64)
+    ten_J = np.zeros((mjm.ntendon, mjm.nv))
     mujoco.mju_sparse2dense(
       ten_J,
       mjd.ten_J.reshape(-1),
