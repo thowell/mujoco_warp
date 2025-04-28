@@ -86,9 +86,6 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
     if unsupported.any():
       raise NotImplementedError(f"{field_str} {field[unsupported]} not supported.")
 
-  if mjm.sensor_cutoff.any():
-    raise NotImplementedError("Sensor cutoff is unsupported.")
-
   for n, msg in (
     (mjm.nplugin, "Plugins"),
     (mjm.nflex, "Flexes"),
@@ -602,6 +599,20 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
     ndim=1,
   )
 
+  m.sensor_subtree_vel = np.isin(
+    mjm.sensor_type,
+    [mujoco.mjtSensor.mjSENS_SUBTREELINVEL, mujoco.mjtSensor.mjSENS_SUBTREEANGMOM],
+  ).any()
+  m.sensor_rne_postconstraint = np.isin(
+    mjm.sensor_type,
+    [
+      mujoco.mjtSensor.mjSENS_ACCELEROMETER,
+      mujoco.mjtSensor.mjSENS_FORCE,
+      mujoco.mjtSensor.mjSENS_TORQUE,
+      mujoco.mjtSensor.mjSENS_FRAMELINACC,
+      mujoco.mjtSensor.mjSENS_FRAMEANGACC,
+    ],
+  ).any()
   return m
 
 
@@ -1108,7 +1119,11 @@ def put_data(
   if support.is_sparse(mjm) and mjm.ntendon:
     ten_J = np.zeros((mjm.ntendon, mjm.nv))
     mujoco.mju_sparse2dense(
-      ten_J, mjd.ten_J, mjd.ten_J_rownnz, mjd.ten_J_rowadr, mjd.ten_J_colind
+      ten_J,
+      mjd.ten_J.reshape(-1),
+      mjd.ten_J_rownnz,
+      mjd.ten_J_rowadr,
+      mjd.ten_J_colind.reshape(-1),
     )
   else:
     ten_J = mjd.ten_J.reshape((mjm.ntendon, mjm.nv))

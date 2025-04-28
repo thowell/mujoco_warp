@@ -19,6 +19,8 @@ import warp as wp
 
 from .collision_primitive import Geom
 from .collision_primitive import _geom
+from .collision_primitive import contact_params
+from .collision_primitive import write_contact
 from .math import gjk_normalize
 from .math import make_frame
 from .math import orthonormal
@@ -745,16 +747,15 @@ def _gjk_epa_pipeline(
 
   # runs GJK and EPA on a set of sparse geom pairs per env
   @wp.kernel
-  def _gjk_epa_sparse(
-    m: Model,
-    d: Data,
-  ):
+  def _gjk_epa_sparse(m: Model, d: Data):
     tid = wp.tid()
     if tid >= d.ncollision[0]:
       return
 
     worldid = d.collision_worldid[tid]
-    geoms = d.collision_pair[tid]
+    geoms, margin, gap, condim, friction, solref, solreffriction, solimp = (
+      contact_params(m, d, tid)
+    )
 
     g1 = geoms[0]
     g2 = geoms[1]
@@ -771,21 +772,32 @@ def _gjk_epa_pipeline(
 
     # TODO(btaba): get depth from GJK, conditionally run EPA.
     depth, normal = _epa(m, geom1, geom2, simplex, normal)
+    dist = -depth
 
-    if (-depth - margin) >= 0.0 or depth != depth:
+    if (dist - margin) >= 0.0 or depth != depth:
       return
 
     # TODO(btaba): split get_multiple_contacts into a separate kernel.
     # TODO(team): multiccd enablebit
     count, points = _multiple_contacts(m, geom1, geom2, depth, normal)
 
-    cid = wp.atomic_add(d.ncon, 0, count)
+    frame = make_frame(normal)
     for i in range(count):
-      d.contact.dist[cid + i] = -depth
-      d.contact.geom[cid + i] = geoms
-      d.contact.frame[cid + i] = make_frame(normal)
-      d.contact.pos[cid + i] = points[i]
-      d.contact.worldid[cid + i] = worldid
+      write_contact(
+        d,
+        dist,
+        points[i],
+        frame,
+        margin,
+        gap,
+        condim,
+        friction,
+        solref,
+        solreffriction,
+        solimp,
+        geoms,
+        worldid,
+      )
 
   return _gjk_epa_sparse
 

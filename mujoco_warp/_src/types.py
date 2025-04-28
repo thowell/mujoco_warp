@@ -43,6 +43,19 @@ class CamLightType(enum.IntEnum):
   TARGETBODYCOM = mujoco.mjtCamLight.mjCAMLIGHT_TARGETBODYCOM
 
 
+class DataType(enum.IntFlag):
+  """Sensor data types.
+
+  Members:
+    REAL: real values, no constraints
+    POSITIVE: positive values, 0 or negative: inactive
+  """
+
+  REAL = mujoco.mjtDataType.mjDATATYPE_REAL
+  POSITIVE = mujoco.mjtDataType.mjDATATYPE_POSITIVE
+  # unsupported: AXIS, QUATERNION
+
+
 class DisableBit(enum.IntFlag):
   """Disable default feature bitflags.
 
@@ -737,6 +750,8 @@ class Model:
     sensor_pos_adr: addresses for position sensors           (<=nsensor,)
     sensor_vel_adr: addresses for velocity sensors           (<=nsensor,)
     sensor_acc_adr: addresses for acceleration sensors       (<=nsensor,)
+    sensor_subtree_vel: evaluate subtree_vel
+    sensor_rne_postconstraint: evaluate rne_postconstraint
   """
 
   nq: int
@@ -949,6 +964,8 @@ class Model:
   sensor_pos_adr: wp.array(dtype=wp.int32, ndim=1)  # warp only
   sensor_vel_adr: wp.array(dtype=wp.int32, ndim=1)  # warp only
   sensor_acc_adr: wp.array(dtype=wp.int32, ndim=1)  # warp only
+  sensor_subtree_vel: bool  # warp only
+  sensor_rne_postconstraint: bool  # warp only
 
 
 @wp.struct
