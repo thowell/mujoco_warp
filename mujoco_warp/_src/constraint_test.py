@@ -142,6 +142,61 @@ class ConstraintTest(parameterized.TestCase):
       _assert_eq(d.efc.pos.numpy()[: mjd.nefc], mjd.efc_pos, "efc_pos")
       _assert_eq(d.efc.margin.numpy()[: mjd.nefc], mjd.efc_margin, "efc_margin")
 
+  def test_equality_tendon(self):
+    """Test equality tendon constraints."""
+
+    _, mjd, m, d = test_util.fixture(
+      xml="""
+      <mujoco>
+        <option>
+          <flag contact="disable"/>
+        </option>
+        <worldbody>
+          <body>
+            <geom type="sphere" size=".1"/>
+            <joint name="joint0" type="hinge"/>
+          </body>
+          <body>
+            <geom type="sphere" size=".1"/>
+            <joint name="joint1" type="hinge"/>
+          </body>
+          <body>
+            <geom type="sphere" size=".1"/>
+            <joint name="joint2" type="hinge"/>
+          </body>
+        </worldbody>
+        <tendon>
+          <fixed name="tendon0">
+            <joint joint="joint0" coef=".1"/>
+          </fixed>
+          <fixed name="tendon1">
+            <joint joint="joint1" coef=".2"/>
+          </fixed>
+          <fixed name="tendon2">
+            <joint joint="joint2" coef=".3"/>
+          </fixed>
+        </tendon>
+        <equality>
+          <tendon tendon1="tendon0" tendon2="tendon1" polycoef=".1 .2 .3 .4 .5"/>
+          <tendon tendon1="tendon2" polycoef="-.1 0 0 0 0"/>
+        </equality>
+        <keyframe>
+          <key qpos=".1 .2 .3"/>
+        </keyframe>
+      </mujoco>
+    """
+    )
+
+    mjwarp.make_constraint(m, d)
+
+    _assert_eq(d.nefc.numpy()[0], mjd.nefc, "nefc")
+    _assert_eq(d.ne.numpy()[0], mjd.ne, "ne")
+    _assert_eq(d.efc.J.numpy()[: mjd.nefc, :].reshape(-1), mjd.efc_J, "efc_J")
+    _assert_eq(d.efc.D.numpy()[: mjd.nefc], mjd.efc_D, "efc_D")
+    _assert_eq(d.efc.aref.numpy()[: mjd.nefc], mjd.efc_aref, "efc_aref")
+    _assert_eq(d.efc.pos.numpy()[: mjd.nefc], mjd.efc_pos, "efc_pos")
+    _assert_eq(d.efc.margin.numpy()[: mjd.nefc], mjd.efc_margin, "efc_margin")
+
 
 if __name__ == "__main__":
   absltest.main()
