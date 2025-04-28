@@ -1105,7 +1105,11 @@ def put_data(
   if support.is_sparse(mjm) and mjm.ntendon:
     ten_J = np.zeros((mjm.ntendon, mjm.nv))
     mujoco.mju_sparse2dense(
-      ten_J, mjd.ten_J, mjd.ten_J_rownnz, mjd.ten_J_rowadr, mjd.ten_J_colind
+      ten_J,
+      mjd.ten_J.reshape(-1),
+      mjd.ten_J_rownnz,
+      mjd.ten_J_rowadr,
+      mjd.ten_J_colind.reshape(-1),
     )
   else:
     ten_J = mjd.ten_J.reshape((mjm.ntendon, mjm.nv))
