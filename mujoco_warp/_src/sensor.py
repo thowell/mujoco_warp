@@ -112,6 +112,7 @@ def _cam_projection(
   )
 
   # projection matrix (3 x 4): product of all 4 matrices
+  # TODO(team): compute proj directly
   proj = image @ focal @ rotation @ translation
 
   # projection matrix multiples homogenous [x, y, z, 1] vectors
