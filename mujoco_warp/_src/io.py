@@ -86,9 +86,6 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
     if unsupported.any():
       raise NotImplementedError(f"{field_str} {field[unsupported]} not supported.")
 
-  if mjm.sensor_cutoff.any():
-    raise NotImplementedError("Sensor cutoff is unsupported.")
-
   for n, msg in (
     (mjm.nplugin, "Plugins"),
     (mjm.nflex, "Flexes"),

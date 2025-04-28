@@ -43,6 +43,19 @@ class CamLightType(enum.IntEnum):
   TARGETBODYCOM = mujoco.mjtCamLight.mjCAMLIGHT_TARGETBODYCOM
 
 
+class DataType(enum.IntFlag):
+  """Sensor data types.
+
+  Members:
+    REAL: real values, no constraints
+    POSITIVE: positive values, 0 or negative: inactive
+  """
+
+  REAL = mujoco.mjtDataType.mjDATATYPE_REAL
+  POSITIVE = mujoco.mjtDataType.mjDATATYPE_POSITIVE
+  # unsupported: AXIS, QUATERNION
+
+
 class DisableBit(enum.IntFlag):
   """Disable default feature bitflags.
 
