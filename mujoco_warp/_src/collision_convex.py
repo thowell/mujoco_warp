@@ -19,6 +19,8 @@ import warp as wp
 
 from .collision_primitive import Geom
 from .collision_primitive import _geom
+from .collision_primitive import contact_params
+from .collision_primitive import write_contact
 from .math import gjk_normalize
 from .math import make_frame
 from .math import orthonormal
@@ -708,22 +710,15 @@ def gjk_epa_pipeline(
 
   # Runs GJK and EPA on a set of sparse geom pairs per env.
   @wp.kernel
-  def gjk_epa_sparse(
-    m: Model,
-    d: Data,
-  ):
-    # Check if we generated max contacts for this env.
-    # TODO(btaba): move max_contact_points_per_env culling to a point later
-    # in the pipline, where we can do a sort on penetration depth per env.
-    if d.ncon[0] > d.nconmax:
-      return
-
+  def gjk_epa_sparse(m: Model, d: Data):
     tid = wp.tid()
     if tid >= d.ncollision[0]:
       return
 
     worldid = d.collision_worldid[tid]
-    geoms = d.collision_pair[tid]
+    geoms, margin, gap, condim, friction, solref, solreffriction, solimp = (
+      contact_params(m, d, tid)
+    )
 
     g1 = geoms[0]
     g2 = geoms[1]
@@ -734,26 +729,35 @@ def gjk_epa_pipeline(
     info1 = _geom(g1, m, d.geom_xpos[worldid], d.geom_xmat[worldid])
     info2 = _geom(g2, m, d.geom_xpos[worldid], d.geom_xmat[worldid])
 
-    margin = wp.max(m.geom_margin[g1], m.geom_margin[g2])
-
     simplex, normal = _gjk(m, info1, info2)
 
     # TODO(btaba): get depth from GJK, conditionally run EPA.
     depth, normal = _epa(m, info1, info2, simplex, normal)
+    dist = -depth
 
-    if (-depth - margin) >= 0.0 or depth != depth:
+    if (dist - margin) >= 0.0 or depth != depth:
       return
 
     # TODO(btaba): split get_multiple_contacts into a separate kernel.
     count, points = _get_multiple_contacts(m, info1, info2, depth, normal)
 
-    cid = wp.atomic_add(d.ncon, 0, count)
+    frame = make_frame(normal)
     for i in range(count):
-      d.contact.dist[cid + i] = -depth
-      d.contact.geom[cid + i] = geoms
-      d.contact.frame[cid + i] = make_frame(normal)
-      d.contact.pos[cid + i] = points[i]
-      d.contact.worldid[cid + i] = worldid
+      write_contact(
+        d,
+        dist,
+        points[i],
+        frame,
+        margin,
+        gap,
+        condim,
+        friction,
+        solref,
+        solreffriction,
+        solimp,
+        geoms,
+        worldid,
+      )
 
   return gjk_epa_sparse
 
