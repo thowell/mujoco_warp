@@ -138,6 +138,9 @@ class ConstraintTest(parameterized.TestCase):
         "tendon/tendon_limit.xml", sparse=False, keyframe=keyframe
       )
 
+      for arr in (d.nefc, d.nl, d.efc.J, d.efc.D, d.efc.aref, d.efc.pos, d.efc.margin):
+        arr.zero_()
+
       mjwarp.make_constraint(m, d)
 
       _assert_eq(d.nefc.numpy()[0], mjd.nefc, "nefc")
