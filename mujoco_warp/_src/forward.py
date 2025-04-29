@@ -267,6 +267,11 @@ def rungekutta4(m: Model, d: Data):
 
   wp.copy(d.qpos_t0, d.qpos)
   wp.copy(d.qvel_t0, d.qvel)
+
+  d.qvel_rk = wp.zeros_like(d.qvel_rk)
+  d.qacc_rk = wp.zeros_like(d.qacc_rk)
+  d.act_dot_rk = wp.zeros_like(d.act_dot_rk)
+
   if m.na:
     wp.copy(d.act_t0, d.act)
 
