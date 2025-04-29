@@ -72,55 +72,55 @@
     <material name="fridge_right_group_SchwarzerGummi" shininess="0.0955372" rgba="0.0108 0.0108 0.0108 1"/>
     <material name="toaster_right_group_model" rgba="0.68 0.68 0.68 1.0" reflectance="0.5"/>
 	<material name="toaster_right_group_main" rgba="0.68 0.68 0.68 1.0" shininess="0.25"/>
-    <mesh name="stovetop_main_group_model_0_vis" file="stovetops/model_0.obj" scale="1.01852 1.01852 1.01852"/>
-	<mesh name="stovetop_main_group_knob_rear_right_0_vis" file="stovetops/knob_rear_right_0.obj" scale="1.01852 1.01852 1.01852"/>
-    <mesh name="stovetop_main_group_knob_front_left_0_vis" file="stovetops/knob_front_left_0.obj" scale="1.01852 1.01852 1.01852"/>
-    <mesh name="stovetop_main_group_knob_front_right_0_vis" file="stovetops/knob_front_right_0.obj" scale="1.01852 1.01852 1.01852"/>
-    <mesh name="stovetop_main_group_knob_rear_left_0_vis" file="stovetops/knob_rear_left_0.obj" scale="1.01852 1.01852 1.01852"/>
-    <mesh name="stovetop_main_group_knob_center_0_vis" file="stovetops/knob_center_0.obj" scale="1.01852 1.01852 1.01852"/>
-	<mesh name="hood_main_group_model_0_vis" file="hoods/model_0.obj" scale="0.808824 0.923077 0.808824"/>
-    <mesh name="hood_main_group_model_2_vis" file="hoods/model_2.obj" scale="0.808824 0.923077 0.808824"/>
-    <mesh name="paper_towel_main_group_model_0_vis" file="paper_towel_holders/model_0.obj" scale="0.35 0.35 0.35"/>
-    <mesh name="paper_towel_main_group_model_1_vis" file="paper_towel_holders/model_1.obj" scale="0.35 0.35 0.35"/>
-    <mesh name="paper_towel_main_group_model_2_vis" file="paper_towel_holders/model_2.obj" scale="0.35 0.35 0.35"/>
-    <mesh name="paper_towel_main_group_model_3_vis" file="paper_towel_holders/model_3.obj" scale="0.35 0.35 0.35"/>
-    <mesh name="utensil_holder_main_group_model_0_vis" file="utensil_holders/model_0.obj" scale="0.35 0.35 0.35"/>
-    <mesh name="utensil_holder_main_group_model_2_vis" file="utensil_holders/model_2.obj" scale="0.35 0.35 0.35"/>
-    <mesh name="utensil_holder_main_group_model_3_vis" file="utensil_holders/model_3.obj" scale="0.35 0.35 0.35"/>
-    <mesh name="sink_island_group_model_0_vis" file="sinks/model_0.obj" scale="0.916667 0.916667 0.916667"/>
-    <mesh name="sink_island_group_spout_0_vis" file="sinks/spout_0.obj" scale="0.916667 0.916667 0.916667"/>
-    <mesh name="sink_island_group_handle_0_vis" file="sinks/handle_0.obj" scale="0.916667 0.916667 0.916667"/>
-    <mesh name="dishwasher_island_group_model_0_vis" file="dishwashers/model_0.obj" scale="0.915417 0.844351 0.89"/>
-    <mesh name="plant_island_group_model_0_vis" file="plants/model_0.obj" scale="0.3 0.3 0.3"/>
-    <mesh name="plant_island_group_model_1_vis" file="plants/model_1.obj" scale="0.3 0.3 0.3"/>
-    <mesh name="plant_island_group_model_2_vis" file="plants/model_2.obj" scale="0.3 0.3 0.3" inertia="shell"/>
-    <mesh name="plant_island_group_model_3_vis" file="plants/model_3.obj" scale="0.3 0.3 0.3"/>
-    <mesh name="stool_1_island_group_model_0_vis" file="stools/model_0.obj"/>
-    <mesh name="stool_2_island_group_model_0_vis" file="stools/model_0.obj"/>
-    <mesh name="stool_3_island_group_model_0_vis" file="stools/model_0.obj"/>
-    <mesh name="oven_left_group_model_0_vis" file="ovens/model_0.obj" scale="0.75 0.973361 0.738286"/>
-    <mesh name="oven_left_group_model_1_vis" file="ovens/model_1.obj" scale="0.75 0.973361 0.738286"/>
-    <mesh name="oven_left_group_model_2_vis" file="ovens/model_2.obj" scale="0.75 0.973361 0.738286"/>
-    <mesh name="oven_left_group_model_3_vis" file="ovens/model_3.obj" scale="0.75 0.973361 0.738286"/>
-    <mesh name="oven_left_group_model_4_vis" file="ovens/model_4.obj" scale="0.75 0.973361 0.738286"/>
-    <mesh name="microwave_left_group_model_0_vis" file="microwaves/model_0.obj" scale="0.75 0.735294 0.75"/>
-    <mesh name="microwave_left_group_model_1_vis" file="microwaves/model_1.obj" scale="0.75 0.735294 0.75"/>
-    <mesh name="microwave_left_group_model_2_vis" file="microwaves/model_2.obj" scale="0.75 0.735294 0.75"/>
-    <mesh name="microwave_left_group_model_5_vis" file="microwaves/model_5.obj" scale="0.75 0.735294 0.75"/>
-    <mesh name="microwave_left_group_model_6_vis" file="microwaves/model_6.obj" scale="0.75 0.735294 0.75"/>
-    <mesh name="microwave_left_group_model_7_vis" file="microwaves/model_7.obj" scale="0.75 0.735294 0.75"/>
-    <mesh name="microwave_left_group_model_8_vis" file="microwaves/model_8.obj" scale="0.75 0.735294 0.75"/>
-    <mesh name="microwave_left_group_model_9_vis" file="microwaves/model_9.obj" scale="0.75 0.735294 0.75"/>
-    <mesh name="microwave_left_group_model_10_vis" file="microwaves/model_10.obj" scale="0.75 0.735294 0.75"/>
-    <mesh name="microwave_left_group_door_1_vis" file="microwaves/door_1.obj" scale="0.75 0.735294 0.75"/>
-    <mesh name="microwave_left_group_door_3_vis" file="microwaves/door_3.obj" scale="0.75 0.735294 0.75"/>
-    <mesh name="microwave_left_group_door_4_vis" file="microwaves/door_4.obj" scale="0.75 0.735294 0.75"/>
-    <mesh name="microwave_left_group_door_5_vis" file="microwaves/door_5.obj" scale="0.75 0.735294 0.75"/>
-    <mesh name="fridge_right_group_model_0_vis" file="fridges/model_0.obj" scale="1.75658 1.95289 1.75"/>
-    <mesh name="fridge_right_group_model_1_vis" file="fridges/model_1.obj" scale="1.75658 1.95289 1.75"/>
-    <mesh name="fridge_right_group_model_2_vis" file="fridges/model_2.obj" scale="1.75658 1.95289 1.75"/>
-    <mesh name="fridge_right_group_model_3_vis" file="fridges/model_3.obj" scale="1.75658 1.95289 1.75"/>
-    <mesh name="toaster_right_group_model_0_vis" file="toasters/model_0.obj" scale="0.3 0.3 0.3"/>
+    <mesh name="stovetop_main_group_model_0_vis" file="stovetops/stovetop_model_0.obj" scale="1.01852 1.01852 1.01852"/>
+	<mesh name="stovetop_main_group_knob_rear_right_0_vis" file="stovetops/stovetop_knob_rear_right_0.obj" scale="1.01852 1.01852 1.01852"/>
+    <mesh name="stovetop_main_group_knob_front_left_0_vis" file="stovetops/stovetop_knob_front_left_0.obj" scale="1.01852 1.01852 1.01852"/>
+    <mesh name="stovetop_main_group_knob_front_right_0_vis" file="stovetops/stovetop_knob_front_right_0.obj" scale="1.01852 1.01852 1.01852"/>
+    <mesh name="stovetop_main_group_knob_rear_left_0_vis" file="stovetops/stovetop_knob_rear_left_0.obj" scale="1.01852 1.01852 1.01852"/>
+    <mesh name="stovetop_main_group_knob_center_0_vis" file="stovetops/stovetop_knob_center_0.obj" scale="1.01852 1.01852 1.01852"/>
+	<mesh name="hood_main_group_model_0_vis" file="hoods/hood_model_0.obj" scale="0.808824 0.923077 0.808824"/>
+    <mesh name="hood_main_group_model_2_vis" file="hoods/hood_model_2.obj" scale="0.808824 0.923077 0.808824"/>
+    <mesh name="paper_towel_main_group_model_0_vis" file="paper_towel_holders/paper_towel_holder_model_0.obj" scale="0.35 0.35 0.35"/>
+    <mesh name="paper_towel_main_group_model_1_vis" file="paper_towel_holders/paper_towel_holder_model_1.obj" scale="0.35 0.35 0.35"/>
+    <mesh name="paper_towel_main_group_model_2_vis" file="paper_towel_holders/paper_towel_holder_model_2.obj" scale="0.35 0.35 0.35"/>
+    <mesh name="paper_towel_main_group_model_3_vis" file="paper_towel_holders/paper_towel_holder_model_3.obj" scale="0.35 0.35 0.35"/>
+    <mesh name="utensil_holder_main_group_model_0_vis" file="utensil_holders/utensil_holder_model_0.obj" scale="0.35 0.35 0.35"/>
+    <mesh name="utensil_holder_main_group_model_2_vis" file="utensil_holders/utensil_holder_model_2.obj" scale="0.35 0.35 0.35"/>
+    <mesh name="utensil_holder_main_group_model_3_vis" file="utensil_holders/utensil_holder_model_3.obj" scale="0.35 0.35 0.35"/>
+    <mesh name="sink_island_group_model_0_vis" file="sinks/sink_model_0.obj" scale="0.916667 0.916667 0.916667"/>
+    <mesh name="sink_island_group_spout_0_vis" file="sinks/sink_spout_0.obj" scale="0.916667 0.916667 0.916667"/>
+    <mesh name="sink_island_group_handle_0_vis" file="sinks/sink_handle_0.obj" scale="0.916667 0.916667 0.916667"/>
+    <mesh name="dishwasher_island_group_model_0_vis" file="dishwashers/dishwasher_model_0.obj" scale="0.915417 0.844351 0.89"/>
+    <mesh name="plant_island_group_model_0_vis" file="plants/plant_model_0.obj" scale="0.3 0.3 0.3"/>
+    <mesh name="plant_island_group_model_1_vis" file="plants/plant_model_1.obj" scale="0.3 0.3 0.3"/>
+    <mesh name="plant_island_group_model_2_vis" file="plants/plant_model_2.obj" scale="0.3 0.3 0.3" inertia="shell"/>
+    <mesh name="plant_island_group_model_3_vis" file="plants/plant_model_3.obj" scale="0.3 0.3 0.3"/>
+    <mesh name="stool_1_island_group_model_0_vis" file="stools/stool_model_0.obj"/>
+    <mesh name="stool_2_island_group_model_0_vis" file="stools/stool_model_0.obj"/>
+    <mesh name="stool_3_island_group_model_0_vis" file="stools/stool_model_0.obj"/>
+    <mesh name="oven_left_group_model_0_vis" file="ovens/oven_model_0.obj" scale="0.75 0.973361 0.738286"/>
+    <mesh name="oven_left_group_model_1_vis" file="ovens/oven_model_1.obj" scale="0.75 0.973361 0.738286"/>
+    <mesh name="oven_left_group_model_2_vis" file="ovens/oven_model_2.obj" scale="0.75 0.973361 0.738286"/>
+    <mesh name="oven_left_group_model_3_vis" file="ovens/oven_model_3.obj" scale="0.75 0.973361 0.738286"/>
+    <mesh name="oven_left_group_model_4_vis" file="ovens/oven_model_4.obj" scale="0.75 0.973361 0.738286"/>
+    <mesh name="microwave_left_group_model_0_vis" file="microwaves/microwave_model_0.obj" scale="0.75 0.735294 0.75"/>
+    <mesh name="microwave_left_group_model_1_vis" file="microwaves/microwave_model_1.obj" scale="0.75 0.735294 0.75"/>
+    <mesh name="microwave_left_group_model_2_vis" file="microwaves/microwave_model_2.obj" scale="0.75 0.735294 0.75"/>
+    <mesh name="microwave_left_group_model_5_vis" file="microwaves/microwave_model_5.obj" scale="0.75 0.735294 0.75"/>
+    <mesh name="microwave_left_group_model_6_vis" file="microwaves/microwave_model_6.obj" scale="0.75 0.735294 0.75"/>
+    <mesh name="microwave_left_group_model_7_vis" file="microwaves/microwave_model_7.obj" scale="0.75 0.735294 0.75"/>
+    <mesh name="microwave_left_group_model_8_vis" file="microwaves/microwave_model_8.obj" scale="0.75 0.735294 0.75"/>
+    <mesh name="microwave_left_group_model_9_vis" file="microwaves/microwave_model_9.obj" scale="0.75 0.735294 0.75"/>
+    <mesh name="microwave_left_group_model_10_vis" file="microwaves/microwave_model_10.obj" scale="0.75 0.735294 0.75"/>
+    <mesh name="microwave_left_group_door_1_vis" file="microwaves/microwave_door_1.obj" scale="0.75 0.735294 0.75"/>
+    <mesh name="microwave_left_group_door_3_vis" file="microwaves/microwave_door_3.obj" scale="0.75 0.735294 0.75"/>
+    <mesh name="microwave_left_group_door_4_vis" file="microwaves/microwave_door_4.obj" scale="0.75 0.735294 0.75"/>
+    <mesh name="microwave_left_group_door_5_vis" file="microwaves/microwave_door_5.obj" scale="0.75 0.735294 0.75"/>
+    <mesh name="fridge_right_group_model_0_vis" file="fridges/fridge_model_0.obj" scale="1.75658 1.95289 1.75"/>
+    <mesh name="fridge_right_group_model_1_vis" file="fridges/fridge_model_1.obj" scale="1.75658 1.95289 1.75"/>
+    <mesh name="fridge_right_group_model_2_vis" file="fridges/fridge_model_2.obj" scale="1.75658 1.95289 1.75"/>
+    <mesh name="fridge_right_group_model_3_vis" file="fridges/fridge_model_3.obj" scale="1.75658 1.95289 1.75"/>
+    <mesh name="toaster_right_group_model_0_vis" file="toasters/toaster_model_0.obj" scale="0.3 0.3 0.3"/>
   </asset>
 
   <worldbody>
