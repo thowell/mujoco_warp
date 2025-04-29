@@ -40,6 +40,7 @@ def fixture(
   constraint: bool = True,
   equality: bool = True,
   gravity: bool = True,
+  eulerdamp: Optional[bool] = None,
   cone: Optional[ConeType] = None,
   solver: Optional[SolverType] = None,
   iterations: Optional[int] = None,
@@ -48,6 +49,9 @@ def fixture(
   sparse: Optional[bool] = None,
   kick: bool = False,
   seed: int = 42,
+  nworld: int = None,
+  nconmax: int = None,
+  njmax: int = None,
 ):
   np.random.seed(seed)
   if fname is not None:
@@ -65,6 +69,8 @@ def fixture(
     mjm.opt.disableflags |= DisableBit.EQUALITY
   if not gravity:
     mjm.opt.disableflags |= DisableBit.GRAVITY
+  if not eulerdamp:
+    mjm.opt.disableflags |= DisableBit.EULERDAMP
   if cone is not None:
     mjm.opt.cone = cone
   if solver is not None:
@@ -90,7 +96,7 @@ def fixture(
   m = io.put_model(mjm)
   if ls_parallel is not None:
     m.opt.ls_parallel = ls_parallel
-  d = io.put_data(mjm, mjd)
+  d = io.put_data(mjm, mjd, nworld=nworld, nconmax=nconmax, njmax=njmax)
   return mjm, mjd, m, d
 
 

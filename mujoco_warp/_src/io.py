@@ -86,9 +86,6 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
     if unsupported.any():
       raise NotImplementedError(f"{field_str} {field[unsupported]} not supported.")
 
-  if mjm.sensor_cutoff.any():
-    raise NotImplementedError("Sensor cutoff is unsupported.")
-
   for n, msg in (
     (mjm.nplugin, "Plugins"),
     (mjm.nflex, "Flexes"),
@@ -157,8 +154,8 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
   m.opt.is_sparse = support.is_sparse(mjm)
   m.opt.ls_parallel = False
   # TODO(team) Figure out good default parameters
-  m.opt.gjk_iteration_count = wp.int32(1)  # warp only
-  m.opt.epa_iteration_count = wp.int32(12)  # warp only
+  m.opt.gjk_iterations = wp.int32(1)  # warp only
+  m.opt.epa_iterations = wp.int32(12)  # warp only
   m.opt.epa_exact_neg_distance = wp.bool(False)  # warp only
   m.opt.depth_extension = wp.float32(0.1)  # warp only
   m.stat.meaninertia = mjm.stat.meaninertia
@@ -490,12 +487,15 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
   m.actuator_dynprm = wp.array(mjm.actuator_dynprm, dtype=types.vec10f, ndim=1)
   m.exclude_signature = wp.array(mjm.exclude_signature, dtype=wp.int32, ndim=1)
 
-  # pre-compute indices of joint equalities
-  m.eq_jnt_adr = wp.array(
-    np.nonzero(mjm.eq_type == types.EqType.JOINT.value)[0], dtype=wp.int32, ndim=1
-  )
+  # pre-compute indices of equality constraints
   m.eq_connect_adr = wp.array(
     np.nonzero(mjm.eq_type == types.EqType.CONNECT.value)[0], dtype=wp.int32, ndim=1
+  )
+  m.eq_wld_adr = wp.array(
+    np.nonzero(mjm.eq_type == types.EqType.WELD.value)[0], dtype=wp.int32, ndim=1
+  )
+  m.eq_jnt_adr = wp.array(
+    np.nonzero(mjm.eq_type == types.EqType.JOINT.value)[0], dtype=wp.int32, ndim=1
   )
 
   # short-circuiting here allows us to skip a lot of code in implicit integration
@@ -525,10 +525,21 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
   # tendon
   m.tendon_adr = wp.array(mjm.tendon_adr, dtype=wp.int32, ndim=1)
   m.tendon_num = wp.array(mjm.tendon_num, dtype=wp.int32, ndim=1)
+  m.tendon_limited = wp.array(mjm.tendon_limited, dtype=wp.int32, ndim=1)
+  m.tendon_limited_adr = wp.array(
+    np.nonzero(mjm.tendon_limited)[0], dtype=wp.int32, ndim=1
+  )
+  m.tendon_solref_lim = wp.array(mjm.tendon_solref_lim, dtype=wp.vec2f, ndim=1)
+  m.tendon_solimp_lim = wp.array(mjm.tendon_solimp_lim, dtype=types.vec5, ndim=1)
+  m.tendon_range = wp.array(mjm.tendon_range, dtype=wp.vec2f, ndim=1)
+  m.tendon_margin = wp.array(mjm.tendon_margin, dtype=wp.float32, ndim=1)
+  m.tendon_length0 = wp.array(mjm.tendon_length0, dtype=wp.float32, ndim=1)
+  m.tendon_invweight0 = wp.array(mjm.tendon_invweight0, dtype=wp.float32, ndim=1)
   m.wrap_objid = wp.array(mjm.wrap_objid, dtype=wp.int32, ndim=1)
   m.wrap_prm = wp.array(mjm.wrap_prm, dtype=wp.float32, ndim=1)
   m.wrap_type = wp.array(mjm.wrap_type, dtype=wp.int32, ndim=1)
 
+  # fixed tendon
   tendon_jnt_adr = []
   wrap_jnt_adr = []
   for i in range(mjm.ntendon):
@@ -541,6 +552,40 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
 
   m.tendon_jnt_adr = wp.array(tendon_jnt_adr, dtype=wp.int32, ndim=1)
   m.wrap_jnt_adr = wp.array(wrap_jnt_adr, dtype=wp.int32, ndim=1)
+
+  # spatial tendon
+  tendon_site_adr = []
+  tendon_site_pair_adr = []
+  ten_wrapadr_site = [0]
+  ten_wrapnum_site = []
+  for i, tendon_num in enumerate(mjm.tendon_num):
+    adr = mjm.tendon_adr[i]
+    if (mjm.wrap_type[adr : adr + tendon_num] == mujoco.mjtWrap.mjWRAP_SITE).all():
+      if i < mjm.ntendon:
+        ten_wrapadr_site.append(ten_wrapadr_site[-1] + tendon_num)
+      ten_wrapnum_site.append(tendon_num)
+      for j in range(tendon_num):
+        if j < tendon_num - 1:
+          tendon_site_pair_adr.append(i)
+        tendon_site_adr.append(i)
+    else:
+      if i < mjm.ntendon:
+        ten_wrapadr_site.append(ten_wrapadr_site[-1])
+      ten_wrapnum_site.append(0)
+
+  tendon_site_adr = np.array(tendon_site_adr)
+  tendon_site_pair_adr = np.array(tendon_site_pair_adr)
+  wrap_site_adr = np.nonzero(mjm.wrap_type == mujoco.mjtWrap.mjWRAP_SITE)[0]
+  wrap_site_pair_adr = np.setdiff1d(
+    wrap_site_adr[np.nonzero(np.diff(wrap_site_adr) == 1)[0]], mjm.tendon_adr[1:] - 1
+  )
+
+  m.tendon_site_adr = wp.array(tendon_site_adr, dtype=wp.int32, ndim=1)
+  m.tendon_site_pair_adr = wp.array(tendon_site_pair_adr, dtype=wp.int32, ndim=1)
+  m.ten_wrapadr_site = wp.array(ten_wrapadr_site, dtype=wp.int32, ndim=1)
+  m.ten_wrapnum_site = wp.array(ten_wrapnum_site, dtype=wp.int32, ndim=1)
+  m.wrap_site_adr = wp.array(wrap_site_adr, dtype=wp.int32, ndim=1)
+  m.wrap_site_pair_adr = wp.array(wrap_site_pair_adr, dtype=wp.int32, ndim=1)
 
   # sensors
   m.sensor_type = wp.array(mjm.sensor_type, dtype=wp.int32, ndim=1)
@@ -568,10 +613,26 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
     ndim=1,
   )
 
+  m.sensor_subtree_vel = np.isin(
+    mjm.sensor_type,
+    [mujoco.mjtSensor.mjSENS_SUBTREELINVEL, mujoco.mjtSensor.mjSENS_SUBTREEANGMOM],
+  ).any()
+  m.sensor_rne_postconstraint = np.isin(
+    mjm.sensor_type,
+    [
+      mujoco.mjtSensor.mjSENS_ACCELEROMETER,
+      mujoco.mjtSensor.mjSENS_FORCE,
+      mujoco.mjtSensor.mjSENS_TORQUE,
+      mujoco.mjtSensor.mjSENS_FRAMELINACC,
+      mujoco.mjtSensor.mjSENS_FRAMEANGACC,
+    ],
+  ).any()
   return m
 
 
-def _constraint(mjm: mujoco.MjModel, nworld: int, njmax: int) -> types.Constraint:
+def _constraint(
+  mjm: mujoco.MjModel, nworld: int, nconmax: int, njmax: int
+) -> types.Constraint:
   efc = types.Constraint()
 
   efc.J = wp.zeros((njmax, mjm.nv), dtype=wp.float32)
@@ -582,6 +643,7 @@ def _constraint(mjm: mujoco.MjModel, nworld: int, njmax: int) -> types.Constrain
   efc.force = wp.zeros((njmax,), dtype=wp.float32)
   efc.margin = wp.zeros((njmax,), dtype=wp.float32)
   efc.worldid = wp.zeros((njmax,), dtype=wp.int32)
+  efc.id = wp.zeros((njmax,), dtype=wp.int32)
 
   efc.Jaref = wp.empty(shape=(njmax,), dtype=wp.float32)
   efc.Ma = wp.empty(shape=(nworld, mjm.nv), dtype=wp.float32)
@@ -627,6 +689,13 @@ def _constraint(mjm: mujoco.MjModel, nworld: int, njmax: int) -> types.Constrain
     shape=(nworld, mjm.opt.ls_iterations), dtype=wp.vec3f
   )
 
+  # TODO(team): skip allocation if not elliptic?
+  efc.u = wp.empty((nconmax, 6), dtype=wp.float32)
+  efc.uu = wp.empty((nconmax,), dtype=wp.float32)
+  efc.uv = wp.empty((nconmax,), dtype=wp.float32)
+  efc.vv = wp.empty((nconmax,), dtype=wp.float32)
+  efc.condim = wp.empty((njmax,), dtype=wp.int32)
+
   return efc
 
 
@@ -639,21 +708,24 @@ def make_data(
   # TODO(team): move to Model?
   if nconmax == -1:
     # TODO(team): heuristic for nconmax
-    nconmax = 512
+    nconmax = nworld * 20
   d.nconmax = nconmax
   if njmax == -1:
     # TODO(team): heuristic for njmax
-    njmax = 512
+    njmax = nworld * 20 * 6
   d.njmax = njmax
 
   d.ncon = wp.zeros(1, dtype=wp.int32)
   d.ne = wp.zeros(1, dtype=wp.int32, ndim=1)
+  d.ne_connect = wp.zeros(1, dtype=wp.int32, ndim=1)
+  d.ne_weld = wp.zeros(1, dtype=wp.int32, ndim=1)
+  d.ne_jnt = wp.zeros(1, dtype=wp.int32, ndim=1)
   d.nefc = wp.zeros(1, dtype=wp.int32, ndim=1)
   d.ne = wp.zeros(1, dtype=wp.int32)
   d.nf = wp.zeros(1, dtype=wp.int32)
   d.nl = wp.zeros(1, dtype=wp.int32)
 
-  d.time = 0.0
+  d.time = wp.zeros(nworld, dtype=wp.float32, ndim=1)
 
   qpos0 = np.tile(mjm.qpos0, (nworld, 1))
   d.qpos = wp.array(qpos0, dtype=wp.float32, ndim=2)
@@ -713,7 +785,7 @@ def make_data(
   d.contact.geom = wp.zeros((nconmax,), dtype=wp.vec2i)
   d.contact.efc_address = wp.zeros((nconmax, np.max(mjm.geom_condim)), dtype=wp.int32)
   d.contact.worldid = wp.zeros((nconmax,), dtype=wp.int32)
-  d.efc = _constraint(mjm, d.nworld, d.njmax)
+  d.efc = _constraint(mjm, d.nworld, d.nconmax, d.njmax)
   d.qfrc_passive = wp.zeros((nworld, mjm.nv), dtype=wp.float32)
   d.subtree_linvel = wp.zeros((nworld, mjm.nbody), dtype=wp.vec3)
   d.subtree_angmom = wp.zeros((nworld, mjm.nbody), dtype=wp.vec3)
@@ -742,7 +814,6 @@ def make_data(
   d.act_dot_rk = wp.zeros((nworld, mjm.na), dtype=wp.float32)
 
   # sweep-and-prune broadphase
-  d.sap_geom_sort = wp.zeros((nworld, mjm.ngeom), dtype=wp.vec4)
   d.sap_projection_lower = wp.zeros((2 * nworld, mjm.ngeom), dtype=wp.float32)
   d.sap_projection_upper = wp.zeros((nworld, mjm.ngeom), dtype=wp.float32)
   d.sap_sort_index = wp.zeros((2 * nworld, mjm.ngeom), dtype=wp.int32)
@@ -765,6 +836,12 @@ def make_data(
   # tendon
   d.ten_length = wp.zeros((nworld, mjm.ntendon), dtype=wp.float32, ndim=2)
   d.ten_J = wp.zeros((nworld, mjm.ntendon, mjm.nv), dtype=wp.float32, ndim=3)
+  d.ten_wrapadr = wp.zeros((nworld, mjm.ntendon), dtype=wp.int32, ndim=2)
+  d.ten_wrapnum = wp.zeros((nworld, mjm.ntendon), dtype=wp.int32, ndim=2)
+  d.wrap_obj = wp.zeros((nworld, mjm.nwrap), dtype=wp.vec2i, ndim=2)
+  d.wrap_xpos = wp.zeros(
+    (nworld, mjm.nwrap), dtype=wp.spatial_vector, ndim=2
+  )  # TODO(team): vec6?
 
   # sensors
   d.sensordata = wp.zeros((nworld, mjm.nsensordata), dtype=wp.float32)
@@ -780,6 +857,8 @@ def put_data(
   njmax: Optional[int] = None,
 ) -> types.Data:
   d = types.Data()
+
+  # TODO(team): confirm that Data is set correctly for solver with elliptic friction cones
 
   nworld = nworld or 1
   # TODO(team): better heuristic for nconmax
@@ -809,10 +888,26 @@ def put_data(
 
   d.ncon = wp.array([mjd.ncon * nworld], dtype=wp.int32, ndim=1)
   d.ne = wp.array([mjd.ne * nworld], dtype=wp.int32, ndim=1)
+  d.ne_connect = wp.array(
+    [3 * np.sum((mjm.eq_type == mujoco.mjtEq.mjEQ_CONNECT) & mjd.eq_active) * nworld],
+    dtype=wp.int32,
+    ndim=1,
+  )
+  d.ne_weld = wp.array(
+    [6 * np.sum((mjm.eq_type == mujoco.mjtEq.mjEQ_WELD) & mjd.eq_active) * nworld],
+    dtype=wp.int32,
+    ndim=1,
+  )
+  d.ne_jnt = wp.array(
+    [np.sum((mjm.eq_type == mujoco.mjtEq.mjEQ_JOINT) & mjd.eq_active) * nworld],
+    dtype=wp.int32,
+    ndim=1,
+  )
   d.nf = wp.array([mjd.nf * nworld], dtype=wp.int32, ndim=1)
   d.nl = wp.array([mjd.nl * nworld], dtype=wp.int32, ndim=1)
   d.nefc = wp.array([mjd.nefc * nworld], dtype=wp.int32, ndim=1)
-  d.time = mjd.time
+
+  d.time = wp.array(mjd.time * np.ones(nworld), dtype=wp.float32, ndim=1)
 
   # TODO(erikfrey): would it be better to tile on the gpu?
   def tile(x):
@@ -921,6 +1016,9 @@ def put_data(
   efc_margin_fill = np.concatenate(
     [np.repeat(mjd.efc_margin, nworld, axis=0), np.zeros(nefc_fill)]
   )
+  efc_id_fill = np.concatenate(
+    [np.repeat(mjd.efc_id, nworld, axis=0), np.zeros(nefc_fill)]
+  )
 
   ncon = mjd.ncon
   condim_max = np.max(mjm.geom_condim)
@@ -982,7 +1080,7 @@ def put_data(
   d.contact.efc_address = wp.array(con_efc_address_fill, dtype=wp.int32, ndim=2)
   d.contact.worldid = wp.array(con_worldid, dtype=wp.int32, ndim=1)
 
-  d.efc = _constraint(mjm, d.nworld, d.njmax)
+  d.efc = _constraint(mjm, d.nworld, d.nconmax, d.njmax)
   d.efc.J = wp.array(efc_J_fill, dtype=wp.float32, ndim=2)
   d.efc.D = wp.array(efc_D_fill, dtype=wp.float32, ndim=1)
   d.efc.pos = wp.array(efc_pos_fill, dtype=wp.float32, ndim=1)
@@ -991,6 +1089,7 @@ def put_data(
   d.efc.force = wp.array(efc_force_fill, dtype=wp.float32, ndim=1)
   d.efc.margin = wp.array(efc_margin_fill, dtype=wp.float32, ndim=1)
   d.efc.worldid = wp.from_numpy(efc_worldid, dtype=wp.int32)
+  d.efc.id = wp.from_numpy(efc_id_fill, dtype=wp.int32)
 
   d.xfrc_applied = wp.array(tile(mjd.xfrc_applied), dtype=wp.spatial_vector, ndim=2)
   d.eq_active = wp.array(tile(mjm.eq_active0), dtype=wp.bool, ndim=2)
@@ -1010,14 +1109,12 @@ def put_data(
   d.act_dot_rk = wp.zeros((nworld, mjm.na), dtype=wp.float32)
 
   # broadphase sweep and prune
-  d.sap_geom_sort = wp.zeros((nworld, mjm.ngeom), dtype=wp.vec4)
   d.sap_projection_lower = wp.zeros((2 * nworld, mjm.ngeom), dtype=wp.float32)
   d.sap_projection_upper = wp.zeros((nworld, mjm.ngeom), dtype=wp.float32)
   d.sap_sort_index = wp.zeros((2 * nworld, mjm.ngeom), dtype=wp.int32)
   d.sap_range = wp.zeros((nworld, mjm.ngeom), dtype=wp.int32)
   d.sap_cumulative_sum = wp.zeros(nworld * mjm.ngeom, dtype=wp.int32)
-  segment_indices_list = [i * mjm.ngeom for i in range(nworld + 1)]
-  d.sap_segment_index = wp.array(segment_indices_list, dtype=int)
+  d.sap_segment_index = wp.array([i * mjm.ngeom for i in range(nworld + 1)], dtype=int)
 
   # collision driver
   d.collision_pair = wp.empty(nconmax, dtype=wp.vec2i, ndim=1)
@@ -1036,12 +1133,23 @@ def put_data(
   if support.is_sparse(mjm) and mjm.ntendon:
     ten_J = np.zeros((mjm.ntendon, mjm.nv))
     mujoco.mju_sparse2dense(
-      ten_J, mjd.ten_J, mjd.ten_J_rownnz, mjd.ten_J_rowadr, mjd.ten_J_colind
+      ten_J,
+      mjd.ten_J.reshape(-1),
+      mjd.ten_J_rownnz,
+      mjd.ten_J_rowadr,
+      mjd.ten_J_colind.reshape(-1),
     )
   else:
     ten_J = mjd.ten_J.reshape((mjm.ntendon, mjm.nv))
 
   d.ten_J = wp.array(tile(ten_J), dtype=wp.float32, ndim=3)
+
+  d.ten_wrapadr = wp.array(tile(mjd.ten_wrapadr), dtype=wp.int32, ndim=2)
+  d.ten_wrapnum = wp.array(tile(mjd.ten_wrapnum), dtype=wp.int32, ndim=2)
+  d.wrap_obj = wp.array(tile(mjd.wrap_obj), dtype=wp.vec2i, ndim=2)
+  d.wrap_xpos = wp.array(
+    tile(mjd.wrap_xpos), dtype=wp.spatial_vector, ndim=2
+  )  # TODO(team): vec6?
 
   # sensors
   d.sensordata = wp.array(tile(mjd.sensordata), dtype=wp.float32, ndim=2)
@@ -1064,7 +1172,7 @@ def get_data_into(
   if ncon != result.ncon or nefc != result.nefc:
     mujoco._functions._realloc_con_efc(result, ncon=ncon, nefc=nefc)
 
-  result.time = d.time
+  result.time = d.time.numpy()[0]
   result.ne = d.ne.numpy()[0]
   result.qpos[:] = d.qpos.numpy()[0]
   result.qvel[:] = d.qvel.numpy()[0]
@@ -1166,6 +1274,14 @@ def get_data_into(
   result.cfrc_ext[:] = d.cfrc_ext.numpy()[0]
 
   # TODO: other efc_ fields, anything else missing
+
+  # tendon
+  result.ten_length[:] = d.ten_length.numpy()[0]
+  result.ten_J[:] = d.ten_J.numpy()[0]
+  result.ten_wrapadr[:] = d.ten_wrapadr.numpy()[0]
+  result.ten_wrapnum[:] = d.ten_wrapnum.numpy()[0]
+  result.wrap_obj[:] = d.wrap_obj.numpy()[0]
+  result.wrap_xpos[:] = d.wrap_xpos.numpy()[0]
 
   # sensors
   result.sensordata[:] = d.sensordata.numpy()

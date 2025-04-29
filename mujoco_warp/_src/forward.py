@@ -38,7 +38,6 @@ from .types import array2df
 from .types import array3df
 from .warp_util import event_scope
 from .warp_util import kernel
-from .warp_util import kernel_copy
 
 wp.set_module_options({"enable_backward": False})
 
@@ -160,6 +159,11 @@ def _advance(m: Model, d: Data, qacc: wp.array, qvel: Optional[wp.array] = None)
     worldid, jntid = wp.tid()
     _integrate_pos(worldid, jntid, m, d.qpos, d.qpos, qvel_in)
 
+  @kernel
+  def _time(m: Model, d: Data):
+    worldid = wp.tid()
+    d.time[worldid] += m.opt.timestep
+
   # advance activations
   if m.na:
     _next_activation(m, d)
@@ -174,7 +178,7 @@ def _advance(m: Model, d: Data, qacc: wp.array, qvel: Optional[wp.array] = None)
 
   wp.launch(integrate_joint_positions, dim=(d.nworld, m.njnt), inputs=[m, d, qvel_in])
 
-  d.time = d.time + m.opt.timestep
+  wp.launch(_time, dim=(d.nworld,), inputs=[m, d])
 
 
 @event_scope
@@ -195,7 +199,7 @@ def euler(m: Model, d: Data):
         d.qfrc_smooth[worldid, tid] + d.qfrc_constraint[worldid, tid]
       )
 
-    kernel_copy(d.qM_integration, d.qM)
+    wp.copy(d.qM_integration, d.qM)
     wp.launch(add_damping_sum_qfrc_kernel_sparse, dim=(d.nworld, m.nv), inputs=[m, d])
     smooth.factor_solve_i(
       m,
@@ -261,10 +265,10 @@ def euler(m: Model, d: Data):
 def rungekutta4(m: Model, d: Data):
   """Runge-Kutta explicit order 4 integrator."""
 
-  kernel_copy(d.qpos_t0, d.qpos)
-  kernel_copy(d.qvel_t0, d.qvel)
+  wp.copy(d.qpos_t0, d.qpos)
+  wp.copy(d.qvel_t0, d.qvel)
   if m.na:
-    kernel_copy(d.act_t0, d.act)
+    wp.copy(d.act_t0, d.act)
 
   A, B = _RK4_A, _RK4_B
 
@@ -322,11 +326,11 @@ def rungekutta4(m: Model, d: Data):
     forward(m, d)
     rk_accumulate(d, b)
 
-  kernel_copy(d.qpos, d.qpos_t0)
-  kernel_copy(d.qvel, d.qvel_t0)
+  wp.copy(d.qpos, d.qpos_t0)
+  wp.copy(d.qvel, d.qvel_t0)
   if m.na:
-    kernel_copy(d.act, d.act_t0)
-    kernel_copy(d.act_dot, d.act_dot_rk)
+    wp.copy(d.act, d.act_t0)
+    wp.copy(d.act_dot, d.act_dot_rk)
   _advance(m, d, d.qacc_rk, d.qvel_rk)
 
 
@@ -814,7 +818,7 @@ def forward(m: Model, d: Data):
   sensor.sensor_acc(m, d)
 
   if d.njmax == 0:
-    kernel_copy(d.qacc, d.qacc_smooth)
+    wp.copy(d.qacc, d.qacc_smooth)
   else:
     solver.solve(m, d)
 
