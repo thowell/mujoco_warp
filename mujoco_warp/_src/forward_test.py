@@ -147,6 +147,16 @@ class ForwardTest(parameterized.TestCase):
     _assert_eq(d.time.numpy()[0], mjd.time, "time")
     _assert_eq(d.xpos.numpy()[0], mjd.xpos, "xpos")
 
+    # test rungekutta determinism
+    def rk_step() -> wp.array(dtype=wp.float32, ndim=2):
+      d.qpos = wp.ones_like(d.qpos)
+      d.qvel = wp.ones_like(d.qvel)
+      d.act = wp.ones_like(d.act)
+      mjwarp.rungekutta4(m, d)
+      return d.qpos
+
+    _assert_eq(rk_step().numpy()[0], rk_step().numpy()[0], "qpos")
+
 
 class ImplicitIntegratorTest(parameterized.TestCase):
   @parameterized.parameters(
