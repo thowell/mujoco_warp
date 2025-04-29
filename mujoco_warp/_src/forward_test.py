@@ -25,8 +25,6 @@ import mujoco_warp as mjwarp
 
 from . import test_util
 
-wp.config.verify_cuda = True
-
 # tolerance for difference between MuJoCo and mjwarp smooth calculations - mostly
 # due to float precision
 _TOLERANCE = 5e-5
@@ -146,6 +144,18 @@ class ForwardTest(parameterized.TestCase):
     _assert_eq(d.act.numpy()[0], mjd.act, "act")
     _assert_eq(d.time.numpy()[0], mjd.time, "time")
     _assert_eq(d.xpos.numpy()[0], mjd.xpos, "xpos")
+
+  def test_graph_capture(self):
+    # TODO(team): pytest flag for wp.config.verify_cuda
+    if wp.get_device().is_cuda and wp.config.verify_cuda == False:
+      _, _, m, d = test_util.fixture("humanoid/humanoid.xml")
+
+      with wp.ScopedCapture() as capture:
+        mjwarp.step(m, d)
+
+      wp.capture_launch(capture.graph)
+
+      self.assertTrue(d.time.numpy()[0] > 0.0)
 
 
 class ImplicitIntegratorTest(parameterized.TestCase):
