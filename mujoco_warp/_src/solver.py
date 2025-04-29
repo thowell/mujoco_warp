@@ -1304,7 +1304,7 @@ def _linesearch_parallel(m: types.Model, d: types.Data):
     jv = d.efc.jv[efcid]
     quad = d.efc.quad[efcid]
 
-    alpha = m.alpha_candidate[alphaid]
+    alpha = alphaid / (m.nlsp - 1)
 
     if (Jaref + alpha * jv) < 0.0 or (efcid < d.ne[0] + d.nf[0]):
       wp.atomic_add(d.efc.quad_total_candidate[worldid], alphaid, quad)
@@ -1318,7 +1318,7 @@ def _linesearch_parallel(m: types.Model, d: types.Data):
       if d.efc.done[worldid]:
         return
 
-    alpha = m.alpha_candidate[alphaid]
+    alpha = alphaid / (m.nlsp - 1)
     alpha_sq = alpha * alpha
     quad_total0 = d.efc.quad_total_candidate[worldid, alphaid][0]
     quad_total1 = d.efc.quad_total_candidate[worldid, alphaid][1]
@@ -1338,7 +1338,7 @@ def _linesearch_parallel(m: types.Model, d: types.Data):
 
     # TODO(team): investigate alternatives to wp.argmin
     bestid = wp.argmin(d.efc.cost_candidate[worldid])
-    d.efc.alpha[worldid] = m.alpha_candidate[bestid]
+    d.efc.alpha[worldid] = bestid / (m.nlsp - 1)
 
   wp.launch(_quad_total, dim=(d.nworld, m.nlsp), inputs=[m, d])
 
