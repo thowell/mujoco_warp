@@ -182,7 +182,7 @@ class ForwardTest(parameterized.TestCase):
       d.act = wp.ones_like(d.act)
       mjwarp.rungekutta4(m, d)
       return d.qpos
-  
+
     _assert_eq(rk_step().numpy()[0], rk_step().numpy()[0], "qpos")
 
 
