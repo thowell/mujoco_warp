@@ -24,9 +24,9 @@ from absl.testing import parameterized
 import mujoco_warp as mjwarp
 
 from . import test_util
+from .types import BiasType
 from .types import DisableBit
 from .types import GainType
-from .types import BiasType
 from .types import IntegratorType
 
 wp.config.verify_cuda = True
