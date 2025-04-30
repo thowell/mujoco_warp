@@ -239,6 +239,7 @@ class SensorType(enum.IntEnum):
   """Type of sensor.
 
   Members:
+    CAMPROJECTION: camera projection
     JOINTPOS: joint position
     TENDONPOS: scalar tendon position
     ACTUATORPOS: actuator position
@@ -269,6 +270,7 @@ class SensorType(enum.IntEnum):
     FRAMEANGACC: 3D angular acceleration
   """
 
+  CAMPROJECTION = mujoco.mjtSensor.mjSENS_CAMPROJECTION
   JOINTPOS = mujoco.mjtSensor.mjSENS_JOINTPOS
   TENDONPOS = mujoco.mjtSensor.mjSENS_TENDONPOS
   ACTUATORPOS = mujoco.mjtSensor.mjSENS_ACTUATORPOS
@@ -668,7 +670,11 @@ class Model:
     cam_pos: position rel. to body frame                     (ncam, 3)
     cam_quat: orientation rel. to body frame                 (ncam, 4)
     cam_poscom0: global position rel. to sub-com in qpos0    (ncam, 3)
-    cam_pos0: Cartesian camera position                      (nworld, ncam, 3)
+    cam_pos0: Cartesian camera position                      (ncam, 3)
+    cam_fovy: y field-of-view (ortho ? len : deg)            (ncam,)
+    cam_resolution: resolution: pixels [width, height]       (ncam, 2)
+    cam_sensorsize: sensor size: length [width, height]      (ncam, 2)
+    cam_intrinsic: [focal length; principal point]           (ncam, 4)
     light_mode: light tracking mode (mjtCamLight)            (nlight,)
     light_bodyid: id of light's body                         (nlight,)
     light_targetbodyid: id of targeted body; -1: none        (nlight,)
@@ -885,6 +891,10 @@ class Model:
   cam_quat: wp.array(dtype=wp.quat, ndim=1)
   cam_poscom0: wp.array(dtype=wp.vec3, ndim=1)
   cam_pos0: wp.array(dtype=wp.vec3, ndim=1)
+  cam_fovy: wp.array(dtype=wp.float32, ndim=1)
+  cam_resolution: wp.array(dtype=wp.vec2i, ndim=1)
+  cam_sensorsize: wp.array(dtype=wp.vec2f, ndim=1)
+  cam_intrinsic: wp.array(dtype=wp.vec4f, ndim=1)
   light_mode: wp.array(dtype=wp.int32, ndim=1)
   light_bodyid: wp.array(dtype=wp.int32, ndim=1)
   light_targetbodyid: wp.array(dtype=wp.int32, ndim=1)

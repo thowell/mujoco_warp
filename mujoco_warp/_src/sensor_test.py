@@ -96,11 +96,15 @@ class SensorTest(parameterized.TestCase):
               <site name="site9" pos=".2 .4 .6"/>        
             </body>
           </body>
+          <camera name="camera"/>
+          <site name="camera_site" pos="0 0 -1"/>
         </worldbody>
         <actuator>
           <motor name="slide" joint="slide"/>
         </actuator>
         <sensor>
+          <camprojection camera="camera" site="camera_site"/>
+          <camprojection camera="camera" site="camera_site" cutoff=".001"/>
           <jointpos joint="slide"/>
           <jointpos joint="slide" cutoff=".001"/>
           <actuatorpos actuator="slide"/>
