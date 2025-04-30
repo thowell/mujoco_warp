@@ -15,6 +15,7 @@
 
 """Run kitchen benchmarks with various robots."""
 
+import subprocess
 import inspect
 from typing import Sequence
 
@@ -25,11 +26,20 @@ import warp as wp
 from absl import app
 from absl import flags
 from etils import epath
+import tqdm
 import os
 
 import mujoco_warp as mjwarp
 
+# The script path to get correct xml and mesh path
 _SCRIPT_DIR = os.path.dirname(os.path.realpath(__file__))
+# Base directory for external dependencies.
+_EXTERNAL_DEPS_PATH = epath.Path(__file__).parent.parent / "external_deps"
+# The menagerie path is used to load robot assets.
+# Resource paths do not have glob implemented, so we use a bare epath.Path.
+_MENAGERIE_PATH = _EXTERNAL_DEPS_PATH / "mujoco_menagerie"
+# Commit SHA of the menagerie repo.
+_MENAGERIE_COMMIT_SHA = "14ceccf557cc47240202f2354d684eca58ff8de4"
 
 _FUNCTION = flags.DEFINE_enum(
   "function",
@@ -38,7 +48,19 @@ _FUNCTION = flags.DEFINE_enum(
   "the function to run",
 )
 _ROBOT = flags.DEFINE_enum(
-  "robot", "franka", ["franka"], "the robot to use",
+  "robot", "mujoco_humanoid",
+  [
+    # Robotic arms
+    "panda", "fr3", "google_robot", "gen3", "iiwa_14", "tiago", "sawyer",
+    "vx300", "arm100", "lite6", "xarm7", "z1", "ur10e", "ur5e",
+    # Humanoids
+    "mujoco_humanoid", "berkeley_humanoid", "t1", "h1", "g1", "talos", "op3",
+    # Quadrupedal
+    "spot", "anymal_b", "anymal_c", "barkour_v0", "a1", "go1", "go2",
+    # Bipedal
+    "cassie",
+  ],
+  "the robot to use",
 )
 _NSTEP = flags.DEFINE_integer("nstep", 1000, "number of steps per rollout")
 _BATCH_SIZE = flags.DEFINE_integer("batch_size", 8192, "number of parallel rollouts")
@@ -81,9 +103,71 @@ def _main(argv: Sequence[str]):
   """Runs testpeed function."""
   wp.init()
 
+  ## Processing the selected robot
+  match _ROBOT.value:
+    case "panda":
+      robot_path = _load_from_menagerie("franka_emika_panda/panda.xml")
+    case "fr3":
+      robot_path = _load_from_menagerie("franka_fr3/fr3.xml")
+    case "google_robot":
+      robot_path = _load_from_menagerie("google_robot/robot.xml")
+    case "gen3":
+      robot_path = _load_from_menagerie("kinova_gen3/gen3.xml")
+    case "iiwa_14":
+      robot_path = _load_from_menagerie("kuka_iiwa_14/iiwa14.xml")
+    case "tiago":
+      robot_path = _load_from_menagerie("pal_tiago/tiago.xml")
+    case "sawyer":
+      robot_path = _load_from_menagerie("rethink_robotics_sawyer/sawyer.xml")
+    case "vx300":
+      robot_path = _load_from_menagerie("trossen_vx300s/vx300s.xml")
+    case "arm100":
+      robot_path = _load_from_menagerie("trs_so_arm100/so_arm100.xml")
+    case "lite6":
+      robot_path = _load_from_menagerie("ufactory_lite6/lite6.xml")
+    case "xarm7":
+      robot_path = _load_from_menagerie("ufactory_xarm7/xarm7.xml")
+    case "z1":
+      robot_path = _load_from_menagerie("unitree_z1/z1.xml")
+    case "ur10e":
+      robot_path = _load_from_menagerie("universal_robots_ur10e/ur10e.xml")
+    case "ur5e":
+      robot_path = _load_from_menagerie("universal_robots_ur5e/ur5e.xml")
+    case "mujoco_humanoid":
+      robot_path = epath.Path(_SCRIPT_DIR + "/../humanoid/humanoid.xml")
+    case "berkeley_humanoid":
+      robot_path = _load_from_menagerie("berkeley_humanoid/berkeley_humanoid.xml")
+    case "t1":
+      robot_path = _load_from_menagerie("booster_t1/t1.xml")
+    case "h1":
+      robot_path = _load_from_menagerie("unitree_h1/h1.xml")
+    case "g1":
+      robot_path = _load_from_menagerie("unitree_g1/g1.xml")
+    case "talos":
+      robot_path = _load_from_menagerie("pal_talos/talos.xml")
+    case "op3":
+      robot_path = _load_from_menagerie("robotis_op3/op3.xml")
+    case "spot":
+      robot_path = _load_from_menagerie("boston_dynamics_spot/spot.xml")
+    case "anymal_b":
+      robot_path = _load_from_menagerie("anybotics_anymal_b/anymal_b.xml")
+    case "anymal_c":
+      robot_path = _load_from_menagerie("anybotics_anymal_c/anymal_c.xml")
+    case "barkour_v0":
+      robot_path = _load_from_menagerie("google_barkour_v0/barkour_v0.xml")
+    case "a1":
+      robot_path = _load_from_menagerie("unitree_a1/a1.xml")
+    case "go1":
+      robot_path = _load_from_menagerie("unitree_go1/go1.xml")
+    case "go2":
+      robot_path = _load_from_menagerie("unitree_go2/go2.xml")
+    case "cassie":
+      robot_path = _load_from_menagerie("agility_cassie/cassie.xml")
+    case _:
+      raise FileNotFoundError(f"Robot provided is unknown.")
+
   ## Verifying that the two xml models exist
-  kitchen_path = epath.Path("kitchen_env.xml")
-  robot_path = epath.Path("../humanoid/humanoid.xml")
+  kitchen_path = epath.Path(_SCRIPT_DIR + "/kitchen_env.xml")
   if not kitchen_path.exists():
     raise FileNotFoundError(f"kitchen_env.xml not found.")
   if not robot_path.exists():
@@ -93,24 +177,56 @@ def _main(argv: Sequence[str]):
   # Loading the robot first to not have issue with freeejoint
   mjcf_model = mjcf.from_path(robot_path)
   env_model = mjcf.from_path(kitchen_path)
+  # Modify position of the robot
+  initial_pose = mjcf_model.worldbody.body[0]._get_attribute("pos")
+  if initial_pose is None:
+    initial_pose = [0.0, 0.0, 0.0]
+  mjcf_model.worldbody.body[0]._set_attribute("pos", [1.5, -1.5, initial_pose[2]])
+  # Attach the kitchen environment
   mjcf_model.attach(env_model)
-  xml_string = mjcf_model.to_xml_string()
+  xml_string = mjcf_model.to_xml_string(filename_with_hash=False)
 
-  ## Post-processing to add proper mesh path
-  original_model = mujoco.MjSpec.from_file(kitchen_path.as_posix())
-  # For each mesh in the original model, search the file attribute and replace it by the
+  ## Post-processing to add proper asset path
+  # For each mesh in the original kitchen, search the file attribute and replace it by the
   # path from the original model.
+  original_model = mujoco.MjSpec.from_file(kitchen_path.as_posix())
   for i in range(len(original_model.meshes)):
-      updated_path = _SCRIPT_DIR + "/assets/" + original_model.meshes[i].file
-      start_mesh_string = xml_string.find(original_model.meshes[i].name)
-      start_file_string = xml_string.find("file", start_mesh_string) + 6
-      end_file_string = xml_string.find('"', start_file_string)
+    updated_path = _SCRIPT_DIR + "/assets/" + original_model.meshes[i].file
+    start_mesh_string = xml_string.find(original_model.meshes[i].name)
+    start_file_string = xml_string.find("file", start_mesh_string) + 6
+    end_file_string = xml_string.find('"', start_file_string)
+    xml_string = xml_string[:start_file_string] + updated_path + xml_string[end_file_string:]
+  # For each mesh in the original robot model, search the file attribute and replace it by the
+  # path from the original model.
+  original_model = mujoco.MjSpec.from_file(robot_path.as_posix())
+  for i in range(len(original_model.meshes)):
+    if original_model.meshes[i].file == "":
+      continue
+    updated_path = str(robot_path.parent) + "/assets/" + original_model.meshes[i].file
+    start_mesh_section = xml_string.find("<mesh")
+    search_string = original_model.meshes[i].file.split("/")[-1]
+    start_file_string = xml_string.find('file="' + search_string, start_mesh_section) + 6
+    end_file_string = xml_string.find('"', start_file_string)
+    xml_string = xml_string[:start_file_string] + updated_path + xml_string[end_file_string:]
+
+  # Same process for textures
+  for i in range(len(original_model.textures)):
+    if original_model.textures[i].file == "":
+        continue
+    updated_path = str(robot_path.parent) + "/assets/" + original_model.textures[i].file
+    start_texture_section = xml_string.find("<texture")
+    search_string = original_model.textures[i].file.split("/")[-1]
+    start_file_string = xml_string.find('file="' + search_string, start_texture_section) + 6
+    end_texture_string = xml_string.find("/>", start_file_string)
+    end_file_string = xml_string.find('"', start_file_string)
+    if end_file_string <= end_texture_string:
       xml_string = xml_string[:start_file_string] + updated_path + xml_string[end_file_string:]
 
   ## Post-processing to remove keyframes
   start_keyframe_string = xml_string.find("<keyframe>")
   end_keyframe_string = xml_string.find("</keyframe>", start_keyframe_string) + 11
-  xml_string = xml_string[:start_keyframe_string] + xml_string[end_keyframe_string:]
+  if start_keyframe_string > 1:
+    xml_string = xml_string[:start_keyframe_string] + xml_string[end_keyframe_string:]
 
   ## Creating the mujoco model and adjusting its properties
   mjm = mujoco.MjModel.from_xml_string(xml_string)
@@ -231,6 +347,82 @@ Summary for {_BATCH_SIZE.value} parallel rollouts
   elif _OUTPUT.value == "tsv":
     name = name.split("/")[-1].replace("testspeed_", "")
     print(f"{name}\tjit: {jit_time:.2f}s\tsteps/second: {steps / run_time:.0f}")
+
+
+def _load_from_menagerie(asset_path: str) -> str:
+  """Load an asset from the mujoco menagerie."""
+  # Ensure menagerie exists, and otherwise clone it
+  _ensure_menagerie_exists()
+  return _MENAGERIE_PATH / asset_path
+
+
+def _ensure_menagerie_exists() -> None:
+  """Ensure mujoco_menagerie exists, downloading it if necessary."""
+  if not _MENAGERIE_PATH.exists():
+    print("mujoco_menagerie not found. Downloading...")
+
+    # Create external deps directory if it doesn't exist
+    _EXTERNAL_DEPS_PATH.mkdir(exist_ok=True, parents=True)
+
+    try:
+      _clone_with_progress(
+          "https://github.com/deepmind/mujoco_menagerie.git",
+          str(_MENAGERIE_PATH),
+          _MENAGERIE_COMMIT_SHA,
+      )
+      print("Successfully downloaded mujoco_menagerie")
+    except subprocess.CalledProcessError as e:
+      print(f"Error downloading mujoco_menagerie: {e}", file=sys.stderr)
+      raise
+
+
+def _clone_with_progress(
+    repo_url: str, target_path: str, commit_sha: str
+) -> None:
+  """Clone a git repo with progress bar."""
+  process = subprocess.Popen(
+      ["git", "clone", "--progress", repo_url, target_path],
+      stdout=subprocess.PIPE,
+      stderr=subprocess.PIPE,
+      universal_newlines=True,
+  )
+
+  with tqdm.tqdm(
+      desc="Cloning mujoco_menagerie",
+      bar_format="{desc}: {bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}]",
+  ) as pbar:
+    pbar.total = 100  # Set to 100 for percentage-based progress.
+    current = 0
+    while True:
+      # Read output line by line.
+      output = process.stderr.readline()  # pytype: disable=attribute-error
+      if not output and process.poll() is not None:
+        break
+      if output:
+        if "Receiving objects:" in output:
+          try:
+            percent = int(output.split("%")[0].split(":")[-1].strip())
+            if percent > current:
+              pbar.update(percent - current)
+              current = percent
+          except (ValueError, IndexError):
+            pass
+
+    # Ensure the progress bar reaches 100%.
+    if current < 100:
+      pbar.update(100 - current)
+
+  if process.returncode != 0:
+    raise subprocess.CalledProcessError(process.returncode, ["git", "clone"])
+
+  # Checkout specific commit.
+  print(f"Checking out commit {commit_sha}")
+  subprocess.run(
+      ["git", "-C", target_path, "checkout", commit_sha],
+      check=True,
+      stdout=subprocess.PIPE,
+      stderr=subprocess.PIPE,
+  )
 
 
 def main():
