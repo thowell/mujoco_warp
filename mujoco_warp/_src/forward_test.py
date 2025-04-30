@@ -208,9 +208,13 @@ class ForwardTest(parameterized.TestCase):
     _assert_eq(d.qpos.numpy()[0], mjd.qpos, "qpos")
     _assert_eq(d.act.numpy()[0], mjd.act, "act")
 
-  def test_graph_capture(self):
+  @parameterized.parameters(
+    "humanoid/humanoid.xml", "pendula.xml", "constraints.xml", "collision.xml"
+  )
+  def test_graph_capture(self, xml):
+    # TODO(team): test more environments
     if wp.get_device().is_cuda and wp.config.verify_cuda == False:
-      _, _, m, d = test_util.fixture("humanoid/humanoid.xml")
+      _, _, m, d = test_util.fixture(xml)
 
       with wp.ScopedCapture() as capture:
         mjwarp.step(m, d)
