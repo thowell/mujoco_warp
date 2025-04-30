@@ -33,11 +33,9 @@ import mujoco_warp as mjwarp
 
 # The script path to get correct xml and mesh path
 _SCRIPT_DIR = os.path.dirname(os.path.realpath(__file__))
-# Base directory for external dependencies.
-_EXTERNAL_DEPS_PATH = epath.Path(__file__).parent.parent / "external_deps"
 # The menagerie path is used to load robot assets.
 # Resource paths do not have glob implemented, so we use a bare epath.Path.
-_MENAGERIE_PATH = _EXTERNAL_DEPS_PATH / "mujoco_menagerie"
+_MENAGERIE_PATH = epath.Path(__file__).parent.parent / "mujoco_menagerie"
 # Commit SHA of the menagerie repo.
 _MENAGERIE_COMMIT_SHA = "14ceccf557cc47240202f2354d684eca58ff8de4"
 
@@ -360,9 +358,6 @@ def _ensure_menagerie_exists() -> None:
   """Ensure mujoco_menagerie exists, downloading it if necessary."""
   if not _MENAGERIE_PATH.exists():
     print("mujoco_menagerie not found. Downloading...")
-
-    # Create external deps directory if it doesn't exist
-    _EXTERNAL_DEPS_PATH.mkdir(exist_ok=True, parents=True)
 
     try:
       _clone_with_progress(
