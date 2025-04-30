@@ -29,8 +29,6 @@ from .types import DisableBit
 from .types import GainType
 from .types import IntegratorType
 
-wp.config.verify_cuda = True
-
 # tolerance for difference between MuJoCo and mjwarp smooth calculations - mostly
 # due to float precision
 _TOLERANCE = 5e-5
@@ -209,6 +207,21 @@ class ForwardTest(parameterized.TestCase):
 
     _assert_eq(d.qpos.numpy()[0], mjd.qpos, "qpos")
     _assert_eq(d.act.numpy()[0], mjd.act, "act")
+
+  @parameterized.parameters(
+    "humanoid/humanoid.xml", "pendula.xml", "constraints.xml", "collision.xml"
+  )
+  def test_graph_capture(self, xml):
+    # TODO(team): test more environments
+    if wp.get_device().is_cuda and wp.config.verify_cuda == False:
+      _, _, m, d = test_util.fixture(xml)
+
+      with wp.ScopedCapture() as capture:
+        mjwarp.step(m, d)
+
+      wp.capture_launch(capture.graph)
+
+      self.assertTrue(d.time.numpy()[0] > 0.0)
 
 
 if __name__ == "__main__":
