@@ -331,7 +331,8 @@ class EqType(enum.IntEnum):
   CONNECT = mujoco.mjtEq.mjEQ_CONNECT
   WELD = mujoco.mjtEq.mjEQ_WELD
   JOINT = mujoco.mjtEq.mjEQ_JOINT
-  # unsupported: TENDON, FLEX, DISTANCE
+  TENDON = mujoco.mjtEq.mjEQ_TENDON
+  # unsupported: FLEX, DISTANCE
 
 
 class WrapType(enum.IntEnum):
@@ -555,6 +556,7 @@ class Model:
     nexclude: number of excluded geom pairs                  ()
     neq: number of equality constraints                      ()
     nmocap: number of mocap bodies                           ()
+    ngravcomp: number of bodies with nonzero gravcomp        ()
     nM: number of non-zeros in sparse inertia matrix         ()
     ntendon: number of tendons                               ()
     nwrap: number of wrap objects in all tendon paths        ()
@@ -609,6 +611,7 @@ class Model:
     body_invweight0: mean inv inert in qpos0 (trn, rot)      (nbody, 2)
     body_contype: OR over all geom contypes                  (nbody,)
     body_conaffinity: OR over all geom conaffinities         (nbody,)
+    body_gravcomp: antigravity force, units of body weight   (nbody,)
     jnt_type: type of joint (mjtJoint)                       (njnt,)
     jnt_qposadr: start addr in 'qpos' for joint's data       (njnt,)
     jnt_dofadr: start addr in 'qvel' for joint's data        (njnt,)
@@ -625,6 +628,7 @@ class Model:
     jnt_margin: min distance for limit detection             (njnt,)
     jnt_limited_slide_hinge_adr: limited/slide/hinge jntadr
     jnt_limited_ball_adr: limited/ball jntadr
+    jnt_actgravcomp: is gravcomp force applied via actuators (njnt,)
     dof_bodyid: id of dof's body                             (nv,)
     dof_jntid: id of dof's joint                             (nv,)
     dof_parentid: id of dof's parent; -1: none               (nv,)
@@ -686,6 +690,7 @@ class Model:
     eq_connect_adr: eq_* addresses of type `CONNECT`
     eq_wld_adr: eq_* addresses of type `WELD`
     eq_jnt_adr: eq_* addresses of type `JOINT`
+    eq_ten_adr: eq_* addresses of type `TENDON`              (<=neq,)
     actuator_trntype: transmission type (mjtTrn)             (nu,)
     actuator_dyntype: dynamics type (mjtDyn)                 (nu,)
     actuator_gaintype: gain type (mjtGain)                   (nu,)
@@ -767,6 +772,7 @@ class Model:
   nexclude: int
   neq: int
   nmocap: int
+  ngravcomp: int
   nM: int
   ntendon: int
   nwrap: int
@@ -821,6 +827,7 @@ class Model:
   body_invweight0: wp.array(dtype=wp.float32, ndim=2)
   body_contype: wp.array(dtype=wp.int32, ndim=1)
   body_conaffinity: wp.array(dtype=wp.int32, ndim=1)
+  body_gravcomp: wp.array(dtype=wp.float32, ndim=1)
   jnt_type: wp.array(dtype=wp.int32, ndim=1)
   jnt_qposadr: wp.array(dtype=wp.int32, ndim=1)
   jnt_dofadr: wp.array(dtype=wp.int32, ndim=1)
@@ -837,6 +844,7 @@ class Model:
   jnt_margin: wp.array(dtype=wp.float32, ndim=1)
   jnt_limited_slide_hinge_adr: wp.array(dtype=wp.int32, ndim=1)  # warp only
   jnt_limited_ball_adr: wp.array(dtype=wp.int32, ndim=1)  # warp only
+  jnt_actgravcomp: wp.array(dtype=wp.int32, ndim=1)
   dof_bodyid: wp.array(dtype=wp.int32, ndim=1)
   dof_jntid: wp.array(dtype=wp.int32, ndim=1)
   dof_parentid: wp.array(dtype=wp.int32, ndim=1)
@@ -898,6 +906,7 @@ class Model:
   eq_connect_adr: wp.array(dtype=wp.int32, ndim=1)
   eq_wld_adr: wp.array(dtype=wp.int32, ndim=1)
   eq_jnt_adr: wp.array(dtype=wp.int32, ndim=1)
+  eq_ten_adr: wp.array(dtype=wp.int32, ndim=1)
   actuator_trntype: wp.array(dtype=wp.int32, ndim=1)
   actuator_dyntype: wp.array(dtype=wp.int32, ndim=1)
   actuator_gaintype: wp.array(dtype=wp.int32, ndim=1)
@@ -1011,6 +1020,7 @@ class Data:
     ne_connect: number of equality connect constraints          ()
     ne_weld: number of equality weld constraints                ()
     ne_jnt: number of equality joint constraints                ()
+    ne_ten: number of equality tendon constraints               ()
     nf: number of friction constraints                          ()
     nl: number of limit constraints                             ()
     nefc: number of constraints                                 (1,)
@@ -1058,6 +1068,7 @@ class Data:
     qfrc_bias: C(qpos,qvel)                                     (nworld, nv)
     qfrc_spring: passive spring force                           (nworld, nv)
     qfrc_damper: passive damper force                           (nworld, nv)
+    qfrc_gravcomp: passive gravity compensation force           (nworld, nv)
     qfrc_passive: total passive force                           (nworld, nv)
     subtree_linvel: linear velocity of subtree com              (nworld, nbody, 3)
     subtree_angmom: angular momentum about subtree com          (nworld, nbody, 3)
@@ -1114,6 +1125,7 @@ class Data:
   ne_connect: wp.array(dtype=wp.int32, ndim=1)  # warp only
   ne_weld: wp.array(dtype=wp.int32, ndim=1)  # warp only
   ne_jnt: wp.array(dtype=wp.int32, ndim=1)  # warp only
+  ne_ten: wp.array(dtype=wp.int32, ndim=1)  # warp only
   nf: wp.array(dtype=wp.int32, ndim=1)
   nl: wp.array(dtype=wp.int32, ndim=1)
   nefc: wp.array(dtype=wp.int32, ndim=1)
@@ -1161,6 +1173,7 @@ class Data:
   qfrc_bias: wp.array(dtype=wp.float32, ndim=2)
   qfrc_spring: wp.array(dtype=wp.float32, ndim=2)
   qfrc_damper: wp.array(dtype=wp.float32, ndim=2)
+  qfrc_gravcomp: wp.array(dtype=wp.float32, ndim=2)
   qfrc_passive: wp.array(dtype=wp.float32, ndim=2)
   subtree_linvel: wp.array(dtype=wp.vec3, ndim=2)
   subtree_angmom: wp.array(dtype=wp.vec3, ndim=2)
