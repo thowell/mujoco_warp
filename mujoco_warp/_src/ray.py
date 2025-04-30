@@ -346,8 +346,6 @@ def _ray_mesh(
   # Return the geom_id if we found a hit, otherwise -1
   return_id = wp.where(hit_found == 1, geom_id, -1)
 
-  print(min_dist)
-
   return DistanceWithId(min_dist, return_id)
 
 
@@ -384,6 +382,19 @@ class RayIntersection:
   geom_id: wp.int32
 
 
+snippet = """
+#if defined(__CUDA_ARCH__)
+    return blockDim.x;
+#else    
+    return 1;
+#endif
+    """
+
+
+@wp.func_native(snippet)
+def get_block_dim_x() -> int: ...
+
+
 @wp.func
 def _ray_all_geom(
   worldid: int,
@@ -395,10 +406,11 @@ def _ray_all_geom(
   has_geomgroup: bool,
   flg_static: bool,
   bodyexclude: int,
-  num_threads: int,
   tid: int,
 ) -> RayIntersection:
   ngeom = m.ngeom
+
+  num_threads = get_block_dim_x()
 
   min_val = wp.float32(wp.inf)
   min_idx = wp.int32(-1)
@@ -458,9 +470,11 @@ def _ray_all_geom(
     local_min_idx = wp.tile_argmin(t)
     local_min_val = t[local_min_idx[0]]
 
+    id_tile = wp.tile(geom_id)
+
     if local_min_val < min_val:
       min_val = local_min_val
-      min_idx = local_min_idx[0]
+      min_idx = id_tile[local_min_idx[0]]
 
   min_val = wp.where(min_val == wp.inf, wp.float32(-1.0), min_val)
 
@@ -480,7 +494,6 @@ def _ray_all_geom_kernel(
   bodyexclude: int,
   dist: wp.array(dtype=float, ndim=2),
   closest_hit_geom_id: wp.array(dtype=int, ndim=2),
-  num_threads: int,
 ):
   worldid, rayid, tid = wp.tid()
   intersection = _ray_all_geom(
@@ -493,7 +506,6 @@ def _ray_all_geom_kernel(
     has_geomgroup,
     flg_static,
     bodyexclude,
-    num_threads,
     tid,
   )
 
@@ -550,7 +562,6 @@ def ray(
       bodyexclude,
       dist,
       closest_hit_geom_id,
-      num_threads,
     ],
     block_dim=num_threads,
   )
