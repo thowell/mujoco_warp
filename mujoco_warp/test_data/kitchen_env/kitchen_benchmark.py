@@ -123,7 +123,7 @@ def _main(argv: Sequence[str]):
       robot_path = _load_from_menagerie("trs_so_arm100/so_arm100.xml")
     case "lite6": # Do not run on mujoco_warp, implicit integrator not available
       robot_path = _load_from_menagerie("ufactory_lite6/lite6.xml")
-    case "xarm7": # Do not run on mujoco_warp, mju_sparse2dense raise en error
+    case "xarm7": # Do not run on mujoco_warp, implicit integrator not available
       robot_path = _load_from_menagerie("ufactory_xarm7/xarm7.xml")
     case "z1": # Do not run on mujoco_warp, implicit integrator not available
       robot_path = _load_from_menagerie("unitree_z1/z1.xml")
@@ -133,13 +133,13 @@ def _main(argv: Sequence[str]):
       robot_path = _load_from_menagerie("universal_robots_ur5e/ur5e.xml")
     case "mujoco_humanoid":
       robot_path = epath.Path(_SCRIPT_DIR + "/../humanoid/humanoid.xml")
-    case "berkeley_humanoid": # Do not run on mujoco_warp, CUDA graph error
+    case "berkeley_humanoid":
       robot_path = _load_from_menagerie("berkeley_humanoid/berkeley_humanoid.xml")
     case "t1": # Do not run on mujoco_warp, implicit integrator not available
       robot_path = _load_from_menagerie("booster_t1/t1.xml")
     case "h1":
       robot_path = _load_from_menagerie("unitree_h1/h1.xml")
-    case "g1": # Do not run on mujoco_warp, sensor cutoff is not available
+    case "g1": # Do not run on mujoco_warp, implicit integrator not available
       robot_path = _load_from_menagerie("unitree_g1/g1.xml")
     case "talos": # Do not run on mujoco_warp, not enough shared memory?
       robot_path = _load_from_menagerie("pal_talos/talos.xml")
@@ -151,7 +151,7 @@ def _main(argv: Sequence[str]):
       robot_path = _load_from_menagerie("anybotics_anymal_b/anymal_b.xml")
     case "anymal_c":
       robot_path = _load_from_menagerie("anybotics_anymal_c/anymal_c.xml")
-    case "barkour_v0": # Do not run on mujoco_warp, CUDA graph error
+    case "barkour_v0":
       robot_path = _load_from_menagerie("google_barkour_v0/barkour_v0.xml")
     case "a1":
       robot_path = _load_from_menagerie("unitree_a1/a1.xml")
