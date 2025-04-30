@@ -20,21 +20,22 @@ from .types import Data
 from .types import DisableBit
 from .types import JointType
 from .types import Model
+from .types import array2df
 from .warp_util import event_scope
 
 
 @wp.kernel
 def _spring_passive(
-  # Model:
-  qpos_spring: wp.array(dtype=float),
-  jnt_type: wp.array(dtype=int),
-  jnt_qposadr: wp.array(dtype=int),
+  # Model
   jnt_dofadr: wp.array(dtype=int),
+  jnt_qposadr: wp.array(dtype=int),
   jnt_stiffness: wp.array(dtype=float),
-  # Data in:
-  qpos_in: wp.array2d(dtype=float),
-  # Data out:
-  qfrc_spring_out: wp.array2d(dtype=float),
+  jnt_type: wp.array(dtype=int),
+  qpos_spring: wp.array(dtype=float),
+  # Data in
+  qpos: array2df,
+  # Data out
+  qfrc_spring: array2df,
 ):
   worldid, jntid = wp.tid()
   stiffness = jnt_stiffness[jntid]
@@ -48,18 +49,18 @@ def _spring_passive(
 
   if jnttype == wp.static(JointType.FREE.value):
     dif = wp.vec3(
-      qpos_in[worldid, qposid + 0] - qpos_spring[qposid + 0],
-      qpos_in[worldid, qposid + 1] - qpos_spring[qposid + 1],
-      qpos_in[worldid, qposid + 2] - qpos_spring[qposid + 2],
+      qpos[worldid, qposid + 0] - qpos_spring[qposid + 0],
+      qpos[worldid, qposid + 1] - qpos_spring[qposid + 1],
+      qpos[worldid, qposid + 2] - qpos_spring[qposid + 2],
     )
-    qfrc_spring_out[worldid, dofid + 0] = -stiffness * dif[0]
-    qfrc_spring_out[worldid, dofid + 1] = -stiffness * dif[1]
-    qfrc_spring_out[worldid, dofid + 2] = -stiffness * dif[2]
+    qfrc_spring[worldid, dofid + 0] = -stiffness * dif[0]
+    qfrc_spring[worldid, dofid + 1] = -stiffness * dif[1]
+    qfrc_spring[worldid, dofid + 2] = -stiffness * dif[2]
     rot = wp.quat(
-      qpos_in[worldid, qposid + 3],
-      qpos_in[worldid, qposid + 4],
-      qpos_in[worldid, qposid + 5],
-      qpos_in[worldid, qposid + 6],
+      qpos[worldid, qposid + 3],
+      qpos[worldid, qposid + 4],
+      qpos[worldid, qposid + 5],
+      qpos[worldid, qposid + 6],
     )
     ref = wp.quat(
       qpos_spring[qposid + 3],
@@ -68,15 +69,15 @@ def _spring_passive(
       qpos_spring[qposid + 6],
     )
     dif = math.quat_sub(rot, ref)
-    qfrc_spring_out[worldid, dofid + 3] = -stiffness * dif[0]
-    qfrc_spring_out[worldid, dofid + 4] = -stiffness * dif[1]
-    qfrc_spring_out[worldid, dofid + 5] = -stiffness * dif[2]
+    qfrc_spring[worldid, dofid + 3] = -stiffness * dif[0]
+    qfrc_spring[worldid, dofid + 4] = -stiffness * dif[1]
+    qfrc_spring[worldid, dofid + 5] = -stiffness * dif[2]
   elif jnttype == wp.static(JointType.BALL.value):
     rot = wp.quat(
-      qpos_in[worldid, qposid + 0],
-      qpos_in[worldid, qposid + 1],
-      qpos_in[worldid, qposid + 2],
-      qpos_in[worldid, qposid + 3],
+      qpos[worldid, qposid + 0],
+      qpos[worldid, qposid + 1],
+      qpos[worldid, qposid + 2],
+      qpos[worldid, qposid + 3],
     )
     ref = wp.quat(
       qpos_spring[qposid + 0],
@@ -85,31 +86,31 @@ def _spring_passive(
       qpos_spring[qposid + 3],
     )
     dif = math.quat_sub(rot, ref)
-    qfrc_spring_out[worldid, dofid + 0] = -stiffness * dif[0]
-    qfrc_spring_out[worldid, dofid + 1] = -stiffness * dif[1]
-    qfrc_spring_out[worldid, dofid + 2] = -stiffness * dif[2]
+    qfrc_spring[worldid, dofid + 0] = -stiffness * dif[0]
+    qfrc_spring[worldid, dofid + 1] = -stiffness * dif[1]
+    qfrc_spring[worldid, dofid + 2] = -stiffness * dif[2]
   else:  # mjJNT_SLIDE, mjJNT_HINGE
-    fdif = qpos_in[worldid, qposid] - qpos_spring[qposid]
-    qfrc_spring_out[worldid, dofid] = -stiffness * fdif
+    fdif = qpos[worldid, qposid] - qpos_spring[qposid]
+    qfrc_spring[worldid, dofid] = -stiffness * fdif
 
 
 @wp.kernel
 def _damper_passive(
-  # Model:
+  # Model
   dof_damping: wp.array(dtype=float),
-  # Data in:
-  qvel_in: wp.array2d(dtype=float),
-  qfrc_spring_in: wp.array2d(dtype=float),
-  # Data out:
-  qfrc_damper_out: wp.array2d(dtype=float),
-  qfrc_passive_out: wp.array2d(dtype=float),
+  # Data in
+  qfrc_spring: array2df,
+  qvel: array2df,
+  # Data out
+  qfrc_damper: array2df,
+  qfrc_passive: array2df,
 ):
   worldid, dofid = wp.tid()
 
-  qfrc_damper = -dof_damping[dofid] * qvel_in[worldid, dofid]
+  damper = -dof_damping[dofid] * qvel[worldid, dofid]
 
-  qfrc_damper_out[worldid, dofid] = qfrc_damper
-  qfrc_passive_out[worldid, dofid] = qfrc_damper + qfrc_spring_in[worldid, dofid]
+  qfrc_damper[worldid, dofid] = damper
+  qfrc_passive[worldid, dofid] = damper + qfrc_spring[worldid, dofid]
 
 
 @event_scope
@@ -129,11 +130,11 @@ def passive(m: Model, d: Data):
     _spring_passive,
     dim=(d.nworld, m.njnt),
     inputs=[
-      m.qpos_spring,
-      m.jnt_type,
-      m.jnt_qposadr,
       m.jnt_dofadr,
+      m.jnt_qposadr,
       m.jnt_stiffness,
+      m.jnt_type,
+      m.qpos_spring,
       d.qpos,
     ],
     outputs=[d.qfrc_spring],
@@ -141,6 +142,6 @@ def passive(m: Model, d: Data):
   wp.launch(
     _damper_passive,
     dim=(d.nworld, m.nv),
-    inputs=[m.dof_damping, d.qvel, d.qfrc_spring],
+    inputs=[m.dof_damping, d.qfrc_spring, d.qvel],
     outputs=[d.qfrc_damper, d.qfrc_passive],
   )
