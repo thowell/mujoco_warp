@@ -81,3 +81,8 @@ class JAXTest(absltest.TestCase):
 
       jax_unroll_fn = jax.jit(unroll).lower(jax_qpos, jax_qvel).compile()
       jax_unroll_fn(jax_qpos, jax_qvel)
+
+
+if __name__ == "__main__":
+  wp.init()
+  absltest.main()

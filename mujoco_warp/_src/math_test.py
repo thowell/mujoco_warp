@@ -86,3 +86,8 @@ class ClosestSegmentSegmentPointsTest(absltest.TestCase):
     best_a, best_b = closest_segment_to_segment_points(a0, a1, b0, b1)
     self.assertSequenceAlmostEqual(best_a, [0.0, 0.0, 0.0], 5)
     self.assertSequenceAlmostEqual(best_b, [0.0, 0.0, 0.0], 5)
+
+
+if __name__ == "__main__":
+  wp.init()
+  absltest.main()
