@@ -1996,6 +1996,21 @@ def _primitive_narrowphase(
       solimp,
       geoms,
     )
+  elif type1 == int(GeomType.BOX.value) and type2 == int(GeomType.BOX.value):
+    box_box(
+      geom1,
+      geom2,
+      worldid,
+      d,
+      margin,
+      gap,
+      condim,
+      friction,
+      solref,
+      solreffriction,
+      solimp,
+      geoms,
+    )
   elif type1 == int(GeomType.CAPSULE.value) and type2 == int(GeomType.BOX.value):
     capsule_box(
       geom1,
