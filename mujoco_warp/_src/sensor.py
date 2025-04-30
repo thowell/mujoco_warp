@@ -324,7 +324,7 @@ def sensor_pos(m: Model, d: Data):
     if sensortype == int(SensorType.CAMPROJECTION.value):
       refid = m.sensor_refid[posadr]
       cam_projection = _cam_projection(m, d, worldid, objid, refid)
-      _apply_cutoff(m, posadr, 2, cam_projection)
+      cam_projection = _apply_cutoff(m, posadr, 2, cam_projection)
       d.sensordata[worldid, adr + 0] = cam_projection[0]
       d.sensordata[worldid, adr + 1] = cam_projection[1]
     elif sensortype == int(SensorType.JOINTPOS.value):

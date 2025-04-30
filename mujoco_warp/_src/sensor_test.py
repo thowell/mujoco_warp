@@ -104,6 +104,7 @@ class SensorTest(parameterized.TestCase):
         </actuator>
         <sensor>
           <camprojection camera="camera" site="camera_site"/>
+          <camprojection camera="camera" site="camera_site" cutoff=".001"/>
           <jointpos joint="slide"/>
           <jointpos joint="slide" cutoff=".001"/>
           <actuatorpos actuator="slide"/>
