@@ -86,9 +86,6 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
     if unsupported.any():
       raise NotImplementedError(f"{field_str} {field[unsupported]} not supported.")
 
-  if mjm.sensor_cutoff.any():
-    raise NotImplementedError("Sensor cutoff is unsupported.")
-
   for n, msg in (
     (mjm.nplugin, "Plugins"),
     (mjm.nflex, "Flexes"),
@@ -156,8 +153,8 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
   m.opt.is_sparse = support.is_sparse(mjm)
   m.opt.ls_parallel = False
   # TODO(team) Figure out good default parameters
-  m.opt.gjk_iteration_count = wp.int32(1)  # warp only
-  m.opt.epa_iteration_count = wp.int32(12)  # warp only
+  m.opt.gjk_iterations = wp.int32(1)  # warp only
+  m.opt.epa_iterations = wp.int32(12)  # warp only
   m.opt.epa_exact_neg_distance = wp.bool(False)  # warp only
   m.opt.depth_extension = wp.float32(0.1)  # warp only
   m.stat.meaninertia = mjm.stat.meaninertia
@@ -301,7 +298,29 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
     tile_corners = [i for i in range(mjm.nv) if mjm.dof_parentid[i] == -1]
     tree_id = mjm.dof_treeid[tile_corners]
     num_trees = int(np.max(tree_id))
-    tree = mjm.body_treeid[mjm.jnt_bodyid[mjm.actuator_trnid[:, 0]]]
+    bodyid = []
+    for i in range(mjm.nu):
+      trntype = mjm.actuator_trntype[i]
+      if (
+        trntype == mujoco.mjtTrn.mjTRN_JOINT
+        or trntype == mujoco.mjtTrn.mjTRN_JOINTINPARENT
+      ):
+        jntid = mjm.actuator_trnid[i, 0]
+        bodyid.append(mjm.jnt_bodyid[jntid])
+      elif trntype == mujoco.mjtTrn.mjTRN_TENDON:
+        tenid = mjm.actuator_trnid[i, 0]
+        adr = mjm.tendon_adr[tenid]
+        if mjm.wrap_type[adr] == mujoco.mjtWrap.mjWRAP_JOINT:
+          ten_num = mjm.tendon_num[tenid]
+          for i in range(ten_num):
+            bodyid.append(mjm.jnt_bodyid[mjm.wrap_objid[adr + i]])
+        else:
+          for i in range(mjm.nv):
+            bodyid.append(mjm.dof_bodyid[i])
+      else:
+        raise NotImplementedError(f"Transmission type {trntype} not implemented.")
+
+    tree = mjm.body_treeid[np.array(bodyid, dtype=int)]
     counts, ids = np.histogram(tree, bins=np.arange(0, num_trees + 2))
     acts_per_tree = dict(zip([int(i) for i in ids], [int(i) for i in counts]))
 
@@ -492,6 +511,9 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
   m.eq_jnt_adr = wp.array(
     np.nonzero(mjm.eq_type == types.EqType.JOINT.value)[0], dtype=wp.int32, ndim=1
   )
+  m.eq_ten_adr = wp.array(
+    np.nonzero(mjm.eq_type == types.EqType.TENDON.value)[0], dtype=wp.int32, ndim=1
+  )
 
   # short-circuiting here allows us to skip a lot of code in implicit integration
   m.actuator_affine_bias_gain = bool(
@@ -606,6 +628,20 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
     ndim=1,
   )
 
+  m.sensor_subtree_vel = np.isin(
+    mjm.sensor_type,
+    [mujoco.mjtSensor.mjSENS_SUBTREELINVEL, mujoco.mjtSensor.mjSENS_SUBTREEANGMOM],
+  ).any()
+  m.sensor_rne_postconstraint = np.isin(
+    mjm.sensor_type,
+    [
+      mujoco.mjtSensor.mjSENS_ACCELEROMETER,
+      mujoco.mjtSensor.mjSENS_FORCE,
+      mujoco.mjtSensor.mjSENS_TORQUE,
+      mujoco.mjtSensor.mjSENS_FRAMELINACC,
+      mujoco.mjtSensor.mjSENS_FRAMEANGACC,
+    ],
+  ).any()
   return m
 
 
@@ -699,6 +735,7 @@ def make_data(
   d.ne_connect = wp.zeros(1, dtype=wp.int32, ndim=1)
   d.ne_weld = wp.zeros(1, dtype=wp.int32, ndim=1)
   d.ne_jnt = wp.zeros(1, dtype=wp.int32, ndim=1)
+  d.ne_ten = wp.zeros(1, dtype=wp.int32, ndim=1)
   d.nefc = wp.zeros(1, dtype=wp.int32, ndim=1)
   d.ne = wp.zeros(1, dtype=wp.int32)
   d.nf = wp.zeros(1, dtype=wp.int32)
@@ -880,6 +917,11 @@ def put_data(
   )
   d.ne_jnt = wp.array(
     [np.sum((mjm.eq_type == mujoco.mjtEq.mjEQ_JOINT) & mjd.eq_active) * nworld],
+    dtype=wp.int32,
+    ndim=1,
+  )
+  d.ne_ten = wp.array(
+    [np.sum((mjm.eq_type == mujoco.mjtEq.mjEQ_TENDON) & mjd.eq_active) * nworld],
     dtype=wp.int32,
     ndim=1,
   )
@@ -1114,7 +1156,11 @@ def put_data(
   if support.is_sparse(mjm) and mjm.ntendon:
     ten_J = np.zeros((mjm.ntendon, mjm.nv))
     mujoco.mju_sparse2dense(
-      ten_J, mjd.ten_J, mjd.ten_J_rownnz, mjd.ten_J_rowadr, mjd.ten_J_colind
+      ten_J,
+      mjd.ten_J.reshape(-1),
+      mjd.ten_J_rownnz,
+      mjd.ten_J_rowadr,
+      mjd.ten_J_colind.reshape(-1),
     )
   else:
     ten_J = mjd.ten_J.reshape((mjm.ntendon, mjm.nv))

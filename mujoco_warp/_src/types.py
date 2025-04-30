@@ -43,6 +43,19 @@ class CamLightType(enum.IntEnum):
   TARGETBODYCOM = mujoco.mjtCamLight.mjCAMLIGHT_TARGETBODYCOM
 
 
+class DataType(enum.IntFlag):
+  """Sensor data types.
+
+  Members:
+    REAL: real values, no constraints
+    POSITIVE: positive values, 0 or negative: inactive
+  """
+
+  REAL = mujoco.mjtDataType.mjDATATYPE_REAL
+  POSITIVE = mujoco.mjtDataType.mjDATATYPE_POSITIVE
+  # unsupported: AXIS, QUATERNION
+
+
 class DisableBit(enum.IntFlag):
   """Disable default feature bitflags.
 
@@ -318,7 +331,8 @@ class EqType(enum.IntEnum):
   CONNECT = mujoco.mjtEq.mjEQ_CONNECT
   WELD = mujoco.mjtEq.mjEQ_WELD
   JOINT = mujoco.mjtEq.mjEQ_JOINT
-  # unsupported: TENDON, FLEX, DISTANCE
+  TENDON = mujoco.mjtEq.mjEQ_TENDON
+  # unsupported: FLEX, DISTANCE
 
 
 class WrapType(enum.IntEnum):
@@ -370,8 +384,8 @@ class Option:
     ls_iterations: maximum number of CG/Newton linesearch iterations
     disableflags: bit flags for disabling standard features
     is_sparse: whether to use sparse representations
-    gjk_iteration_count: number of Gjk iterations in the convex narrowphase
-    epa_iteration_count: number of Epa iterations in the convex narrowphase
+    gjk_iterations: number of Gjk iterations in the convex narrowphase
+    epa_iterations: number of Epa iterations in the convex narrowphase
     epa_exact_neg_distance: flag for enabling the distance calculation for non-intersecting case in the convex narrowphase
     depth_extension: distance for which the closest point is not calculated for non-intersecting case in the convex narrowphase
     ls_parallel: evaluate engine solver step sizes in parallel
@@ -389,8 +403,8 @@ class Option:
   ls_iterations: int
   disableflags: int
   is_sparse: bool
-  gjk_iteration_count: int  # warp only
-  epa_iteration_count: int  # warp only
+  gjk_iterations: int  # warp only
+  epa_iterations: int  # warp only
   epa_exact_neg_distance: bool  # warp only
   depth_extension: float  # warp only
   ls_parallel: bool
@@ -676,6 +690,7 @@ class Model:
     eq_connect_adr: eq_* addresses of type `CONNECT`
     eq_wld_adr: eq_* addresses of type `WELD`
     eq_jnt_adr: eq_* addresses of type `JOINT`
+    eq_ten_adr: eq_* addresses of type `TENDON`              (<=neq,)
     actuator_trntype: transmission type (mjtTrn)             (nu,)
     actuator_dyntype: dynamics type (mjtDyn)                 (nu,)
     actuator_gaintype: gain type (mjtGain)                   (nu,)
@@ -740,6 +755,8 @@ class Model:
     sensor_pos_adr: addresses for position sensors           (<=nsensor,)
     sensor_vel_adr: addresses for velocity sensors           (<=nsensor,)
     sensor_acc_adr: addresses for acceleration sensors       (<=nsensor,)
+    sensor_subtree_vel: evaluate subtree_vel
+    sensor_rne_postconstraint: evaluate rne_postconstraint
   """
 
   nq: int
@@ -889,6 +906,7 @@ class Model:
   eq_connect_adr: wp.array(dtype=wp.int32, ndim=1)
   eq_wld_adr: wp.array(dtype=wp.int32, ndim=1)
   eq_jnt_adr: wp.array(dtype=wp.int32, ndim=1)
+  eq_ten_adr: wp.array(dtype=wp.int32, ndim=1)
   actuator_trntype: wp.array(dtype=wp.int32, ndim=1)
   actuator_dyntype: wp.array(dtype=wp.int32, ndim=1)
   actuator_gaintype: wp.array(dtype=wp.int32, ndim=1)
@@ -955,6 +973,8 @@ class Model:
   sensor_pos_adr: wp.array(dtype=wp.int32, ndim=1)  # warp only
   sensor_vel_adr: wp.array(dtype=wp.int32, ndim=1)  # warp only
   sensor_acc_adr: wp.array(dtype=wp.int32, ndim=1)  # warp only
+  sensor_subtree_vel: bool  # warp only
+  sensor_rne_postconstraint: bool  # warp only
 
 
 @wp.struct
@@ -1000,6 +1020,7 @@ class Data:
     ne_connect: number of equality connect constraints          ()
     ne_weld: number of equality weld constraints                ()
     ne_jnt: number of equality joint constraints                ()
+    ne_ten: number of equality tendon constraints               ()
     nf: number of friction constraints                          ()
     nl: number of limit constraints                             ()
     nefc: number of constraints                                 (1,)
@@ -1104,6 +1125,7 @@ class Data:
   ne_connect: wp.array(dtype=wp.int32, ndim=1)  # warp only
   ne_weld: wp.array(dtype=wp.int32, ndim=1)  # warp only
   ne_jnt: wp.array(dtype=wp.int32, ndim=1)  # warp only
+  ne_ten: wp.array(dtype=wp.int32, ndim=1)  # warp only
   nf: wp.array(dtype=wp.int32, ndim=1)
   nl: wp.array(dtype=wp.int32, ndim=1)
   nefc: wp.array(dtype=wp.int32, ndim=1)
