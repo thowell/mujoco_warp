@@ -485,6 +485,9 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
   m.eq_jnt_adr = wp.array(
     np.nonzero(mjm.eq_type == types.EqType.JOINT.value)[0], dtype=wp.int32, ndim=1
   )
+  m.eq_ten_adr = wp.array(
+    np.nonzero(mjm.eq_type == types.EqType.TENDON.value)[0], dtype=wp.int32, ndim=1
+  )
 
   # short-circuiting here allows us to skip a lot of code in implicit integration
   m.actuator_affine_bias_gain = bool(
@@ -706,6 +709,7 @@ def make_data(
   d.ne_connect = wp.zeros(1, dtype=wp.int32, ndim=1)
   d.ne_weld = wp.zeros(1, dtype=wp.int32, ndim=1)
   d.ne_jnt = wp.zeros(1, dtype=wp.int32, ndim=1)
+  d.ne_ten = wp.zeros(1, dtype=wp.int32, ndim=1)
   d.nefc = wp.zeros(1, dtype=wp.int32, ndim=1)
   d.ne = wp.zeros(1, dtype=wp.int32)
   d.nf = wp.zeros(1, dtype=wp.int32)
@@ -886,6 +890,11 @@ def put_data(
   )
   d.ne_jnt = wp.array(
     [np.sum((mjm.eq_type == mujoco.mjtEq.mjEQ_JOINT) & mjd.eq_active) * nworld],
+    dtype=wp.int32,
+    ndim=1,
+  )
+  d.ne_ten = wp.array(
+    [np.sum((mjm.eq_type == mujoco.mjtEq.mjEQ_TENDON) & mjd.eq_active) * nworld],
     dtype=wp.int32,
     ndim=1,
   )

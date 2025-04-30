@@ -331,7 +331,8 @@ class EqType(enum.IntEnum):
   CONNECT = mujoco.mjtEq.mjEQ_CONNECT
   WELD = mujoco.mjtEq.mjEQ_WELD
   JOINT = mujoco.mjtEq.mjEQ_JOINT
-  # unsupported: TENDON, FLEX, DISTANCE
+  TENDON = mujoco.mjtEq.mjEQ_TENDON
+  # unsupported: FLEX, DISTANCE
 
 
 class WrapType(enum.IntEnum):
@@ -686,6 +687,7 @@ class Model:
     eq_connect_adr: eq_* addresses of type `CONNECT`
     eq_wld_adr: eq_* addresses of type `WELD`
     eq_jnt_adr: eq_* addresses of type `JOINT`
+    eq_ten_adr: eq_* addresses of type `TENDON`              (<=neq,)
     actuator_trntype: transmission type (mjtTrn)             (nu,)
     actuator_dyntype: dynamics type (mjtDyn)                 (nu,)
     actuator_gaintype: gain type (mjtGain)                   (nu,)
@@ -898,6 +900,7 @@ class Model:
   eq_connect_adr: wp.array(dtype=wp.int32, ndim=1)
   eq_wld_adr: wp.array(dtype=wp.int32, ndim=1)
   eq_jnt_adr: wp.array(dtype=wp.int32, ndim=1)
+  eq_ten_adr: wp.array(dtype=wp.int32, ndim=1)
   actuator_trntype: wp.array(dtype=wp.int32, ndim=1)
   actuator_dyntype: wp.array(dtype=wp.int32, ndim=1)
   actuator_gaintype: wp.array(dtype=wp.int32, ndim=1)
@@ -1011,6 +1014,7 @@ class Data:
     ne_connect: number of equality connect constraints          ()
     ne_weld: number of equality weld constraints                ()
     ne_jnt: number of equality joint constraints                ()
+    ne_ten: number of equality tendon constraints               ()
     nf: number of friction constraints                          ()
     nl: number of limit constraints                             ()
     nefc: number of constraints                                 (1,)
@@ -1114,6 +1118,7 @@ class Data:
   ne_connect: wp.array(dtype=wp.int32, ndim=1)  # warp only
   ne_weld: wp.array(dtype=wp.int32, ndim=1)  # warp only
   ne_jnt: wp.array(dtype=wp.int32, ndim=1)  # warp only
+  ne_ten: wp.array(dtype=wp.int32, ndim=1)  # warp only
   nf: wp.array(dtype=wp.int32, ndim=1)
   nl: wp.array(dtype=wp.int32, ndim=1)
   nefc: wp.array(dtype=wp.int32, ndim=1)
