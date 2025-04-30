@@ -77,6 +77,16 @@ class ConstraintTest(parameterized.TestCase):
     """
 
     _, mjd, m, d = test_util.fixture(xml=xml, cone=cone)
+
+    for arr in (
+      d.efc.J,
+      d.efc.D,
+      d.efc.aref,
+      d.efc.pos,
+      d.efc.margin,
+    ):
+      arr.zero_()
+
     mjwarp.make_constraint(m, d)
 
     _assert_eq(d.efc.J.numpy()[: mjd.nefc, :].reshape(-1), mjd.efc_J, "efc_J")
@@ -92,13 +102,9 @@ class ConstraintTest(parameterized.TestCase):
   def test_constraints(self, cone):
     """Test constraints."""
     for key in range(3):
-      mjm, mjd, _, _ = test_util.fixture(
+      mjm, mjd, m, d = test_util.fixture(
         "constraints.xml", sparse=False, cone=cone, keyframe=key
       )
-
-      mujoco.mj_forward(mjm, mjd)
-      m = mjwarp.put_model(mjm)
-      d = mjwarp.put_data(mjm, mjd)
 
       for arr in (
         d.efc.J,
@@ -131,6 +137,9 @@ class ConstraintTest(parameterized.TestCase):
       _, mjd, m, d = test_util.fixture(
         "tendon/tendon_limit.xml", sparse=False, keyframe=keyframe
       )
+
+      for arr in (d.nefc, d.nl, d.efc.J, d.efc.D, d.efc.aref, d.efc.pos, d.efc.margin):
+        arr.zero_()
 
       mjwarp.make_constraint(m, d)
 
