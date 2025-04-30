@@ -103,55 +103,55 @@ def _main(argv: Sequence[str]):
 
   ## Processing the selected robot
   match _ROBOT.value:
-    case "panda":
-      robot_path = _load_from_menagerie("franka_emika_panda/panda.xml")
-    case "fr3":
+    case "panda": # Run on mujoco_warp using mjx version without implicit integrator
+      robot_path = _load_from_menagerie("franka_emika_panda/mjx_panda.xml")
+    case "fr3": # Do not run on mujoco_warp, implicit integrator not available
       robot_path = _load_from_menagerie("franka_fr3/fr3.xml")
-    case "google_robot":
+    case "google_robot": # Do not run on mujoco_warp, implicit integrator not available
       robot_path = _load_from_menagerie("google_robot/robot.xml")
-    case "gen3":
+    case "gen3": # Do not run on mujoco_warp, implicit integrator not available
       robot_path = _load_from_menagerie("kinova_gen3/gen3.xml")
-    case "iiwa_14":
+    case "iiwa_14": # Do not run on mujoco_warp, implicit integrator not available
       robot_path = _load_from_menagerie("kuka_iiwa_14/iiwa14.xml")
-    case "tiago":
+    case "tiago": # Do not run on mujoco_warp, implicit integrator not available
       robot_path = _load_from_menagerie("pal_tiago/tiago.xml")
-    case "sawyer":
+    case "sawyer": # Do not run on mujoco_warp, implicit integrator not available
       robot_path = _load_from_menagerie("rethink_robotics_sawyer/sawyer.xml")
     case "vx300":
       robot_path = _load_from_menagerie("trossen_vx300s/vx300s.xml")
     case "arm100":
       robot_path = _load_from_menagerie("trs_so_arm100/so_arm100.xml")
-    case "lite6":
+    case "lite6": # Do not run on mujoco_warp, implicit integrator not available
       robot_path = _load_from_menagerie("ufactory_lite6/lite6.xml")
-    case "xarm7":
+    case "xarm7": # Do not run on mujoco_warp, mju_sparse2dense raise en error
       robot_path = _load_from_menagerie("ufactory_xarm7/xarm7.xml")
-    case "z1":
+    case "z1": # Do not run on mujoco_warp, implicit integrator not available
       robot_path = _load_from_menagerie("unitree_z1/z1.xml")
-    case "ur10e":
+    case "ur10e": # Do not run on mujoco_warp, implicit integrator not available
       robot_path = _load_from_menagerie("universal_robots_ur10e/ur10e.xml")
-    case "ur5e":
+    case "ur5e": # Do not run on mujoco_warp, implicit integrator not available
       robot_path = _load_from_menagerie("universal_robots_ur5e/ur5e.xml")
     case "mujoco_humanoid":
       robot_path = epath.Path(_SCRIPT_DIR + "/../humanoid/humanoid.xml")
-    case "berkeley_humanoid":
+    case "berkeley_humanoid": # Do not run on mujoco_warp, CUDA graph error
       robot_path = _load_from_menagerie("berkeley_humanoid/berkeley_humanoid.xml")
-    case "t1":
+    case "t1": # Do not run on mujoco_warp, implicit integrator not available
       robot_path = _load_from_menagerie("booster_t1/t1.xml")
     case "h1":
       robot_path = _load_from_menagerie("unitree_h1/h1.xml")
-    case "g1":
+    case "g1": # Do not run on mujoco_warp, sensor cutoff is not available
       robot_path = _load_from_menagerie("unitree_g1/g1.xml")
-    case "talos":
+    case "talos": # Do not run on mujoco_warp, not enough shared memory?
       robot_path = _load_from_menagerie("pal_talos/talos.xml")
     case "op3":
       robot_path = _load_from_menagerie("robotis_op3/op3.xml")
-    case "spot":
+    case "spot": # Do not run on mujoco_warp, implicit integrator not available
       robot_path = _load_from_menagerie("boston_dynamics_spot/spot.xml")
     case "anymal_b":
       robot_path = _load_from_menagerie("anybotics_anymal_b/anymal_b.xml")
     case "anymal_c":
       robot_path = _load_from_menagerie("anybotics_anymal_c/anymal_c.xml")
-    case "barkour_v0":
+    case "barkour_v0": # Do not run on mujoco_warp, CUDA graph error
       robot_path = _load_from_menagerie("google_barkour_v0/barkour_v0.xml")
     case "a1":
       robot_path = _load_from_menagerie("unitree_a1/a1.xml")
@@ -159,7 +159,7 @@ def _main(argv: Sequence[str]):
       robot_path = _load_from_menagerie("unitree_go1/go1.xml")
     case "go2":
       robot_path = _load_from_menagerie("unitree_go2/go2.xml")
-    case "cassie":
+    case "cassie": # Do not run on mujoco_warp, magnetometer sensor not available
       robot_path = _load_from_menagerie("agility_cassie/cassie.xml")
     case _:
       raise FileNotFoundError(f"Robot provided is unknown.")
