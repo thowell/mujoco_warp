@@ -29,8 +29,8 @@ Enjoy kernel analysis directly within vscode.
 4. Right click on `kernel-analyzer-{version}.vsix` file
 5. Select "Install Extension VSIX"
 6. Open vscode settings and navigate to `Extensions > Kernel Analyzer`
-7. Set **Python Path** to the `bin/python` of the env you set up in step 1, e.g. `/home/$USER/work/mujoco_warp/env/bin/python`
-8. Set **Types Path** to the location of `types.py` in your checked out code, e.g. `/home/$USER/work/mujoco_warp/mujoco_warp/_src/types.py`
+7. Set Python Path to the `bin/python` of the env you set up in step 1, e.g. `/home/$USER/work/mujoco_warp/env/bin/python`
+8. Set Types Path to the location of `types.py` in your checked out code, e.g. `/home/$USER/work/mujoco_warp/mujoco_warp/_src/types.py`
 
 ## Plugin Development
 

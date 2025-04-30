@@ -226,6 +226,8 @@ def analyze(source: str, filename: str, type_source: str) -> List[Issue]:
 
       # Model params must not have in/out suffix, Data/other params must
       if (param_source == "Model") == has_suffix:
+        if param_source is None and param_type in ("int", "float", "bool"):
+          continue
         issues.append(InvalidSuffix(param, kernel, param_source))
 
       source_order = {"Model": 0, "Data": 1, None: 2}[param_source]

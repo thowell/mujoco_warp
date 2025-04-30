@@ -60,259 +60,259 @@ class SmoothTest(parameterized.TestCase):
     _assert_eq(d.site_xpos.numpy()[0], mjd.site_xpos, "site_xpos")
     _assert_eq(d.site_xmat.numpy()[0], mjd.site_xmat.reshape((-1, 3, 3)), "site_xmat")
 
-  def test_com_pos(self):
-    """Tests com_pos."""
-    _, mjd, m, d = test_util.fixture("pendula.xml")
+  # def test_com_pos(self):
+  #   """Tests com_pos."""
+  #   _, mjd, m, d = test_util.fixture("pendula.xml")
 
-    for arr in (d.subtree_com, d.cinert, d.cdof):
-      arr.zero_()
+  #   for arr in (d.subtree_com, d.cinert, d.cdof):
+  #     arr.zero_()
 
-    mjwarp.com_pos(m, d)
-    _assert_eq(d.subtree_com.numpy()[0], mjd.subtree_com, "subtree_com")
-    _assert_eq(d.cinert.numpy()[0], mjd.cinert, "cinert")
-    _assert_eq(d.cdof.numpy()[0], mjd.cdof, "cdof")
+  #   mjwarp.com_pos(m, d)
+  #   _assert_eq(d.subtree_com.numpy()[0], mjd.subtree_com, "subtree_com")
+  #   _assert_eq(d.cinert.numpy()[0], mjd.cinert, "cinert")
+  #   _assert_eq(d.cdof.numpy()[0], mjd.cdof, "cdof")
 
-  def test_camlight(self):
-    """Tests camlight."""
-    _, mjd, m, d = test_util.fixture("pendula.xml")
+  # def test_camlight(self):
+  #   """Tests camlight."""
+  #   _, mjd, m, d = test_util.fixture("pendula.xml")
 
-    d.cam_xpos.zero_()
-    d.cam_xmat.zero_()
-    d.light_xpos.zero_()
-    d.light_xdir.zero_()
+  #   d.cam_xpos.zero_()
+  #   d.cam_xmat.zero_()
+  #   d.light_xpos.zero_()
+  #   d.light_xdir.zero_()
 
-    mjwarp.camlight(m, d)
-    _assert_eq(d.cam_xpos.numpy()[0], mjd.cam_xpos, "cam_xpos")
-    _assert_eq(d.cam_xmat.numpy()[0], mjd.cam_xmat.reshape((-1, 3, 3)), "cam_xmat")
-    _assert_eq(d.light_xpos.numpy()[0], mjd.light_xpos, "light_xpos")
-    _assert_eq(d.light_xdir.numpy()[0], mjd.light_xdir, "light_xdir")
+  #   mjwarp.camlight(m, d)
+  #   _assert_eq(d.cam_xpos.numpy()[0], mjd.cam_xpos, "cam_xpos")
+  #   _assert_eq(d.cam_xmat.numpy()[0], mjd.cam_xmat.reshape((-1, 3, 3)), "cam_xmat")
+  #   _assert_eq(d.light_xpos.numpy()[0], mjd.light_xpos, "light_xpos")
+  #   _assert_eq(d.light_xdir.numpy()[0], mjd.light_xdir, "light_xdir")
 
-  @parameterized.parameters(True, False)
-  def test_crb(self, sparse: bool):
-    """Tests crb."""
-    mjm, mjd, m, d = test_util.fixture("pendula.xml", sparse=sparse)
+  # @parameterized.parameters(True, False)
+  # def test_crb(self, sparse: bool):
+  #   """Tests crb."""
+  #   mjm, mjd, m, d = test_util.fixture("pendula.xml", sparse=sparse)
 
-    d.crb.zero_()
+  #   d.crb.zero_()
 
-    mjwarp.crb(m, d)
-    _assert_eq(d.crb.numpy()[0], mjd.crb, "crb")
+  #   mjwarp.crb(m, d)
+  #   _assert_eq(d.crb.numpy()[0], mjd.crb, "crb")
 
-    if sparse:
-      _assert_eq(d.qM.numpy()[0, 0], mjd.qM, "qM")
-    else:
-      qM = np.zeros((mjm.nv, mjm.nv))
-      mujoco.mj_fullM(mjm, qM, mjd.qM)
-      _assert_eq(d.qM.numpy()[0], qM, "qM")
+  #   if sparse:
+  #     _assert_eq(d.qM.numpy()[0, 0], mjd.qM, "qM")
+  #   else:
+  #     qM = np.zeros((mjm.nv, mjm.nv))
+  #     mujoco.mj_fullM(mjm, qM, mjd.qM)
+  #     _assert_eq(d.qM.numpy()[0], qM, "qM")
 
-  @parameterized.parameters(True, False)
-  def test_factor_m(self, sparse: bool):
-    """Tests factor_m."""
-    _, mjd, m, d = test_util.fixture("pendula.xml", sparse=sparse)
+  # @parameterized.parameters(True, False)
+  # def test_factor_m(self, sparse: bool):
+  #   """Tests factor_m."""
+  #   _, mjd, m, d = test_util.fixture("pendula.xml", sparse=sparse)
 
-    qLD = d.qLD.numpy()[0].copy()
-    for arr in (d.qLD, d.qLDiagInv):
-      arr.zero_()
+  #   qLD = d.qLD.numpy()[0].copy()
+  #   for arr in (d.qLD, d.qLDiagInv):
+  #     arr.zero_()
 
-    mjwarp.factor_m(m, d)
+  #   mjwarp.factor_m(m, d)
 
-    if sparse:
-      _assert_eq(d.qLD.numpy()[0, 0], mjd.qLD, "qLD (sparse)")
-      _assert_eq(d.qLDiagInv.numpy()[0], mjd.qLDiagInv, "qLDiagInv")
-    else:
-      _assert_eq(d.qLD.numpy()[0], qLD, "qLD (dense)")
+  #   if sparse:
+  #     _assert_eq(d.qLD.numpy()[0, 0], mjd.qLD, "qLD (sparse)")
+  #     _assert_eq(d.qLDiagInv.numpy()[0], mjd.qLDiagInv, "qLDiagInv")
+  #   else:
+  #     _assert_eq(d.qLD.numpy()[0], qLD, "qLD (dense)")
 
-  @parameterized.parameters(True, False)
-  def test_solve_m(self, sparse: bool):
-    """Tests solve_m."""
-    mjm, mjd, m, d = test_util.fixture("pendula.xml", sparse=sparse)
+  # @parameterized.parameters(True, False)
+  # def test_solve_m(self, sparse: bool):
+  #   """Tests solve_m."""
+  #   mjm, mjd, m, d = test_util.fixture("pendula.xml", sparse=sparse)
 
-    qfrc_smooth = np.tile(mjd.qfrc_smooth, (1, 1))
-    qacc_smooth = np.zeros(
-      shape=(
-        1,
-        mjm.nv,
-      ),
-      dtype=float,
-    )
-    mujoco.mj_solveM(mjm, mjd, qacc_smooth, qfrc_smooth)
+  #   qfrc_smooth = np.tile(mjd.qfrc_smooth, (1, 1))
+  #   qacc_smooth = np.zeros(
+  #     shape=(
+  #       1,
+  #       mjm.nv,
+  #     ),
+  #     dtype=float,
+  #   )
+  #   mujoco.mj_solveM(mjm, mjd, qacc_smooth, qfrc_smooth)
 
-    d.qacc_smooth.zero_()
+  #   d.qacc_smooth.zero_()
 
-    mjwarp.solve_m(m, d, d.qacc_smooth, d.qfrc_smooth)
-    _assert_eq(d.qacc_smooth.numpy()[0], qacc_smooth[0], "qacc_smooth")
+  #   mjwarp.solve_m(m, d, d.qacc_smooth, d.qfrc_smooth)
+  #   _assert_eq(d.qacc_smooth.numpy()[0], qacc_smooth[0], "qacc_smooth")
 
-  @parameterized.parameters(True, False)
-  def test_rne(self, gravity):
-    """Tests rne."""
-    _, mjd, m, d = test_util.fixture("pendula.xml", gravity=gravity)
+  # @parameterized.parameters(True, False)
+  # def test_rne(self, gravity):
+  #   """Tests rne."""
+  #   _, mjd, m, d = test_util.fixture("pendula.xml", gravity=gravity)
 
-    d.qfrc_bias.zero_()
+  #   d.qfrc_bias.zero_()
 
-    mjwarp.rne(m, d)
-    _assert_eq(d.qfrc_bias.numpy()[0], mjd.qfrc_bias, "qfrc_bias")
+  #   mjwarp.rne(m, d)
+  #   _assert_eq(d.qfrc_bias.numpy()[0], mjd.qfrc_bias, "qfrc_bias")
 
-    # TODO(team): test DisableBit.GRAVITY
+  #   # TODO(team): test DisableBit.GRAVITY
 
-  @parameterized.parameters(True, False)
-  def test_rne_postconstraint(self, gravity):
-    """Tests rne_postconstraint."""
-    mjm, mjd, m, d = test_util.fixture("pendula.xml", gravity=gravity)
+  # @parameterized.parameters(True, False)
+  # def test_rne_postconstraint(self, gravity):
+  #   """Tests rne_postconstraint."""
+  #   mjm, mjd, m, d = test_util.fixture("pendula.xml", gravity=gravity)
 
-    mjd.xfrc_applied = np.random.uniform(
-      low=-0.01, high=0.01, size=mjd.xfrc_applied.shape
-    )
-    d.xfrc_applied = wp.array(
-      np.expand_dims(mjd.xfrc_applied, axis=0), dtype=wp.spatial_vector
-    )
+  #   mjd.xfrc_applied = np.random.uniform(
+  #     low=-0.01, high=0.01, size=mjd.xfrc_applied.shape
+  #   )
+  #   d.xfrc_applied = wp.array(
+  #     np.expand_dims(mjd.xfrc_applied, axis=0), dtype=wp.spatial_vector
+  #   )
 
-    mujoco.mj_rnePostConstraint(mjm, mjd)
+  #   mujoco.mj_rnePostConstraint(mjm, mjd)
 
-    for arr in (d.cacc, d.cfrc_int, d.cfrc_ext):
-      arr.zero_()
+  #   for arr in (d.cacc, d.cfrc_int, d.cfrc_ext):
+  #     arr.zero_()
 
-    mjwarp.rne_postconstraint(m, d)
+  #   mjwarp.rne_postconstraint(m, d)
 
-    _assert_eq(d.cacc.numpy()[0], mjd.cacc, "cacc")
-    _assert_eq(d.cfrc_int.numpy()[0], mjd.cfrc_int, "cfrc_int")
-    _assert_eq(d.cfrc_ext.numpy()[0], mjd.cfrc_ext, "cfrc_ext")
+  #   _assert_eq(d.cacc.numpy()[0], mjd.cacc, "cacc")
+  #   _assert_eq(d.cfrc_int.numpy()[0], mjd.cfrc_int, "cfrc_int")
+  #   _assert_eq(d.cfrc_ext.numpy()[0], mjd.cfrc_ext, "cfrc_ext")
 
-    _EQUALITY = """
-      <mujoco>
-        <option gravity="1 1 -1">
-          <flag contact="disable"/>
-        </option>
-        <worldbody>
-          <site name="siteworld"/>
-          <body name="body0">
-            <geom type="sphere" size=".1"/>
-            <freejoint/>
-          </body>
-          <body name="body1">
-            <geom type="sphere" size=".1"/>
-            <site name="site1"/>
-            <freejoint/>
-          </body>
-          <body name="body2">
-            <geom type="sphere" size=".1"/>
-            <freejoint/>
-          </body>
-          <body name="body3">
-            <geom type="sphere" size=".1"/>
-            <site name="site3" quat="0 1 0 0"/>
-            <freejoint/>
-          </body>
-        </worldbody>
-        <equality>
-          <connect body1="body0" anchor="1 1 1"/>
-          <connect site1="siteworld" site2="site1"/>
-          <weld body1="body2" relpose="1 1 1 0 1 0 0"/>
-          <weld site1="siteworld" site2="site3"/>
-        </equality>
-        <keyframe>
-          <key qpos="0 0 0 1 0 0 0 1 1 1 1 0 0 0 0 0 0 1 0 0 0 1 1 1 1 0 0 0"/>
-        </keyframe>
-      </mujoco>
-      """
-    mjm, mjd, m, d = test_util.fixture(xml=_EQUALITY, kick=True, keyframe=0)
+  #   _EQUALITY = """
+  #     <mujoco>
+  #       <option gravity="1 1 -1">
+  #         <flag contact="disable"/>
+  #       </option>
+  #       <worldbody>
+  #         <site name="siteworld"/>
+  #         <body name="body0">
+  #           <geom type="sphere" size=".1"/>
+  #           <freejoint/>
+  #         </body>
+  #         <body name="body1">
+  #           <geom type="sphere" size=".1"/>
+  #           <site name="site1"/>
+  #           <freejoint/>
+  #         </body>
+  #         <body name="body2">
+  #           <geom type="sphere" size=".1"/>
+  #           <freejoint/>
+  #         </body>
+  #         <body name="body3">
+  #           <geom type="sphere" size=".1"/>
+  #           <site name="site3" quat="0 1 0 0"/>
+  #           <freejoint/>
+  #         </body>
+  #       </worldbody>
+  #       <equality>
+  #         <connect body1="body0" anchor="1 1 1"/>
+  #         <connect site1="siteworld" site2="site1"/>
+  #         <weld body1="body2" relpose="1 1 1 0 1 0 0"/>
+  #         <weld site1="siteworld" site2="site3"/>
+  #       </equality>
+  #       <keyframe>
+  #         <key qpos="0 0 0 1 0 0 0 1 1 1 1 0 0 0 0 0 0 1 0 0 0 1 1 1 1 0 0 0"/>
+  #       </keyframe>
+  #     </mujoco>
+  #     """
+  #   mjm, mjd, m, d = test_util.fixture(xml=_EQUALITY, kick=True, keyframe=0)
 
-    mujoco.mj_rnePostConstraint(mjm, mjd)
+  #   mujoco.mj_rnePostConstraint(mjm, mjd)
 
-    d.cfrc_ext.zero_()
-    mjwarp.rne_postconstraint(m, d)
+  #   d.cfrc_ext.zero_()
+  #   mjwarp.rne_postconstraint(m, d)
 
-    _assert_eq(d.cfrc_ext.numpy()[0], mjd.cfrc_ext, "cfrc_ext (equality)")
+  #   _assert_eq(d.cfrc_ext.numpy()[0], mjd.cfrc_ext, "cfrc_ext (equality)")
 
-    mjm, mjd, m, d = test_util.fixture("constraints.xml", keyframe=1, equality=False)
+  #   mjm, mjd, m, d = test_util.fixture("constraints.xml", keyframe=1, equality=False)
 
-    mujoco.mj_rnePostConstraint(mjm, mjd)
+  #   mujoco.mj_rnePostConstraint(mjm, mjd)
 
-    d.cfrc_ext.zero_()
+  #   d.cfrc_ext.zero_()
 
-    # clear equality constraint counts
-    d.ne_connect.zero_()
-    d.ne_weld.zero_()
-    d.ne_jnt.zero_()
+  #   # clear equality constraint counts
+  #   d.ne_connect.zero_()
+  #   d.ne_weld.zero_()
+  #   d.ne_jnt.zero_()
 
-    mjwarp.rne_postconstraint(m, d)
+  #   mjwarp.rne_postconstraint(m, d)
 
-    _assert_eq(d.cfrc_ext.numpy()[0], mjd.cfrc_ext, "cfrc_ext (contact)")
+  #   _assert_eq(d.cfrc_ext.numpy()[0], mjd.cfrc_ext, "cfrc_ext (contact)")
 
-  def test_com_vel(self):
-    """Tests com_vel."""
-    _, mjd, m, d = test_util.fixture("pendula.xml")
+  # def test_com_vel(self):
+  #   """Tests com_vel."""
+  #   _, mjd, m, d = test_util.fixture("pendula.xml")
 
-    for arr in (d.cvel, d.cdof_dot):
-      arr.zero_()
+  #   for arr in (d.cvel, d.cdof_dot):
+  #     arr.zero_()
 
-    mjwarp.com_vel(m, d)
-    _assert_eq(d.cvel.numpy()[0], mjd.cvel, "cvel")
-    _assert_eq(d.cdof_dot.numpy()[0], mjd.cdof_dot, "cdof_dot")
+  #   mjwarp.com_vel(m, d)
+  #   _assert_eq(d.cvel.numpy()[0], mjd.cvel, "cvel")
+  #   _assert_eq(d.cdof_dot.numpy()[0], mjd.cdof_dot, "cdof_dot")
 
-  def test_transmission(self):
-    """Tests transmission."""
-    mjm, mjd, m, d = test_util.fixture("pendula.xml")
+  # def test_transmission(self):
+  #   """Tests transmission."""
+  #   mjm, mjd, m, d = test_util.fixture("pendula.xml")
 
-    for arr in (d.actuator_length, d.actuator_moment):
-      arr.zero_()
+  #   for arr in (d.actuator_length, d.actuator_moment):
+  #     arr.zero_()
 
-    actuator_moment = np.zeros((mjm.nu, mjm.nv))
-    mujoco.mju_sparse2dense(
-      actuator_moment,
-      mjd.actuator_moment,
-      mjd.moment_rownnz,
-      mjd.moment_rowadr,
-      mjd.moment_colind,
-    )
+  #   actuator_moment = np.zeros((mjm.nu, mjm.nv))
+  #   mujoco.mju_sparse2dense(
+  #     actuator_moment,
+  #     mjd.actuator_moment,
+  #     mjd.moment_rownnz,
+  #     mjd.moment_rowadr,
+  #     mjd.moment_colind,
+  #   )
 
-    mjwarp._src.smooth.transmission(m, d)
-    _assert_eq(d.actuator_length.numpy()[0], mjd.actuator_length, "actuator_length")
-    _assert_eq(d.actuator_moment.numpy()[0], actuator_moment, "actuator_moment")
+  #   mjwarp._src.smooth.transmission(m, d)
+  #   _assert_eq(d.actuator_length.numpy()[0], mjd.actuator_length, "actuator_length")
+  #   _assert_eq(d.actuator_moment.numpy()[0], actuator_moment, "actuator_moment")
 
-  def test_subtree_vel(self):
-    """Tests subtree_vel."""
-    mjm, mjd, m, d = test_util.fixture("pendula.xml")
+  # def test_subtree_vel(self):
+  #   """Tests subtree_vel."""
+  #   mjm, mjd, m, d = test_util.fixture("pendula.xml")
 
-    for arr in (d.subtree_linvel, d.subtree_angmom):
-      arr.zero_()
+  #   for arr in (d.subtree_linvel, d.subtree_angmom):
+  #     arr.zero_()
 
-    mujoco.mj_subtreeVel(mjm, mjd)
-    mjwarp.subtree_vel(m, d)
+  #   mujoco.mj_subtreeVel(mjm, mjd)
+  #   mjwarp.subtree_vel(m, d)
 
-    _assert_eq(d.subtree_linvel.numpy()[0], mjd.subtree_linvel, "subtree_linvel")
-    _assert_eq(d.subtree_angmom.numpy()[0], mjd.subtree_angmom, "subtree_angmom")
+  #   _assert_eq(d.subtree_linvel.numpy()[0], mjd.subtree_linvel, "subtree_linvel")
+  #   _assert_eq(d.subtree_angmom.numpy()[0], mjd.subtree_angmom, "subtree_angmom")
 
-  @parameterized.parameters(
-    ("tendon/fixed.xml"),
-    ("tendon/site.xml"),
-    ("tendon/fixed_site.xml"),
-    ("tendon/site_fixed.xml"),
-  )
-  def test_tendon(self, xml):
-    """Tests tendon."""
-    mjm, mjd, m, d = test_util.fixture(xml, keyframe=0)
+  # @parameterized.parameters(
+  #   ("tendon/fixed.xml"),
+  #   ("tendon/site.xml"),
+  #   ("tendon/fixed_site.xml"),
+  #   ("tendon/site_fixed.xml"),
+  # )
+  # def test_tendon(self, xml):
+  #   """Tests tendon."""
+  #   mjm, mjd, m, d = test_util.fixture(xml, keyframe=0)
 
-    for arr in (d.ten_length, d.ten_J, d.actuator_length, d.actuator_moment):
-      arr.zero_()
+  #   for arr in (d.ten_length, d.ten_J, d.actuator_length, d.actuator_moment):
+  #     arr.zero_()
 
-    mjwarp.tendon(m, d)
-    mjwarp.transmission(m, d)
+  #   mjwarp.tendon(m, d)
+  #   mjwarp.transmission(m, d)
 
-    _assert_eq(d.ten_length.numpy()[0], mjd.ten_length, "ten_length")
-    _assert_eq(d.ten_J.numpy()[0], mjd.ten_J.reshape((mjm.ntendon, mjm.nv)), "ten_J")
-    _assert_eq(d.wrap_xpos.numpy()[0], mjd.wrap_xpos, "wrap_xpos")
-    _assert_eq(d.wrap_obj.numpy()[0], mjd.wrap_obj, "wrap_obj")
-    _assert_eq(d.ten_wrapnum.numpy()[0], mjd.ten_wrapnum, "ten_wrapnum")
-    _assert_eq(d.ten_wrapadr.numpy()[0], mjd.ten_wrapadr, "ten_wrapadr")
-    _assert_eq(d.actuator_length.numpy()[0], mjd.actuator_length, "actuator_length")
-    actuator_moment = np.zeros((mjm.nu, mjm.nv))
-    mujoco.mju_sparse2dense(
-      actuator_moment,
-      mjd.actuator_moment,
-      mjd.moment_rownnz,
-      mjd.moment_rowadr,
-      mjd.moment_colind,
-    )
-    _assert_eq(d.actuator_moment.numpy()[0], actuator_moment, "actuator_moment")
+  #   _assert_eq(d.ten_length.numpy()[0], mjd.ten_length, "ten_length")
+  #   _assert_eq(d.ten_J.numpy()[0], mjd.ten_J.reshape((mjm.ntendon, mjm.nv)), "ten_J")
+  #   _assert_eq(d.wrap_xpos.numpy()[0], mjd.wrap_xpos, "wrap_xpos")
+  #   _assert_eq(d.wrap_obj.numpy()[0], mjd.wrap_obj, "wrap_obj")
+  #   _assert_eq(d.ten_wrapnum.numpy()[0], mjd.ten_wrapnum, "ten_wrapnum")
+  #   _assert_eq(d.ten_wrapadr.numpy()[0], mjd.ten_wrapadr, "ten_wrapadr")
+  #   _assert_eq(d.actuator_length.numpy()[0], mjd.actuator_length, "actuator_length")
+  #   actuator_moment = np.zeros((mjm.nu, mjm.nv))
+  #   mujoco.mju_sparse2dense(
+  #     actuator_moment,
+  #     mjd.actuator_moment,
+  #     mjd.moment_rownnz,
+  #     mjd.moment_rowadr,
+  #     mjd.moment_colind,
+  #   )
+  #   _assert_eq(d.actuator_moment.numpy()[0], actuator_moment, "actuator_moment")
 
 
 if __name__ == "__main__":

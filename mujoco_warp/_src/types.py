@@ -542,6 +542,7 @@ class TileSet:
 
 # TODO(team): make Model/Data fields sort order match mujoco
 
+
 @dataclasses.dataclass
 class Model:
   """Model definition and parameters.
