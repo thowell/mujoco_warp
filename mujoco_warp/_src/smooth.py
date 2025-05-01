@@ -923,7 +923,7 @@ def factor_m(m: Model, d: Data):
 
 
 @kernel
-def _cacc_gravity(
+def _cacc_world(
   # In:
   gravity: wp.vec3,
   # Data out:
@@ -933,8 +933,15 @@ def _cacc_gravity(
   cacc_out[worldid, 0] = wp.spatial_vector(wp.vec3(0.0), -gravity)
 
 
+def _rne_cacc_world(m: Model, d: Data):
+  if m.opt.disableflags & DisableBit.GRAVITY:
+    d.cacc.zero_()
+  else:
+    wp.launch(_cacc_world, dim=[d.nworld], inputs=[m.opt.gravity], outputs=[d.cacc])
+
+
 @kernel
-def _cacc_level(
+def _cacc(
   # Model:
   body_dofnum: wp.array(dtype=int),
   body_parentid: wp.array(dtype=int),
@@ -943,8 +950,11 @@ def _cacc_level(
   cdof_dot_in: wp.array2d(dtype=wp.spatial_vector),
   qvel_in: wp.array2d(dtype=float),
   cacc_in: wp.array2d(dtype=wp.spatial_vector),
+  cdof_in: wp.array2d(dtype=wp.spatial_vector),
+  qacc_in: wp.array2d(dtype=float),
   # In:
   body_tree_: wp.array(dtype=int),
+  flg_acc: bool,
   # Data out:
   cacc_out: wp.array2d(dtype=wp.spatial_vector),
 ):
@@ -956,29 +966,67 @@ def _cacc_level(
   local_cacc = cacc_in[worldid, pid]
   for i in range(dofnum):
     local_cacc += cdof_dot_in[worldid, dofadr + i] * qvel_in[worldid, dofadr + i]
+    if flg_acc:
+      local_cacc += cdof_in[worldid, dofadr + i] * qacc_in[worldid, dofadr + i]
   cacc_out[worldid, bodyid] = local_cacc
 
 
+def _rne_cacc_forward(m: Model, d: Data, flg_acc: bool = False):
+  for body_tree in m.body_tree:
+    wp.launch(
+      _cacc,
+      dim=(d.nworld, body_tree.size),
+      inputs=[
+        m.body_dofnum,
+        m.body_parentid,
+        m.body_dofadr,
+        d.cdof_dot,
+        d.qvel,
+        d.cacc,
+        d.cdof,
+        d.qacc,
+        body_tree,
+        flg_acc,
+      ],
+      outputs=[d.cacc],
+    )
+
+
 @kernel
-def _frc_fn(
+def _cfrc(
   # Data in:
   cacc_in: wp.array2d(dtype=wp.spatial_vector),
   cinert_in: wp.array2d(dtype=vec10),
   cvel_in: wp.array2d(dtype=wp.spatial_vector),
+  cfrc_ext_in: wp.array2d(dtype=wp.spatial_vector),
+  # In:
+  flg_cfrc_ext: bool,
   # Data out:
   cfrc_int_out: wp.array2d(dtype=wp.spatial_vector),
 ):
   worldid, bodyid = wp.tid()
-  frc = math.inert_vec(cinert_in[worldid, bodyid], cacc_in[worldid, bodyid])
-  frc += math.motion_cross_force(
-    cvel_in[worldid, bodyid],
-    math.inert_vec(cinert_in[worldid, bodyid], cvel_in[worldid, bodyid]),
-  )
+  cacc = cacc_in[worldid, bodyid]
+  cinert = cinert_in[worldid, bodyid]
+  cvel = cvel_in[worldid, bodyid]
+  frc = math.inert_vec(cinert, cacc)
+  frc += math.motion_cross_force(cvel, math.inert_vec(cinert, cvel))
+  if flg_cfrc_ext:
+    frc -= cfrc_ext_in[worldid, bodyid]
+
   cfrc_int_out[worldid, bodyid] = frc
 
 
+def _rne_cfrc(m: Model, d: Data, flg_cfrc_ext: bool = False):
+  wp.launch(
+    _cfrc,
+    dim=[d.nworld, m.nbody - 1],
+    inputs=[d.cacc, d.cinert, d.cvel, d.cfrc_ext, flg_cfrc_ext],
+    outputs=[d.cfrc_int],
+  )
+
+
 @kernel
-def _cfrc_fn(
+def _cfrc_backward(
   # Model:
   body_parentid: wp.array(dtype=int),
   # Data in:
@@ -991,7 +1039,18 @@ def _cfrc_fn(
   worldid, nodeid = wp.tid()
   bodyid = body_tree_[nodeid]
   pid = body_parentid[bodyid]
-  wp.atomic_add(cfrc_int_out[worldid], pid, cfrc_int_in[worldid, bodyid])
+  if bodyid != 0:
+    wp.atomic_add(cfrc_int_out[worldid], pid, cfrc_int_in[worldid, bodyid])
+
+
+def _rne_cfrc_backward(m: Model, d: Data):
+  for body_tree in reversed(m.body_tree):
+    wp.launch(
+      _cfrc_backward,
+      dim=[d.nworld, body_tree.size],
+      inputs=[m.body_parentid, d.cfrc_int, body_tree],
+      outputs=[d.cfrc_int],
+    )
 
 
 @kernel
@@ -1012,43 +1071,12 @@ def _qfrc_bias(
 
 
 @event_scope
-def rne(m: Model, d: Data):
+def rne(m: Model, d: Data, flg_acc: bool = False):
   """Computes inverse dynamics using Newton-Euler algorithm."""
-  if m.opt.disableflags & DisableBit.GRAVITY:
-    d.cacc.zero_()
-  else:
-    wp.launch(_cacc_gravity, dim=[d.nworld], inputs=[m.opt.gravity], outputs=[d.cacc])
-
-  for body_tree in m.body_tree:
-    wp.launch(
-      _cacc_level,
-      dim=(d.nworld, body_tree.size),
-      inputs=[
-        m.body_dofnum,
-        m.body_parentid,
-        m.body_dofadr,
-        d.cdof_dot,
-        d.qvel,
-        d.cacc,
-        body_tree,
-      ],
-      outputs=[d.cacc],
-    )
-
-  wp.launch(
-    _frc_fn,
-    dim=[d.nworld, m.nbody],
-    inputs=[d.cacc, d.cinert, d.cvel],
-    outputs=[d.cfrc_int],
-  )
-
-  for body_tree in reversed(m.body_tree):
-    wp.launch(
-      _cfrc_fn,
-      dim=[d.nworld, body_tree.size],
-      inputs=[m.body_parentid, d.cfrc_int, body_tree],
-      outputs=[d.cfrc_int],
-    )
+  _rne_cacc_world(m, d)
+  _rne_cacc_forward(m, d, flg_acc=flg_acc)
+  _rne_cfrc(m, d)
+  _rne_cfrc_backward(m, d)
 
   wp.launch(
     _qfrc_bias,
