@@ -15,12 +15,14 @@
 
 """Public API for MJWarp."""
 
-# from ._src.collision_driver import collision as collision
-# from ._src.collision_driver import nxn_broadphase as nxn_broadphase
-# from ._src.collision_driver import sap_broadphase as sap_broadphase
-# from ._src.collision_primitive import primitive_narrowphase as primitive_narrowphase
+
+from ._src.collision_driver import collision as collision
+from ._src.collision_driver import nxn_broadphase as nxn_broadphase
+from ._src.collision_driver import sap_broadphase as sap_broadphase
+from ._src.collision_primitive import primitive_narrowphase as primitive_narrowphase
 from ._src.constraint import make_constraint as make_constraint
 
+# from ._src.constraint import make_constraint as make_constraint
 # from ._src.forward import euler as euler
 # from ._src.forward import forward as forward
 # from ._src.forward import fwd_acceleration as fwd_acceleration
@@ -34,10 +36,11 @@ from ._src.io import get_data_into as get_data_into
 from ._src.io import make_data as make_data
 from ._src.io import put_data as put_data
 from ._src.io import put_model as put_model
-# from ._src.passive import passive as passive
-# from ._src.sensor import sensor_acc as sensor_acc
-# from ._src.sensor import sensor_pos as sensor_pos
-# from ._src.sensor import sensor_vel as sensor_vel
+from ._src.passive import passive as passive
+from ._src.sensor import sensor_acc as sensor_acc
+from ._src.sensor import sensor_pos as sensor_pos
+from ._src.sensor import sensor_vel as sensor_vel
+
 # from ._src.smooth import camlight as camlight
 # from ._src.smooth import com_pos as com_pos
 # from ._src.smooth import com_vel as com_vel
@@ -51,10 +54,9 @@ from ._src.io import put_model as put_model
 # from ._src.smooth import tendon as tendon
 # from ._src.smooth import transmission as transmission
 # from ._src.solver import solve as solve
-# from ._src.support import contact_force as contact_force
-# from ._src.support import is_sparse as is_sparse
-# from ._src.support import mul_m as mul_m
-# from ._src.support import xfrc_accumulate as xfrc_accumulate
+from ._src.support import contact_force as contact_force
+from ._src.support import mul_m as mul_m
+from ._src.support import xfrc_accumulate as xfrc_accumulate
 # from ._src.test_util import benchmark as benchmark
 # from ._src.types import ConeType as ConeType
 # from ._src.types import Contact as Contact

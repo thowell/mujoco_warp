@@ -37,7 +37,7 @@ def _assert_eq(a, b, name):
 class PassiveTest(absltest.TestCase):
   def test_passive(self):
     """Tests passive."""
-    _, mjd, m, d = test_util.fixture("pendula.xml")
+    _, mjd, m, d = test_util.fixture("pendula.xml", kick=True)
 
     for arr in (d.qfrc_spring, d.qfrc_damper, d.qfrc_passive):
       arr.zero_()

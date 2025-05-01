@@ -194,7 +194,9 @@ def gjk_epa_pipeline(
   # Returns simplex and normal.
   @wp.func
   def _gjk(
-    m: Model,
+    # Model:
+    mesh_vert: wp.array(dtype=wp.vec3),
+    # In:
     info1: Geom,
     info2: Geom,
   ):
@@ -202,8 +204,8 @@ def gjk_epa_pipeline(
     dir_n = -dir
     depth = 1e30
 
-    dist_max, simplex0 = _gjk_support(info1, info2, type1, type2, dir, m.mesh_vert)
-    dist_min, simplex1 = _gjk_support(info1, info2, type1, type2, dir_n, m.mesh_vert)
+    dist_max, simplex0 = _gjk_support(info1, info2, type1, type2, dir, mesh_vert)
+    dist_min, simplex1 = _gjk_support(info1, info2, type1, type2, dir_n, mesh_vert)
     if dist_max < dist_min:
       depth = dist_max
       normal = dir
@@ -215,7 +217,7 @@ def gjk_epa_pipeline(
     sd = simplex0 - simplex1
     dir = orthonormal(sd)
 
-    dist_max, simplex3 = _gjk_support(info1, info2, type1, type2, dir, m.mesh_vert)
+    dist_max, simplex3 = _gjk_support(info1, info2, type1, type2, dir, mesh_vert)
     # Initialize a 2-simplex with simplex[2]==simplex[1]. This ensures the
     # correct winding order for face normals defined below. Face 0 and face 3
     # are degenerate, and face 1 and 2 have opposing normals.
@@ -273,7 +275,7 @@ def gjk_epa_pipeline(
 
       # Add new support point to the simplex.
       dist, simplex_i = _gjk_support(
-        info1, info2, type1, type2, plane[index], m.mesh_vert
+        info1, info2, type1, type2, plane[index], mesh_vert
       )
       simplex[index] = simplex_i
       if dist < depth:
@@ -294,7 +296,9 @@ def gjk_epa_pipeline(
   # computes contact normal and depth
   @wp.func
   def _epa(
-    m: Model,
+    # Model:
+    mesh_vert: wp.array(dtype=wp.vec3),
+    # In:
     info1: Geom,
     info2: Geom,
     simplex: mat43,
@@ -303,7 +307,7 @@ def gjk_epa_pipeline(
     normal = input_normal
 
     # Get the support. If less than 0, objects are not intersecting.
-    depth, _simplex = _gjk_support(info1, info2, type1, type2, normal, m.mesh_vert)
+    depth, _simplex = _gjk_support(info1, info2, type1, type2, normal, mesh_vert)
 
     if depth < -depth_extension:
       # Objects are not intersecting, and we do not obtain the closest points as
@@ -327,7 +331,7 @@ def gjk_epa_pipeline(
           p0 = wp.clamp(alpha, 0.0, 1.0) * v - si1
           p0, pf = gjk_normalize(p0)
           if pf:
-            depth2, _ = _gjk_support(info1, info2, type1, type2, p0, m.mesh_vert)
+            depth2, _ = _gjk_support(info1, info2, type1, type2, p0, mesh_vert)
             if depth2 < depth:
               depth = depth2
               normal = p0
@@ -376,7 +380,7 @@ def gjk_epa_pipeline(
           dists[i * 3 + j] = 2e30
         continue
 
-      dist, pi = _gjk_support(info1, info2, type1, type2, n, m.mesh_vert)
+      dist, pi = _gjk_support(info1, info2, type1, type2, n, mesh_vert)
       p[i] = pi
       if dist < depth:
         depth = dist
@@ -392,7 +396,7 @@ def gjk_epa_pipeline(
             p0 = wp.clamp(alpha, 0.0, 1.0) * v - p[i]
             p0, pf = gjk_normalize(p0)
             if pf:
-              dist2, v = _gjk_support(info1, info2, type1, type2, p0, m.mesh_vert)
+              dist2, v = _gjk_support(info1, info2, type1, type2, p0, mesh_vert)
               if dist2 < depth:
                 depth = dist2
                 normal = p0
@@ -425,7 +429,9 @@ def gjk_epa_pipeline(
 
   @wp.func
   def _get_multiple_contacts(
-    m: Model,
+    # Model:
+    mesh_vert: wp.array(dtype=wp.vec3),
+    # In:
     info1: Geom,
     info2: Geom,
     depth: float,
@@ -494,13 +500,13 @@ def gjk_epa_pipeline(
         mat8 * normal[0] + mat9 * normal[1] + mat10 * normal[2],
       )
 
-      _, p = gjk_support_geom(info1, type1, n, m.mesh_vert)
+      _, p = gjk_support_geom(info1, type1, n, mesh_vert)
       v1[v1count] = wp.vec3(wp.dot(p, dir), wp.dot(p, dir2), wp.dot(p, normal))
       if i != 0 or any_different(v1[v1count], v1[v1count - 1]):
         v1count += 1
 
       n = -n
-      _, p = gjk_support_geom(info2, type2, n, m.mesh_vert)
+      _, p = gjk_support_geom(info2, type2, n, mesh_vert)
       v2[v2count] = wp.vec3(wp.dot(p, dir), wp.dot(p, dir2), wp.dot(p, normal))
       if i != 0 or any_different(v2[v2count], v2[v2count - 1]):
         v2count += 1
@@ -709,51 +715,90 @@ def gjk_epa_pipeline(
   # Runs GJK and EPA on a set of sparse geom pairs per env.
   @wp.kernel
   def gjk_epa_sparse(
-    m: Model,
-    d: Data,
+    # Model:
+    geom_type: wp.array(dtype=int),
+    geom_dataid: wp.array(dtype=int),
+    geom_size: wp.array(dtype=wp.vec3),
+    geom_margin: wp.array(dtype=float),
+    mesh_vertadr: wp.array(dtype=int),
+    mesh_vertnum: wp.array(dtype=int),
+    mesh_vert: wp.array(dtype=wp.vec3),
+    # Data in:
+    nconmax_in: int,
+    ncon_in: wp.array(dtype=int),
+    geom_xpos_in: wp.array2d(dtype=wp.vec3),
+    geom_xmat_in: wp.array2d(dtype=wp.mat33),
+    collision_pair_in: wp.array(dtype=wp.vec2i),
+    collision_worldid_in: wp.array(dtype=int),
+    ncollision_in: wp.array(dtype=int),
+    # Data out:
+    ncon_out: wp.array(dtype=int),
+    # Out:
+    dist_out: wp.array(dtype=float),
+    pos_out: wp.array(dtype=wp.vec3),
+    frame_out: wp.array(dtype=wp.mat33),
+    geoms_out: wp.array(dtype=wp.vec2i),
+    worldid_out: wp.array(dtype=int),
   ):
     # Check if we generated max contacts for this env.
     # TODO(btaba): move max_contact_points_per_env culling to a point later
     # in the pipline, where we can do a sort on penetration depth per env.
-    if d.ncon[0] > d.nconmax:
+    if ncon_in[0] > nconmax_in:
       return
 
     tid = wp.tid()
-    if tid >= d.ncollision[0]:
+    if tid >= ncollision_in[0]:
       return
 
-    worldid = d.collision_worldid[tid]
-    geoms = d.collision_pair[tid]
+    worldid = collision_worldid_in[tid]
+    geoms = collision_pair_in[tid]
 
     g1 = geoms[0]
     g2 = geoms[1]
 
-    if m.geom_type[g1] != type1 or m.geom_type[g2] != type2:
+    if geom_type[g1] != type1 or geom_type[g2] != type2:
       return
 
-    info1 = _geom(g1, m, d.geom_xpos[worldid], d.geom_xmat[worldid])
-    info2 = _geom(g2, m, d.geom_xpos[worldid], d.geom_xmat[worldid])
+    info1 = _geom(
+      geom_dataid,
+      geom_size,
+      mesh_vertadr,
+      mesh_vertnum,
+      geom_xpos_in[worldid],
+      geom_xmat_in[worldid],
+      g1,
+    )
 
-    margin = wp.max(m.geom_margin[g1], m.geom_margin[g2])
+    info2 = _geom(
+      geom_dataid,
+      geom_size,
+      mesh_vertadr,
+      mesh_vertnum,
+      geom_xpos_in[worldid],
+      geom_xmat_in[worldid],
+      g2,
+    )
 
-    simplex, normal = _gjk(m, info1, info2)
+    margin = wp.max(geom_margin[g1], geom_margin[g2])
+
+    simplex, normal = _gjk(mesh_vert, info1, info2)
 
     # TODO(btaba): get depth from GJK, conditionally run EPA.
-    depth, normal = _epa(m, info1, info2, simplex, normal)
+    depth, normal = _epa(mesh_vert, info1, info2, simplex, normal)
 
     if (-depth - margin) >= 0.0 or depth != depth:
       return
 
     # TODO(btaba): split get_multiple_contacts into a separate kernel.
-    count, points = _get_multiple_contacts(m, info1, info2, depth, normal)
+    count, points = _get_multiple_contacts(mesh_vert, info1, info2, depth, normal)
 
-    cid = wp.atomic_add(d.ncon, 0, count)
+    cid = wp.atomic_add(ncon_out, 0, count)
     for i in range(count):
-      d.contact.dist[cid + i] = -depth
-      d.contact.geom[cid + i] = geoms
-      d.contact.frame[cid + i] = make_frame(normal)
-      d.contact.pos[cid + i] = points[i]
-      d.contact.worldid[cid + i] = worldid
+      dist_out[cid + i] = -depth
+      geoms_out[cid + i] = geoms
+      frame_out[cid + i] = make_frame(normal)
+      pos_out[cid + i] = points[i]
+      worldid_out[cid + i] = worldid
 
   return gjk_epa_sparse
 
@@ -776,4 +821,31 @@ def gjk_narrowphase(m: Model, d: Data):
       )
 
   for collision_kernel in _collision_kernels.values():
-    wp.launch(collision_kernel, dim=d.nconmax, inputs=[m, d])
+    wp.launch(
+      collision_kernel,
+      dim=d.nconmax,
+      inputs=[
+        m.geom_type,
+        m.geom_dataid,
+        m.geom_size,
+        m.geom_margin,
+        m.mesh_vertadr,
+        m.mesh_vertnum,
+        m.mesh_vert,
+        d.nconmax,
+        d.ncon,
+        d.geom_xpos,
+        d.geom_xmat,
+        d.collision_pair,
+        d.collision_worldid,
+        d.ncollision,
+      ],
+      outputs=[
+        d.ncon,
+        d.contact.dist,
+        d.contact.pos,
+        d.contact.frame,
+        d.contact.geom,
+        d.contact.worldid,
+      ],
+    )
