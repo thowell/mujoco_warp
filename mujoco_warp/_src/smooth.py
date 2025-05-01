@@ -922,253 +922,140 @@ def factor_m(m: Model, d: Data):
   factor_i(m, d, d.qM, d.qLD, d.qLDiagInv)
 
 
-# def _rne_cacc_world(m: Model, d: Data):
-#   @kernel
-#   def _cacc_world(m: Model, d: Data):
-#     worldid = wp.tid()
-#     d.cacc[worldid, 0] = wp.spatial_vector(wp.vec3(0.0), -m.opt.gravity)
-
-#   if m.opt.disableflags & DisableBit.GRAVITY:
-#     d.cacc.zero_()
-#   else:
-#     wp.launch(_cacc_world, dim=[d.nworld], inputs=[m, d])
-
-
-# def _rne_cacc_forward(m: Model, d: Data, flg_acc: bool = False):
-#   @kernel
-#   def _cacc(
-#     m: Model,
-#     d: Data,
-#     leveladr: int,
-#   ):
-#     worldid, nodeid = wp.tid()
-#     bodyid = m.body_tree[leveladr + nodeid]
-#     dofnum = m.body_dofnum[bodyid]
-#     pid = m.body_parentid[bodyid]
-#     dofadr = m.body_dofadr[bodyid]
-#     local_cacc = d.cacc[worldid, pid]
-#     for i in range(dofnum):
-#       local_cacc += d.cdof_dot[worldid, dofadr + i] * d.qvel[worldid, dofadr + i]
-#       if flg_acc:
-#         local_cacc += d.cdof[worldid, dofadr + i] * d.qacc[worldid, dofadr + i]
-#     d.cacc[worldid, bodyid] = local_cacc
-
-#   body_treeadr = m.body_treeadr.numpy()
-#   for i in range(len(body_treeadr)):
-#     beg = body_treeadr[i]
-#     end = m.nbody if i == len(body_treeadr) - 1 else body_treeadr[i + 1]
-#     wp.launch(_cacc, dim=(d.nworld, end - beg), inputs=[m, d, beg])
+@kernel
+def _cacc_gravity(
+  # In:
+  gravity: wp.vec3,
+  # Data out:
+  cacc_out: wp.array2d(dtype=wp.spatial_vector),
+):
+  worldid = wp.tid()
+  cacc_out[worldid, 0] = wp.spatial_vector(wp.vec3(0.0), -gravity)
 
 
-# def _rne_cfrc(m: Model, d: Data, flg_cfrc_ext: bool = False):
-#   @kernel
-#   def _cfrc(d: Data):
-#     worldid, bodyid = wp.tid()
-#     bodyid += 1  # skip world body
-#     cacc = d.cacc[worldid, bodyid]
-#     cinert = d.cinert[worldid, bodyid]
-#     cvel = d.cvel[worldid, bodyid]
-#     frc = math.inert_vec(cinert, cacc)
-#     frc += math.motion_cross_force(cvel, math.inert_vec(cinert, cvel))
-
-#     if flg_cfrc_ext:
-#       frc -= d.cfrc_ext[worldid, bodyid]
-
-#     d.cfrc_int[worldid, bodyid] = frc
-
-#   wp.launch(_cfrc, dim=[d.nworld, m.nbody - 1], inputs=[d])
-
-
-# def _rne_cfrc_backward(m: Model, d: Data):
-#   @kernel
-#   def _cfrc(m: Model, d: Data, leveladr: int):
-#     worldid, nodeid = wp.tid()
-#     bodyid = m.body_tree[leveladr + nodeid]
-#     pid = m.body_parentid[bodyid]
-#     if bodyid != 0:
-#       wp.atomic_add(d.cfrc_int[worldid], pid, d.cfrc_int[worldid, bodyid])
-
-#   body_treeadr = m.body_treeadr.numpy()
-#   for i in reversed(range(len(body_treeadr))):
-#     beg = body_treeadr[i]
-#     end = m.nbody if i == len(body_treeadr) - 1 else body_treeadr[i + 1]
-#     wp.launch(_cfrc, dim=[d.nworld, end - beg], inputs=[m, d, beg])
+@kernel
+def _cacc_level(
+  # Model:
+  body_dofnum: wp.array(dtype=int),
+  body_parentid: wp.array(dtype=int),
+  body_dofadr: wp.array(dtype=int),
+  # Data in:
+  cdof_dot_in: wp.array2d(dtype=wp.spatial_vector),
+  qvel_in: wp.array2d(dtype=float),
+  cacc_in: wp.array2d(dtype=wp.spatial_vector),
+  # In:
+  body_tree_: wp.array(dtype=int),
+  # Data out:
+  cacc_out: wp.array2d(dtype=wp.spatial_vector),
+):
+  worldid, nodeid = wp.tid()
+  bodyid = body_tree_[nodeid]
+  dofnum = body_dofnum[bodyid]
+  pid = body_parentid[bodyid]
+  dofadr = body_dofadr[bodyid]
+  local_cacc = cacc_in[worldid, pid]
+  for i in range(dofnum):
+    local_cacc += cdof_dot_in[worldid, dofadr + i] * qvel_in[worldid, dofadr + i]
+  cacc_out[worldid, bodyid] = local_cacc
 
 
-# @event_scope
-# def rne(m: Model, d: Data, flg_acc: bool = False):
-#   """Computes inverse dynamics using Newton-Euler algorithm."""
-
-#   @kernel
-#   def qfrc_bias(m: Model, d: Data):
-#     worldid, dofid = wp.tid()
-#     bodyid = m.dof_bodyid[dofid]
-#     d.qfrc_bias[worldid, dofid] = wp.dot(
-#       d.cdof[worldid, dofid], d.cfrc_int[worldid, bodyid]
-#     )
-
-#   _rne_cacc_world(m, d)
-#   _rne_cacc_forward(m, d, flg_acc=flg_acc)
-#   _rne_cfrc(m, d)
-#   _rne_cfrc_backward(m, d)
-
-#   wp.launch(qfrc_bias, dim=[d.nworld, m.nv], inputs=[m, d])
+@kernel
+def _frc_fn(
+  # Data in:
+  cacc_in: wp.array2d(dtype=wp.spatial_vector),
+  cinert_in: wp.array2d(dtype=vec10),
+  cvel_in: wp.array2d(dtype=wp.spatial_vector),
+  # Data out:
+  cfrc_int_out: wp.array2d(dtype=wp.spatial_vector),
+):
+  worldid, bodyid = wp.tid()
+  frc = math.inert_vec(cinert_in[worldid, bodyid], cacc_in[worldid, bodyid])
+  frc += math.motion_cross_force(
+    cvel_in[worldid, bodyid],
+    math.inert_vec(cinert_in[worldid, bodyid], cvel_in[worldid, bodyid]),
+  )
+  cfrc_int_out[worldid, bodyid] = frc
 
 
-# @event_scope
-# def rne_postconstraint(m: Model, d: Data):
-#   """RNE with complete data: compute cacc, cfrc_ext, cfrc_int."""
+@kernel
+def _cfrc_fn(
+  # Model:
+  body_parentid: wp.array(dtype=int),
+  # Data in:
+  cfrc_int_in: wp.array2d(dtype=wp.spatial_vector),
+  # In:
+  body_tree_: wp.array(dtype=int),
+  # Data out:
+  cfrc_int_out: wp.array2d(dtype=wp.spatial_vector),
+):
+  worldid, nodeid = wp.tid()
+  bodyid = body_tree_[nodeid]
+  pid = body_parentid[bodyid]
+  wp.atomic_add(cfrc_int_out[worldid], pid, cfrc_int_in[worldid, bodyid])
 
-#   # cfrc_ext = perturb
-#   @kernel
-#   def _cfrc_ext(m: Model, d: Data):
-#     worldid, bodyid = wp.tid()
 
-#     if bodyid == 0:
-#       d.cfrc_ext[worldid, 0] = wp.spatial_vector(0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
-#     else:
-#       xfrc_applied = d.xfrc_applied[worldid, bodyid]
-#       subtree_com = d.subtree_com[worldid, m.body_rootid[bodyid]]
-#       xipos = d.xipos[worldid, bodyid]
-#       d.cfrc_ext[worldid, bodyid] = support.transform_force(
-#         xfrc_applied, subtree_com - xipos
-#       )
+@kernel
+def _qfrc_bias(
+  # Model:
+  dof_bodyid: wp.array(dtype=int),
+  # Data in:
+  cdof_in: wp.array2d(dtype=wp.spatial_vector),
+  cfrc_int_in: wp.array2d(dtype=wp.spatial_vector),
+  # Data out:
+  qfrc_bias_out: wp.array2d(dtype=float),
+):
+  worldid, dofid = wp.tid()
+  bodyid = dof_bodyid[dofid]
+  qfrc_bias_out[worldid, dofid] = wp.dot(
+    cdof_in[worldid, dofid], cfrc_int_in[worldid, bodyid]
+  )
 
-#   wp.launch(_cfrc_ext, dim=(d.nworld, m.nbody), inputs=[m, d])
 
-#   @kernel
-#   def _cfrc_ext_equality(m: Model, d: Data):
-#     eqid = wp.tid()
+@event_scope
+def rne(m: Model, d: Data):
+  """Computes inverse dynamics using Newton-Euler algorithm."""
+  if m.opt.disableflags & DisableBit.GRAVITY:
+    d.cacc.zero_()
+  else:
+    wp.launch(_cacc_gravity, dim=[d.nworld], inputs=[m.opt.gravity], outputs=[d.cacc])
 
-#     ne_connect = d.ne_connect[0]
-#     ne_weld = d.ne_weld[0]
-#     num_connect = ne_connect // 3
+  for body_tree in m.body_tree:
+    wp.launch(
+      _cacc_level,
+      dim=(d.nworld, body_tree.size),
+      inputs=[
+        m.body_dofnum,
+        m.body_parentid,
+        m.body_dofadr,
+        d.cdof_dot,
+        d.qvel,
+        d.cacc,
+        body_tree,
+      ],
+      outputs=[d.cacc],
+    )
 
-#     if eqid >= num_connect + ne_weld // 6:
-#       return
+  wp.launch(
+    _frc_fn,
+    dim=[d.nworld, m.nbody],
+    inputs=[d.cacc, d.cinert, d.cvel],
+    outputs=[d.cfrc_int],
+  )
 
-#     is_connect = eqid < num_connect
-#     if is_connect:
-#       efcid = 3 * eqid
-#       cfrc_torque = wp.vec3(0.0, 0.0, 0.0)  # no torque from connect
-#     else:
-#       efcid = 6 * eqid - ne_connect
-#       cfrc_torque = wp.vec3(
-#         d.efc.force[efcid + 3], d.efc.force[efcid + 4], d.efc.force[efcid + 5]
-#       )
+  for body_tree in reversed(m.body_tree):
+    wp.launch(
+      _cfrc_fn,
+      dim=[d.nworld, body_tree.size],
+      inputs=[m.body_parentid, d.cfrc_int, body_tree],
+      outputs=[d.cfrc_int],
+    )
 
-#     cfrc_force = wp.vec3(
-#       d.efc.force[efcid + 0],
-#       d.efc.force[efcid + 1],
-#       d.efc.force[efcid + 2],
-#     )
-
-#     worldid = d.efc.worldid[efcid]
-#     id = d.efc.id[efcid]
-#     eq_data = m.eq_data[id]
-#     body_semantic = m.eq_objtype[id] == wp.static(ObjType.BODY.value)
-
-#     obj1 = m.eq_obj1id[id]
-#     obj2 = m.eq_obj2id[id]
-
-#     if body_semantic:
-#       bodyid1 = obj1
-#       bodyid2 = obj2
-#     else:
-#       bodyid1 = m.site_bodyid[obj1]
-#       bodyid2 = m.site_bodyid[obj2]
-
-#     # body 1
-#     if bodyid1:
-#       if body_semantic:
-#         if is_connect:
-#           offset = wp.vec3(eq_data[0], eq_data[1], eq_data[2])
-#         else:
-#           offset = wp.vec3(eq_data[3], eq_data[4], eq_data[5])
-#       else:
-#         offset = m.site_pos[obj1]
-
-#       # transform point on body1: local -> global
-#       pos = d.xmat[worldid, bodyid1] @ offset + d.xpos[worldid, bodyid1]
-
-#       # subtree CoM-based torque_force vector
-#       newpos = d.subtree_com[worldid, m.body_rootid[bodyid1]]
-
-#       dif = newpos - pos
-#       cfrc_com = wp.spatial_vector(cfrc_torque - wp.cross(dif, cfrc_force), cfrc_force)
-
-#       # apply (opposite for body 1)
-#       wp.atomic_add(d.cfrc_ext[worldid], bodyid1, cfrc_com)
-
-#     # body 2
-#     if bodyid2:
-#       if body_semantic:
-#         if is_connect:
-#           offset = wp.vec3(eq_data[3], eq_data[4], eq_data[5])
-#         else:
-#           offset = wp.vec3(eq_data[0], eq_data[1], eq_data[2])
-#       else:
-#         offset = m.site_pos[obj2]
-
-#       # transform point on body2: local -> global
-#       pos = d.xmat[worldid, bodyid2] @ offset + d.xpos[worldid, bodyid2]
-
-#       # subtree CoM-based torque_force vector
-#       newpos = d.subtree_com[worldid, m.body_rootid[bodyid2]]
-
-#       dif = newpos - pos
-#       cfrc_com = wp.spatial_vector(cfrc_torque - wp.cross(dif, cfrc_force), cfrc_force)
-
-#       # apply
-#       wp.atomic_sub(d.cfrc_ext[worldid], bodyid2, cfrc_com)
-
-#   wp.launch(_cfrc_ext_equality, dim=(d.nworld * m.neq,), inputs=[m, d])
-
-#   # cfrc_ext += contacts
-#   @kernel
-#   def _cfrc_ext_contact(m: Model, d: Data):
-#     conid = wp.tid()
-
-#     if conid >= d.ncon[0]:
-#       return
-
-#     geom = d.contact.geom[conid]
-#     id1 = m.geom_bodyid[geom[0]]
-#     id2 = m.geom_bodyid[geom[1]]
-
-#     if id1 == 0 and id2 == 0:
-#       return
-
-#     # contact force in world frame
-#     force = support.contact_force(m, d, conid, to_world_frame=True)
-
-#     worldid = d.contact.worldid[conid]
-#     pos = d.contact.pos[conid]
-
-#     # contact force on bodies
-#     if id1:
-#       com1 = d.subtree_com[worldid, m.body_rootid[id1]]
-#       wp.atomic_sub(
-#         d.cfrc_ext[worldid], id1, support.transform_force(force, com1 - pos)
-#       )
-
-#     if id2:
-#       com2 = d.subtree_com[worldid, m.body_rootid[id2]]
-#       wp.atomic_add(
-#         d.cfrc_ext[worldid], id2, support.transform_force(force, com2 - pos)
-#       )
-
-#   wp.launch(_cfrc_ext_contact, dim=(d.nconmax,), inputs=[m, d])
-
-#   # forward pass over bodies: compute cacc, cfrc_int
-#   _rne_cacc_world(m, d)
-#   _rne_cacc_forward(m, d, flg_acc=True)
-
-#   # cfrc_body = cinert * cacc + cvel x (cinert * cvel)
-#   _rne_cfrc(m, d, flg_cfrc_ext=True)
-
-#   # backward pass over bodies: accumulate cfrc_int from children
-#   _rne_cfrc_backward(m, d)
+  wp.launch(
+    _qfrc_bias,
+    dim=[d.nworld, m.nv],
+    inputs=[m.dof_bodyid, d.cdof, d.cfrc_int],
+    outputs=[d.qfrc_bias],
+  )
 
 
 # @event_scope
