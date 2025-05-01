@@ -2013,7 +2013,6 @@ def _spatial_tendon(
 
 def tendon(m: Model, d: Data):
   """Computes tendon lengths and moments."""
-
   if not m.ntendon:
     return
 
@@ -2042,7 +2041,7 @@ def tendon(m: Model, d: Data):
     d.wrap_xpos.zero_()
     d.wrap_obj.zero_()
 
-    n_site_pair = m.wrap_site_pair_adr.size
+    n_site_pair = wp.static(m.wrap_site_pair_adr.size)
     wp.launch(
       _spatial_site_tendon,
       dim=(d.nworld, m.wrap_site_adr.size),
@@ -2064,66 +2063,9 @@ def tendon(m: Model, d: Data):
       outputs=[d.wrap_xpos, d.wrap_obj, d.ten_length, d.ten_J],
     )
 
-    wp.launch(
-      _spatial_tendon,
-      dim=(d.nworld, m.ntendon),
-      inputs=[m.ten_wrapnum_site, m.ten_wrapadr_site],
-      outputs=[d.ten_wrapnum, d.ten_wrapadr],
-    )
-
-  # TODO(team): geom wrap, pulleys
-
-  d.ten_J.zero_()
-
-  # process joint tendons
-  if m.wrap_jnt_adr.size:
-    wp.launch(
-      _joint_tendon,
-      dim=(d.nworld, m.wrap_jnt_adr.size),
-      inputs=[
-        m.tendon_jnt_adr,
-        m.wrap_jnt_adr,
-        m.wrap_objid,
-        m.wrap_prm,
-        m.jnt_qposadr,
-        m.jnt_dofadr,
-        d.qpos,
-      ],
-      outputs=[d.ten_length, d.ten_J],
-    )
-
-  # process spatial site tendons
-  if m.wrap_site_adr.size:
-    d.wrap_xpos.zero_()
-    d.wrap_obj.zero_()
-
-    n_site_pair = m.wrap_site_pair_adr.size
-    wp.launch(
-      _spatial_site_tendon,
-      dim=(d.nworld, m.wrap_site_adr.size),
-      inputs=[
-        m.wrap_site_adr,
-        m.wrap_site_pair_adr,
-        m.tendon_site_pair_adr,
-        m.wrap_objid,
-        m.site_bodyid,
-        m.body_parentid,
-        m.body_rootid,
-        m.dof_bodyid,
-        d.site_xpos,
-        d.subtree_com,
-        d.cdof,
-        n_site_pair,
-        m.nv,
-      ],
-      outputs=[d.wrap_xpos, d.wrap_obj, d.ten_length, d.ten_J],
-    )
-
-    wp.launch(
-      _spatial_tendon,
-      dim=(d.nworld, m.ntendon),
-      inputs=[m.ten_wrapnum_site, m.ten_wrapadr_site],
-      outputs=[d.ten_wrapnum, d.ten_wrapadr],
-    )
-
-  # TODO(team): geom wrap, pulleys
+  wp.launch(
+    _spatial_tendon,
+    dim=(d.nworld, m.ntendon),
+    inputs=[m.ten_wrapnum_site, m.ten_wrapadr_site],
+    outputs=[d.ten_wrapnum, d.ten_wrapadr],
+  )
