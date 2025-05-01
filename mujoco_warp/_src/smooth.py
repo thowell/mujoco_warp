@@ -209,10 +209,9 @@ def kinematics(m: Model, d: Data):
 
   for i in range(1, len(m.body_tree)):
     body_tree = m.body_tree[i]
-    beg, end = body_tree[0], body_tree[-1]
     wp.launch(
       _kinematics_level,
-      dim=(d.nworld, end - beg),
+      dim=(d.nworld, body_tree.size),
       inputs=[
         m.qpos0,
         m.body_parentid,
@@ -393,10 +392,9 @@ def com_pos(m: Model, d: Data):
 
   for i in reversed(range(len(m.body_tree))):
     body_tree = m.body_tree[i]
-    beg, end = body_tree[0], body_tree[-1]
     wp.launch(
       _subtree_com_acc,
-      dim=(d.nworld, end - beg),
+      dim=(d.nworld, body_tree.size),
       inputs=[m.body_parentid, body_tree],
       outputs=[d.subtree_com],
     )
