@@ -104,22 +104,22 @@ class SmoothTest(parameterized.TestCase):
       mujoco.mj_fullM(mjm, qM, mjd.qM)
       _assert_eq(d.qM.numpy()[0], qM, "qM")
 
-  # @parameterized.parameters(True, False)
-  # def test_factor_m(self, sparse: bool):
-  #   """Tests factor_m."""
-  #   _, mjd, m, d = test_util.fixture("pendula.xml", sparse=sparse)
+  @parameterized.parameters(True, False)
+  def test_factor_m(self, sparse: bool):
+    """Tests factor_m."""
+    _, mjd, m, d = test_util.fixture("pendula.xml", sparse=sparse)
 
-  #   qLD = d.qLD.numpy()[0].copy()
-  #   for arr in (d.qLD, d.qLDiagInv):
-  #     arr.zero_()
+    qLD = d.qLD.numpy()[0].copy()
+    for arr in (d.qLD, d.qLDiagInv):
+      arr.zero_()
 
-  #   mjwarp.factor_m(m, d)
+    mjwarp.factor_m(m, d)
 
-  #   if sparse:
-  #     _assert_eq(d.qLD.numpy()[0, 0], mjd.qLD, "qLD (sparse)")
-  #     _assert_eq(d.qLDiagInv.numpy()[0], mjd.qLDiagInv, "qLDiagInv")
-  #   else:
-  #     _assert_eq(d.qLD.numpy()[0], qLD, "qLD (dense)")
+    if sparse:
+      _assert_eq(d.qLD.numpy()[0, 0], mjd.qLD, "qLD (sparse)")
+      _assert_eq(d.qLDiagInv.numpy()[0], mjd.qLDiagInv, "qLDiagInv")
+    else:
+      _assert_eq(d.qLD.numpy()[0], qLD, "qLD (dense)")
 
   # @parameterized.parameters(True, False)
   # def test_solve_m(self, sparse: bool):

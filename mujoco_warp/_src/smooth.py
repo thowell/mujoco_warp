@@ -29,11 +29,14 @@ from .types import Model
 from .types import ObjType
 from .types import TrnType
 from .types import WrapType
+from .types import TileSet
 from .types import array2df
 from .types import array3df
 from .types import vec10
 from .warp_util import event_scope
 from .warp_util import kernel
+from .warp_util import kernel as nested_kernel
+
 
 wp.set_module_options({"enable_backward": False})
 
@@ -268,6 +271,8 @@ def _subtree_com_init(
 def _subtree_com_acc(
   # Model:
   body_parentid: wp.array(dtype=int),
+  # Data in:
+  subtree_com_in: wp.array2d(dtype=wp.vec3),
   # In:
   body_tree_: wp.array(dtype=int),
   # Data out:
@@ -276,7 +281,7 @@ def _subtree_com_acc(
   worldid, nodeid = wp.tid()
   bodyid = body_tree_[nodeid]
   pid = body_parentid[bodyid]
-  wp.atomic_add(subtree_com_out, worldid, pid, subtree_com_out[worldid, bodyid])
+  wp.atomic_add(subtree_com_out, worldid, pid, subtree_com_in[worldid, bodyid])
 
 
 @kernel
@@ -395,7 +400,7 @@ def com_pos(m: Model, d: Data):
     wp.launch(
       _subtree_com_acc,
       dim=(d.nworld, body_tree.size),
-      inputs=[m.body_parentid, body_tree],
+      inputs=[m.body_parentid, d.subtree_com, body_tree],
       outputs=[d.subtree_com],
     )
 
@@ -620,6 +625,8 @@ def camlight(m: Model, d: Data):
 def _crb_accumulate(
   # Model:
   body_parentid: wp.array(dtype=int),
+  # Data in:
+  crb_in: wp.array2d(dtype=vec10),
   # In:
   body_tree_: wp.array(dtype=int),
   # Data out:
@@ -630,7 +637,7 @@ def _crb_accumulate(
   pid = body_parentid[bodyid]
   if pid == 0:
     return
-  wp.atomic_add(crb_out, worldid, pid, crb_out[worldid, bodyid])
+  wp.atomic_add(crb_out, worldid, pid, crb_in[worldid, bodyid])
 
 
 @kernel
@@ -707,7 +714,7 @@ def crb(m: Model, d: Data):
     wp.launch(
       _crb_accumulate,
       dim=(d.nworld, body_tree.size),
-      inputs=[m.body_parentid, body_tree],
+      inputs=[m.body_parentid, d.crb, body_tree],
       outputs=[d.crb],
     )
 
@@ -728,132 +735,191 @@ def crb(m: Model, d: Data):
     )
 
 
-# def _factor_i_sparse_legacy(m: Model, d: Data, M: array3df, L: array3df, D: array2df):
-#   """Sparse L'*D*L factorizaton of inertia-like matrix M, assumed spd."""
-
-#   @kernel
-#   def qLD_acc(m: Model, leveladr: int, L: array3df):
-#     worldid, nodeid = wp.tid()
-#     update = m.qLD_update_tree[leveladr + nodeid]
-#     i, k, Madr_ki = update[0], update[1], update[2]
-#     Madr_i = m.dof_Madr[i]
-#     # tmp = M(k,i) / M(k,k)
-#     tmp = L[worldid, 0, Madr_ki] / L[worldid, 0, m.dof_Madr[k]]
-#     for j in range(m.dof_Madr[i + 1] - Madr_i):
-#       # M(i,j) -= M(k,j) * tmp
-#       wp.atomic_sub(L[worldid, 0], Madr_i + j, L[worldid, 0, Madr_ki + j] * tmp)
-#     # M(k,i) = tmp
-#     L[worldid, 0, Madr_ki] = tmp
-
-#   @kernel
-#   def qLDiag_div(m: Model, L: array3df, D: array2df):
-#     worldid, dofid = wp.tid()
-#     D[worldid, dofid] = 1.0 / L[worldid, 0, m.dof_Madr[dofid]]
-
-#   wp.copy(L, M)
-
-#   qLD_update_treeadr = m.qLD_update_treeadr.numpy()
-
-#   for i in reversed(range(len(qLD_update_treeadr))):
-#     if i == len(qLD_update_treeadr) - 1:
-#       beg, end = qLD_update_treeadr[i], m.qLD_update_tree.shape[0]
-#     else:
-#       beg, end = qLD_update_treeadr[i], qLD_update_treeadr[i + 1]
-#     wp.launch(qLD_acc, dim=(d.nworld, end - beg), inputs=[m, beg, L])
-
-#   wp.launch(qLDiag_div, dim=(d.nworld, m.nv), inputs=[m, L, D])
+@kernel
+def _qLD_acc_legacy(
+  # Model:
+  dof_Madr: wp.array(dtype=int),
+  # In:
+  qLD_updates_: wp.array(dtype=wp.vec3i),
+  L_in: array3df,
+  # Out:
+  L_out: array3df,
+):
+  worldid, nodeid = wp.tid()
+  update = qLD_updates_[nodeid]
+  i, k, Madr_ki = update[0], update[1], update[2]
+  Madr_i = dof_Madr[i]
+  # tmp = M(k,i) / M(k,k)
+  tmp = L_in[worldid, 0, Madr_ki] / L_in[worldid, 0, dof_Madr[k]]
+  for j in range(dof_Madr[i + 1] - Madr_i):
+    # M(i,j) -= M(k,j) * tmp
+    wp.atomic_sub(L_out[worldid, 0], Madr_i + j, L_in[worldid, 0, Madr_ki + j] * tmp)
+  # M(k,i) = tmp
+  L_out[worldid, 0, Madr_ki] = tmp
 
 
-# def _factor_i_sparse(m: Model, d: Data, M: array3df, L: array3df, D: array2df):
-#   """Sparse L'*D*L factorizaton of inertia-like matrix M, assumed spd."""
-#   if version.parse(mujoco.__version__) <= version.parse("3.2.7"):
-#     return _factor_i_sparse_legacy(m, d, M, L, D)
-
-#   @kernel
-#   def qLD_acc(m: Model, leveladr: int, L: array3df):
-#     worldid, nodeid = wp.tid()
-#     update = m.qLD_update_tree[leveladr + nodeid]
-#     i, k, Madr_ki = update[0], update[1], update[2]
-#     Madr_i = m.M_rowadr[i]  # Address of row being updated
-#     diag_k = m.M_rowadr[k] + m.M_rownnz[k] - 1  # Address of diagonal element of k
-#     # tmp = M(k,i) / M(k,k)
-#     tmp = L[worldid, 0, Madr_ki] / L[worldid, 0, diag_k]
-#     for j in range(m.M_rownnz[i]):
-#       # M(i,j) -= M(k,j) * tmp
-#       wp.atomic_sub(L[worldid, 0], Madr_i + j, L[worldid, 0, m.M_rowadr[k] + j] * tmp)
-#     # M(k,i) = tmp
-#     L[worldid, 0, Madr_ki] = tmp
-
-#   @kernel
-#   def qLDiag_div(m: Model, L: array3df, D: array2df):
-#     worldid, dofid = wp.tid()
-#     diag_i = (
-#       m.M_rowadr[dofid] + m.M_rownnz[dofid] - 1
-#     )  # Address of diagonal element of i
-#     D[worldid, dofid] = 1.0 / L[worldid, 0, diag_i]
-
-#   @kernel
-#   def copy_CSR(L: array3df, M: array3df, mapM2M: wp.array(dtype=wp.int32, ndim=1)):
-#     worldid, ind = wp.tid()
-#     L[worldid, 0, ind] = M[worldid, 0, mapM2M[ind]]
-
-#   wp.launch(copy_CSR, dim=(d.nworld, m.nM), inputs=[L, M, m.mapM2M])
-
-#   qLD_update_treeadr = m.qLD_update_treeadr.numpy()
-
-#   for i in reversed(range(len(qLD_update_treeadr))):
-#     if i == len(qLD_update_treeadr) - 1:
-#       beg, end = qLD_update_treeadr[i], m.qLD_update_tree.shape[0]
-#     else:
-#       beg, end = qLD_update_treeadr[i], qLD_update_treeadr[i + 1]
-#     wp.launch(qLD_acc, dim=(d.nworld, end - beg), inputs=[m, beg, L])
-
-#   wp.launch(qLDiag_div, dim=(d.nworld, m.nv), inputs=[m, L, D])
+@kernel
+def _qLDiag_div_legacy(
+  # Model:
+  dof_Madr: wp.array(dtype=int),
+  # In:
+  L_in: array3df,
+  # Out:
+  D_out: array2df,
+):
+  worldid, dofid = wp.tid()
+  D_out[worldid, dofid] = 1.0 / L_in[worldid, 0, dof_Madr[dofid]]
 
 
-# def _factor_i_dense(m: Model, d: Data, M: wp.array, L: wp.array):
-#   """Dense Cholesky factorizaton of inertia-like matrix M, assumed spd."""
+def _factor_i_sparse_legacy(m: Model, d: Data, M: array3df, L: array3df, D: array2df):
+  """Sparse L'*D*L factorizaton of inertia-like matrix M, assumed spd."""
 
-#   # TODO(team): develop heuristic for block dim, or make configurable
-#   block_dim = 32
+  wp.copy(L, M)
 
-#   def tile_cholesky(adr: int, size: int, tilesize: int):
-#     @kernel
-#     def cholesky(m: Model, leveladr: int, M: array3df, L: array3df):
-#       worldid, nodeid = wp.tid()
-#       dofid = m.qLD_tile[leveladr + nodeid]
-#       M_tile = wp.tile_load(
-#         M[worldid], shape=(tilesize, tilesize), offset=(dofid, dofid)
-#       )
-#       L_tile = wp.tile_cholesky(M_tile)
-#       wp.tile_store(L[worldid], L_tile, offset=(dofid, dofid))
+  for i in reversed(range(len(m.qLD_updates))):
+    qlD_updates = m.qLD_updates[i]
+    wp.launch(
+      _qLD_acc_legacy,
+      dim=(d.nworld, qlD_updates.size),
+      inputs=[m.dof_Madr, qlD_updates, L],
+      outputs=[L],
+    )
 
-#     wp.launch_tiled(
-#       cholesky, dim=(d.nworld, size), inputs=[m, adr, M, L], block_dim=block_dim
-#     )
-
-#   qLD_tileadr, qLD_tilesize = m.qLD_tileadr.numpy(), m.qLD_tilesize.numpy()
-
-#   for i in range(len(qLD_tileadr)):
-#     beg = qLD_tileadr[i]
-#     end = m.qLD_tile.shape[0] if i == len(qLD_tileadr) - 1 else qLD_tileadr[i + 1]
-#     tile_cholesky(beg, end - beg, int(qLD_tilesize[i]))
+  wp.launch(
+    _qLDiag_div_legacy, dim=(d.nworld, m.nv), inputs=[m.dof_Madr, L], outputs=[D]
+  )
 
 
-# def factor_i(m: Model, d: Data, M, L, D=None):
-#   """Factorizaton of inertia-like matrix M, assumed spd."""
+@kernel
+def _copy_CSR(
+  # Model:
+  mapM2M: wp.array(dtype=int),
+  # In:
+  M_in: array3df,
+  # Out:
+  L_out: array3df,
+):
+  worldid, ind = wp.tid()
+  L_out[worldid, 0, ind] = M_in[worldid, 0, mapM2M[ind]]
 
-#   if m.opt.is_sparse:
-#     assert D is not None
-#     _factor_i_sparse(m, d, M, L, D)
-#   else:
-#     _factor_i_dense(m, d, M, L)
+
+@kernel
+def _qLD_acc(
+  # Model:
+  M_rowadr: wp.array(dtype=int),
+  M_rownnz: wp.array(dtype=int),
+  # In:
+  qLD_updates_: wp.array(dtype=wp.vec3i),
+  L_in: array3df,
+  # Out:
+  L_out: array3df,
+):
+  worldid, nodeid = wp.tid()
+  update = qLD_updates_[nodeid]
+  i, k, Madr_ki = update[0], update[1], update[2]
+  Madr_i = M_rowadr[i]  # Address of row being updated
+  diag_k = M_rowadr[k] + M_rownnz[k] - 1  # Address of diagonal element of k
+  # tmp = M(k,i) / M(k,k)
+  tmp = L_out[worldid, 0, Madr_ki] / L_out[worldid, 0, diag_k]
+  for j in range(M_rownnz[i]):
+    # M(i,j) -= M(k,j) * tmp
+    wp.atomic_sub(
+      L_out[worldid, 0], Madr_i + j, L_in[worldid, 0, M_rowadr[k] + j] * tmp
+    )
+  # M(k,i) = tmp
+  L_out[worldid, 0, Madr_ki] = tmp
 
 
-# @event_scope
-# def factor_m(m: Model, d: Data):
-#   """Factorizaton of inertia-like matrix M, assumed spd."""
-#   factor_i(m, d, d.qM, d.qLD, d.qLDiagInv)
+@kernel
+def _qLDiag_div(
+  # Model:
+  M_rowadr: wp.array(dtype=int),
+  M_rownnz: wp.array(dtype=int),
+  # In:
+  L_in: array3df,
+  # Out:
+  D_out: array2df,
+):
+  worldid, dofid = wp.tid()
+  diag_i = M_rowadr[dofid] + M_rownnz[dofid] - 1  # Address of diagonal element of i
+  D_out[worldid, dofid] = 1.0 / L_in[worldid, 0, diag_i]
+
+
+def _factor_i_sparse(m: Model, d: Data, M: array3df, L: array3df, D: array2df):
+  """Sparse L'*D*L factorizaton of inertia-like matrix M, assumed spd."""
+  if version.parse(mujoco.__version__) <= version.parse("3.2.7"):
+    return _factor_i_sparse_legacy(m, d, M, L, D)
+
+  wp.launch(_copy_CSR, dim=(d.nworld, m.nM), inputs=[m.mapM2M, M], outputs=[L])
+
+  for i in reversed(range(len(m.qLD_updates))):
+    qLD_updates = m.qLD_updates[i]
+    wp.launch(
+      _qLD_acc,
+      dim=(d.nworld, qLD_updates.size),
+      inputs=[m.M_rowadr, m.M_rownnz, qLD_updates, L],
+      outputs=[L],
+    )
+
+  wp.launch(
+    _qLDiag_div, dim=(d.nworld, m.nv), inputs=[m.M_rowadr, m.M_rownnz, L], outputs=[D]
+  )
+
+
+def _tile_cholesky(tile: TileSet):
+  """Returns a kernel for dense Cholesky factorizaton of a tile."""
+
+  @nested_kernel
+  def cholesky(
+    # Data In:
+    qM_in: wp.array3d(dtype=float),
+    # In:
+    adr: wp.array(dtype=int),
+    # Out:
+    L_out: wp.array3d(dtype=float),
+  ):
+    worldid, nodeid = wp.tid()
+    TILE_SIZE = wp.static(tile.size)
+
+    dofid = adr[nodeid]
+    M_tile = wp.tile_load(
+      qM_in[worldid], shape=(TILE_SIZE, TILE_SIZE), offset=(dofid, dofid)
+    )
+    L_tile = wp.tile_cholesky(M_tile)
+    wp.tile_store(L_out[worldid], L_tile, offset=(dofid, dofid))
+
+  return cholesky
+
+
+def _factor_i_dense(m: Model, d: Data, M: wp.array, L: wp.array):
+  """Dense Cholesky factorizaton of inertia-like matrix M, assumed spd."""
+  # TODO(team): develop heuristic for block dim, or make configurable
+  block_dim = 32
+
+  for tile in m.qM_tiles:
+    wp.launch_tiled(
+      _tile_cholesky(tile),
+      dim=(d.nworld, tile.adr.size),
+      inputs=[M, tile.adr],
+      outputs=[L],
+      block_dim=block_dim,
+    )
+
+
+def factor_i(m: Model, d: Data, M, L, D=None):
+  """Factorizaton of inertia-like matrix M, assumed spd."""
+
+  if m.opt.is_sparse:
+    assert D is not None
+    _factor_i_sparse(m, d, M, L, D)
+  else:
+    _factor_i_dense(m, d, M, L)
+
+
+@event_scope
+def factor_m(m: Model, d: Data):
+  """Factorizaton of inertia-like matrix M, assumed spd."""
+  factor_i(m, d, d.qM, d.qLD, d.qLDiagInv)
 
 
 # def _rne_cacc_world(m: Model, d: Data):
@@ -1363,9 +1429,17 @@ def crb(m: Model, d: Data):
 
 #   def tile_cholesky(adr: int, size: int, tilesize: int):
 #     @kernel(module="unique")
-#     def cholesky(m: Model, leveladr: int, M: array3df, x: array2df, y: array2df):
+#     def cholesky(
+#       # Model:
+#       qLD_tile: wp.array(dtype=int),
+#       # In:
+#       leveladr: int,
+#       M: array3df,
+#       x: array2df,
+#       y: array2df
+#     ):
 #       worldid, nodeid = wp.tid()
-#       dofid = m.qLD_tile[leveladr + nodeid]
+#       dofid = qLD_tile[leveladr + nodeid]
 #       M_tile = wp.tile_load(
 #         M[worldid], shape=(tilesize, tilesize), offset=(dofid, dofid)
 #       )
@@ -1378,7 +1452,7 @@ def crb(m: Model, d: Data):
 #     wp.launch_tiled(
 #       cholesky,
 #       dim=(d.nworld, size),
-#       inputs=[m, adr, M, x, y],
+#       inputs=[m.qLD_tile, adr, M, x, y],
 #       block_dim=block_dim,
 #     )
 

@@ -218,7 +218,7 @@ def analyze(source: str, filename: str, type_source: str) -> List[Issue]:
 
       # paramater type must match field type (or generic types if no corresponding field)
       if expected_type is None:
-        expected_type = ("int", "float", "bool")
+        expected_type = ("int", "float", "bool", "array3df", "array2df")
         if param_type not in expected_type and not param_type.startswith("wp.array"):
           issues.append(TypeMismatch(param, kernel, "int, float, bool, wp.array", None))
       elif param_type != expected_type:
