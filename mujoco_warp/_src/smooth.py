@@ -19,7 +19,7 @@ from packaging import version
 
 from . import math
 
-# from . import support
+from . import support
 from .types import MJ_MINVAL
 from .types import CamLightType
 from .types import Data
@@ -33,6 +33,8 @@ from .types import TileSet
 from .types import array2df
 from .types import array3df
 from .types import vec10
+from .types import vec11
+from .types import vec5
 from .warp_util import event_scope
 from .warp_util import kernel
 from .warp_util import kernel as nested_kernel
@@ -1086,6 +1088,370 @@ def rne(m: Model, d: Data, flg_acc: bool = False):
   )
 
 
+@kernel
+def _cfrc_ext(
+  # Model:
+  body_rootid: wp.array(dtype=int),
+  # Data in:
+  xfrc_applied_in: wp.array2d(dtype=wp.spatial_vector),
+  xipos_in: wp.array2d(dtype=wp.vec3),
+  subtree_com_in: wp.array2d(dtype=wp.vec3),
+  # Data out:
+  cfrc_ext_out: wp.array2d(dtype=wp.spatial_vector),
+):
+  worldid, bodyid = wp.tid()
+  if bodyid == 0:
+    cfrc_ext_out[worldid, 0] = wp.spatial_vector(0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+    return
+
+  xfrc_applied = xfrc_applied_in[worldid, bodyid]
+  subtree_com = subtree_com_in[worldid, body_rootid[bodyid]]
+  xipos = xipos_in[worldid, bodyid]
+  cfrc_ext_out[worldid, bodyid] = support.transform_force(
+    xfrc_applied, subtree_com - xipos
+  )
+
+
+@kernel
+def _cfrc_ext_equality(
+  # Model:
+  eq_data: wp.array(dtype=vec11),
+  eq_objtype: wp.array(dtype=int),
+  eq_obj1id: wp.array(dtype=int),
+  eq_obj2id: wp.array(dtype=int),
+  site_bodyid: wp.array(dtype=int),
+  site_pos: wp.array(dtype=wp.vec3),
+  body_rootid: wp.array(dtype=int),
+  # Data in:
+  ne_connect_in: wp.array(dtype=int),
+  ne_weld_in: wp.array(dtype=int),
+  xmat_in: wp.array2d(dtype=wp.mat33),
+  xpos_in: wp.array2d(dtype=wp.vec3),
+  subtree_com_in: wp.array2d(dtype=wp.vec3),
+  cfrc_ext_in: wp.array2d(dtype=wp.spatial_vector),
+  # In:
+  efc_force_in: wp.array(dtype=float),
+  efc_worldid_in: wp.array(dtype=int),
+  efc_id_in: wp.array(dtype=int),
+  # Data out:
+  cfrc_ext_out: wp.array2d(dtype=wp.spatial_vector),
+):
+  eqid = wp.tid()
+
+  ne_connect = ne_connect_in[0]
+  ne_weld = ne_weld_in[0]
+  num_connect = ne_connect // 3
+
+  if eqid >= num_connect + ne_weld // 6:
+    return
+
+  is_connect = eqid < num_connect
+  if is_connect:
+    efcid = 3 * eqid
+    cfrc_torque = wp.vec3(0.0, 0.0, 0.0)  # no torque from connect
+  else:
+    efcid = 6 * eqid - ne_connect
+    cfrc_torque = wp.vec3(
+      efc_force_in[efcid + 3], efc_force_in[efcid + 4], efc_force_in[efcid + 5]
+    )
+
+  cfrc_force = wp.vec3(
+    efc_force_in[efcid + 0],
+    efc_force_in[efcid + 1],
+    efc_force_in[efcid + 2],
+  )
+
+  worldid = efc_worldid_in[efcid]
+  id = efc_id_in[efcid]
+  eq_data_ = eq_data[id]
+  body_semantic = eq_objtype[id] == wp.static(ObjType.BODY.value)
+
+  obj1 = eq_obj1id[id]
+  obj2 = eq_obj2id[id]
+
+  if body_semantic:
+    bodyid1 = obj1
+    bodyid2 = obj2
+  else:
+    bodyid1 = site_bodyid[obj1]
+    bodyid2 = site_bodyid[obj2]
+
+  # body 1
+  if bodyid1:
+    if body_semantic:
+      if is_connect:
+        offset = wp.vec3(eq_data_[0], eq_data_[1], eq_data_[2])
+      else:
+        offset = wp.vec3(eq_data_[3], eq_data_[4], eq_data_[5])
+    else:
+      offset = site_pos[obj1]
+
+    # transform point on body1: local -> global
+    pos = xmat_in[worldid, bodyid1] @ offset + xpos_in[worldid, bodyid1]
+
+    # subtree CoM-based torque_force vector
+    newpos = subtree_com_in[worldid, body_rootid[bodyid1]]
+
+    dif = newpos - pos
+    cfrc_com = wp.spatial_vector(cfrc_torque - wp.cross(dif, cfrc_force), cfrc_force)
+
+    # apply (opposite for body 1)
+    wp.atomic_add(cfrc_ext_out[worldid], bodyid1, cfrc_com)
+
+  # body 2
+  if bodyid2:
+    if body_semantic:
+      if is_connect:
+        offset = wp.vec3(eq_data_[3], eq_data_[4], eq_data_[5])
+      else:
+        offset = wp.vec3(eq_data_[0], eq_data_[1], eq_data_[2])
+    else:
+      offset = site_pos[obj2]
+
+    # transform point on body2: local -> global
+    pos = xmat_in[worldid, bodyid2] @ offset + xpos_in[worldid, bodyid2]
+
+    # subtree CoM-based torque_force vector
+    newpos = subtree_com_in[worldid, body_rootid[bodyid2]]
+
+    dif = newpos - pos
+    cfrc_com = wp.spatial_vector(cfrc_torque - wp.cross(dif, cfrc_force), cfrc_force)
+
+    # apply
+    wp.atomic_sub(cfrc_ext_out[worldid], bodyid2, cfrc_com)
+
+
+@kernel
+def _cfrc_ext_contact(
+  # Model:
+  geom_bodyid: wp.array(dtype=int),
+  body_rootid: wp.array(dtype=int),
+  # Data in:
+  ncon_in: wp.array(dtype=int),
+  subtree_com_in: wp.array2d(dtype=wp.vec3),
+  # In:
+  opt_cone: int,
+  contact_dim_in: wp.array(dtype=int),
+  contact_efc_address_in: wp.array2d(dtype=int),
+  contact_friction_in: wp.array(dtype=vec5),
+  contact_frame_in: wp.array(dtype=wp.mat33),
+  contact_pos_in: wp.array(dtype=wp.vec3),
+  efc_force_in: wp.array(dtype=float),
+  contact_geom_in: wp.array(dtype=wp.vec2i),
+  contact_worldid_in: wp.array(dtype=int),
+  # Data out:
+  cfrc_ext_out: wp.array2d(dtype=wp.spatial_vector),
+):
+  contactid = wp.tid()
+
+  if contactid >= ncon_in[0]:
+    return
+
+  geom = contact_geom_in[contactid]
+  id1 = geom_bodyid[geom[0]]
+  id2 = geom_bodyid[geom[1]]
+
+  if id1 == 0 and id2 == 0:
+    return
+
+  # contact force in world frame
+  force = support.contact_force_fn(
+    contactid,
+    opt_cone,
+    ncon_in,
+    contact_dim_in,
+    contact_efc_address_in,
+    contact_friction_in,
+    contact_frame_in,
+    efc_force_in,
+    to_world_frame=True,
+  )
+
+  worldid = contact_worldid_in[contactid]
+  pos = contact_pos_in[contactid]
+
+  # contact force on bodies
+  if id1:
+    com1 = subtree_com_in[worldid, body_rootid[id1]]
+    wp.atomic_sub(
+      cfrc_ext_out[worldid], id1, support.transform_force(force, com1 - pos)
+    )
+
+  if id2:
+    com2 = subtree_com_in[worldid, body_rootid[id2]]
+    wp.atomic_add(
+      cfrc_ext_out[worldid], id2, support.transform_force(force, com2 - pos)
+    )
+
+
+@event_scope
+def rne_postconstraint(m: Model, d: Data):
+  """RNE with complete data: compute cacc, cfrc_ext, cfrc_int."""
+
+  # cfrc_ext = perturb
+  wp.launch(
+    _cfrc_ext,
+    dim=(d.nworld, m.nbody),
+    inputs=[m.body_rootid, d.xfrc_applied, d.xipos, d.subtree_com],
+    outputs=[d.cfrc_ext],
+  )
+
+  wp.launch(
+    _cfrc_ext_equality,
+    dim=(d.nworld * m.neq,),
+    inputs=[
+      m.eq_data,
+      m.eq_objtype,
+      m.eq_obj1id,
+      m.eq_obj2id,
+      m.site_bodyid,
+      m.site_pos,
+      m.body_rootid,
+      d.ne_connect,
+      d.ne_weld,
+      d.xmat,
+      d.xpos,
+      d.subtree_com,
+      d.cfrc_ext,
+      d.efc.force,
+      d.efc.worldid,
+      d.efc.id,
+    ],
+    outputs=[d.cfrc_ext],
+  )
+
+  # cfrc_ext += contacts
+  wp.launch(
+    _cfrc_ext_contact,
+    dim=(d.nconmax,),
+    inputs=[
+      m.geom_bodyid,
+      m.body_rootid,
+      d.ncon,
+      d.subtree_com,
+      m.opt.cone,
+      d.contact.dim,
+      d.contact.efc_address,
+      d.contact.friction,
+      d.contact.frame,
+      d.contact.pos,
+      d.efc.force,
+      d.contact.geom,
+      d.contact.worldid,
+    ],
+    outputs=[d.cfrc_ext],
+  )
+
+  # forward pass over bodies: compute cacc, cfrc_int
+  _rne_cacc_world(m, d)
+  _rne_cacc_forward(m, d, flg_acc=True)
+
+  # cfrc_body = cinert * cacc + cvel x (cinert * cvel)
+  _rne_cfrc(m, d, flg_cfrc_ext=True)
+
+  # backward pass over bodies: accumulate cfrc_int from children
+  _rne_cfrc_backward(m, d)
+
+
+@kernel
+def _comvel_root(cvel_out: wp.array2d(dtype=wp.spatial_vector)):
+  worldid, elementid = wp.tid()
+  cvel_out[worldid, 0][elementid] = 0.0
+
+
+@kernel
+def _comvel_level(
+  # Model:
+  body_dofadr: wp.array(dtype=int),
+  body_jntadr: wp.array(dtype=int),
+  body_jntnum: wp.array(dtype=int),
+  body_parentid: wp.array(dtype=int),
+  jnt_type: wp.array(dtype=int),
+  # Data in:
+  cvel_in: wp.array2d(dtype=wp.spatial_vector),
+  qvel_in: wp.array2d(dtype=float),
+  cdof_in: wp.array2d(dtype=wp.spatial_vector),
+  # In:
+  body_tree_: wp.array(dtype=int),
+  # Data out:
+  cvel_out: wp.array2d(dtype=wp.spatial_vector),
+  cdof_dot_out: wp.array2d(dtype=wp.spatial_vector),
+):
+  worldid, nodeid = wp.tid()
+  bodyid = body_tree_[nodeid]
+  dofid = body_dofadr[bodyid]
+  jntid = body_jntadr[bodyid]
+  jntnum = body_jntnum[bodyid]
+  pid = body_parentid[bodyid]
+
+  if jntnum == 0:
+    cvel_out[worldid, bodyid] = cvel_in[worldid, pid]
+    return
+
+  cvel = cvel_in[worldid, pid]
+  qvel = qvel_in[worldid]
+  cdof = cdof_in[worldid]
+
+  for j in range(jntid, jntid + jntnum):
+    jnttype = jnt_type[j]
+
+    if jnttype == wp.static(JointType.FREE.value):
+      cvel += cdof[dofid + 0] * qvel[dofid + 0]
+      cvel += cdof[dofid + 1] * qvel[dofid + 1]
+      cvel += cdof[dofid + 2] * qvel[dofid + 2]
+
+      cdof_dot_out[worldid, dofid + 3] = math.motion_cross(cvel, cdof[dofid + 3])
+      cdof_dot_out[worldid, dofid + 4] = math.motion_cross(cvel, cdof[dofid + 4])
+      cdof_dot_out[worldid, dofid + 5] = math.motion_cross(cvel, cdof[dofid + 5])
+
+      cvel += cdof[dofid + 3] * qvel[dofid + 3]
+      cvel += cdof[dofid + 4] * qvel[dofid + 4]
+      cvel += cdof[dofid + 5] * qvel[dofid + 5]
+
+      dofid += 6
+    elif jnttype == wp.static(JointType.BALL.value):
+      cdof_dot_out[worldid, dofid + 0] = math.motion_cross(cvel, cdof[dofid + 0])
+      cdof_dot_out[worldid, dofid + 1] = math.motion_cross(cvel, cdof[dofid + 1])
+      cdof_dot_out[worldid, dofid + 2] = math.motion_cross(cvel, cdof[dofid + 2])
+
+      cvel += cdof[dofid + 0] * qvel[dofid + 0]
+      cvel += cdof[dofid + 1] * qvel[dofid + 1]
+      cvel += cdof[dofid + 2] * qvel[dofid + 2]
+
+      dofid += 3
+    else:
+      cdof_dot_out[worldid, dofid] = math.motion_cross(cvel, cdof[dofid])
+      cvel += cdof[dofid] * qvel[dofid]
+
+      dofid += 1
+
+  cvel_out[worldid, bodyid] = cvel
+
+
+@event_scope
+def com_vel(m: Model, d: Data):
+  """Computes cvel, cdof_dot."""
+  wp.launch(_comvel_root, dim=(d.nworld, 6), inputs=[], outputs=[d.cvel])
+
+  for body_tree in m.body_tree:
+    wp.launch(
+      _comvel_level,
+      dim=(d.nworld, body_tree.size),
+      inputs=[
+        m.body_dofadr,
+        m.body_jntadr,
+        m.body_jntnum,
+        m.body_parentid,
+        m.jnt_type,
+        d.cvel,
+        d.qvel,
+        d.cdof,
+        body_tree,
+      ],
+      outputs=[d.cvel, d.cdof_dot],
+    )
+
+
 # @event_scope
 # def transmission(m: Model, d: Data):
 #   """Computes actuator/transmission lengths and moments."""
@@ -1173,76 +1539,6 @@ def rne(m: Model, d: Data, flg_acc: bool = False):
 #     inputs=[m, d],
 #     outputs=[d.actuator_length, d.actuator_moment],
 #   )
-
-
-# @event_scope
-# def com_vel(m: Model, d: Data):
-#   """Computes cvel, cdof_dot."""
-
-#   @kernel
-#   def _root(d: Data):
-#     worldid, elementid = wp.tid()
-#     d.cvel[worldid, 0][elementid] = 0.0
-
-#   @kernel
-#   def _level(m: Model, d: Data, leveladr: int):
-#     worldid, nodeid = wp.tid()
-#     bodyid = m.body_tree[leveladr + nodeid]
-#     dofid = m.body_dofadr[bodyid]
-#     jntid = m.body_jntadr[bodyid]
-#     jntnum = m.body_jntnum[bodyid]
-#     pid = m.body_parentid[bodyid]
-
-#     if jntnum == 0:
-#       d.cvel[worldid, bodyid] = d.cvel[worldid, pid]
-#       return
-
-#     cvel = d.cvel[worldid, pid]
-#     qvel = d.qvel[worldid]
-#     cdof = d.cdof[worldid]
-
-#     for j in range(jntid, jntid + jntnum):
-#       jnttype = m.jnt_type[j]
-
-#       if jnttype == wp.static(JointType.FREE.value):
-#         cvel += cdof[dofid + 0] * qvel[dofid + 0]
-#         cvel += cdof[dofid + 1] * qvel[dofid + 1]
-#         cvel += cdof[dofid + 2] * qvel[dofid + 2]
-
-#         d.cdof_dot[worldid, dofid + 3] = math.motion_cross(cvel, cdof[dofid + 3])
-#         d.cdof_dot[worldid, dofid + 4] = math.motion_cross(cvel, cdof[dofid + 4])
-#         d.cdof_dot[worldid, dofid + 5] = math.motion_cross(cvel, cdof[dofid + 5])
-
-#         cvel += cdof[dofid + 3] * qvel[dofid + 3]
-#         cvel += cdof[dofid + 4] * qvel[dofid + 4]
-#         cvel += cdof[dofid + 5] * qvel[dofid + 5]
-
-#         dofid += 6
-#       elif jnttype == wp.static(JointType.BALL.value):
-#         d.cdof_dot[worldid, dofid + 0] = math.motion_cross(cvel, cdof[dofid + 0])
-#         d.cdof_dot[worldid, dofid + 1] = math.motion_cross(cvel, cdof[dofid + 1])
-#         d.cdof_dot[worldid, dofid + 2] = math.motion_cross(cvel, cdof[dofid + 2])
-
-#         cvel += cdof[dofid + 0] * qvel[dofid + 0]
-#         cvel += cdof[dofid + 1] * qvel[dofid + 1]
-#         cvel += cdof[dofid + 2] * qvel[dofid + 2]
-
-#         dofid += 3
-#       else:
-#         d.cdof_dot[worldid, dofid] = math.motion_cross(cvel, cdof[dofid])
-#         cvel += cdof[dofid] * qvel[dofid]
-
-#         dofid += 1
-
-#     d.cvel[worldid, bodyid] = cvel
-
-#   wp.launch(_root, dim=(d.nworld, 6), inputs=[d])
-
-#   body_treeadr = m.body_treeadr.numpy()
-#   for i in range(1, len(body_treeadr)):
-#     beg = body_treeadr[i]
-#     end = m.nbody if i == len(body_treeadr) - 1 else body_treeadr[i + 1]
-#     wp.launch(_level, dim=(d.nworld, end - beg), inputs=[m, d, beg])
 
 
 # def _solve_LD_sparse(

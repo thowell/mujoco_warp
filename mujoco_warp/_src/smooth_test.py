@@ -237,16 +237,16 @@ class SmoothTest(parameterized.TestCase):
 
   #   _assert_eq(d.cfrc_ext.numpy()[0], mjd.cfrc_ext, "cfrc_ext (contact)")
 
-  # def test_com_vel(self):
-  #   """Tests com_vel."""
-  #   _, mjd, m, d = test_util.fixture("pendula.xml")
+  def test_com_vel(self):
+    """Tests com_vel."""
+    _, mjd, m, d = test_util.fixture("pendula.xml")
 
-  #   for arr in (d.cvel, d.cdof_dot):
-  #     arr.zero_()
+    for arr in (d.cvel, d.cdof_dot):
+      arr.zero_()
 
-  #   mjwarp.com_vel(m, d)
-  #   _assert_eq(d.cvel.numpy()[0], mjd.cvel, "cvel")
-  #   _assert_eq(d.cdof_dot.numpy()[0], mjd.cdof_dot, "cdof_dot")
+    mjwarp.com_vel(m, d)
+    _assert_eq(d.cvel.numpy()[0], mjd.cvel, "cvel")
+    _assert_eq(d.cdof_dot.numpy()[0], mjd.cdof_dot, "cdof_dot")
 
   # def test_transmission(self):
   #   """Tests transmission."""

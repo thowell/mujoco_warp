@@ -798,7 +798,12 @@ def put_data(
         dtype = wp.bool
       else:
         raise ValueError(f"Unsupported dtype: {x.dtype}")
-    return wp.array(x, dtype=dtype)
+    wp_array = {
+      1: wp.array,
+      2: wp.array2d,
+      3: wp.array3d,
+    }[x.ndim]
+    return wp_array(x, dtype=dtype)
 
   def tile(x, dtype=None):
     return arr(np.tile(x, (nworld,) + (1,) * len(x.shape)), dtype)
