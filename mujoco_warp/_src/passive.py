@@ -21,7 +21,95 @@ from .types import DisableBit
 from .types import JointType
 from .types import Model
 from .warp_util import event_scope
-from .warp_util import kernel
+
+
+@wp.kernel
+def _spring_passive(
+  # Model:
+  qpos_spring: wp.array(dtype=float),
+  jnt_type: wp.array(dtype=int),
+  jnt_qposadr: wp.array(dtype=int),
+  jnt_dofadr: wp.array(dtype=int),
+  jnt_stiffness: wp.array(dtype=float),
+  # Data in:
+  qpos_in: wp.array2d(dtype=float),
+  # Data out:
+  qfrc_spring_out: wp.array2d(dtype=float),
+):
+  worldid, jntid = wp.tid()
+  stiffness = jnt_stiffness[jntid]
+  dofid = jnt_dofadr[jntid]
+
+  if stiffness == 0.0:
+    return
+
+  jnttype = jnt_type[jntid]
+  qposid = jnt_qposadr[jntid]
+
+  if jnttype == wp.static(JointType.FREE.value):
+    dif = wp.vec3(
+      qpos_in[worldid, qposid + 0] - qpos_spring[qposid + 0],
+      qpos_in[worldid, qposid + 1] - qpos_spring[qposid + 1],
+      qpos_in[worldid, qposid + 2] - qpos_spring[qposid + 2],
+    )
+    qfrc_spring_out[worldid, dofid + 0] = -stiffness * dif[0]
+    qfrc_spring_out[worldid, dofid + 1] = -stiffness * dif[1]
+    qfrc_spring_out[worldid, dofid + 2] = -stiffness * dif[2]
+    rot = wp.quat(
+      qpos_in[worldid, qposid + 3],
+      qpos_in[worldid, qposid + 4],
+      qpos_in[worldid, qposid + 5],
+      qpos_in[worldid, qposid + 6],
+    )
+    ref = wp.quat(
+      qpos_spring[qposid + 3],
+      qpos_spring[qposid + 4],
+      qpos_spring[qposid + 5],
+      qpos_spring[qposid + 6],
+    )
+    dif = math.quat_sub(rot, ref)
+    qfrc_spring_out[worldid, dofid + 3] = -stiffness * dif[0]
+    qfrc_spring_out[worldid, dofid + 4] = -stiffness * dif[1]
+    qfrc_spring_out[worldid, dofid + 5] = -stiffness * dif[2]
+  elif jnttype == wp.static(JointType.BALL.value):
+    rot = wp.quat(
+      qpos_in[worldid, qposid + 0],
+      qpos_in[worldid, qposid + 1],
+      qpos_in[worldid, qposid + 2],
+      qpos_in[worldid, qposid + 3],
+    )
+    ref = wp.quat(
+      qpos_spring[qposid + 0],
+      qpos_spring[qposid + 1],
+      qpos_spring[qposid + 2],
+      qpos_spring[qposid + 3],
+    )
+    dif = math.quat_sub(rot, ref)
+    qfrc_spring_out[worldid, dofid + 0] = -stiffness * dif[0]
+    qfrc_spring_out[worldid, dofid + 1] = -stiffness * dif[1]
+    qfrc_spring_out[worldid, dofid + 2] = -stiffness * dif[2]
+  else:  # mjJNT_SLIDE, mjJNT_HINGE
+    fdif = qpos_in[worldid, qposid] - qpos_spring[qposid]
+    qfrc_spring_out[worldid, dofid] = -stiffness * fdif
+
+
+@wp.kernel
+def _damper_passive(
+  # Model:
+  dof_damping: wp.array(dtype=float),
+  # Data in:
+  qvel_in: wp.array2d(dtype=float),
+  qfrc_spring_in: wp.array2d(dtype=float),
+  # Data out:
+  qfrc_damper_out: wp.array2d(dtype=float),
+  qfrc_passive_out: wp.array2d(dtype=float),
+):
+  worldid, dofid = wp.tid()
+
+  qfrc_damper = -dof_damping[dofid] * qvel_in[worldid, dofid]
+
+  qfrc_damper_out[worldid, dofid] = qfrc_damper
+  qfrc_passive_out[worldid, dofid] = qfrc_damper + qfrc_spring_in[worldid, dofid]
 
 
 @event_scope
@@ -32,77 +120,27 @@ def passive(m: Model, d: Data):
     # TODO(team): qfrc_gravcomp
     return
 
-  @kernel
-  def _spring(m: Model, d: Data):
-    worldid, jntid = wp.tid()
-    stiffness = m.jnt_stiffness[jntid]
-    dofid = m.jnt_dofadr[jntid]
-
-    if stiffness == 0.0:
-      return
-
-    jnt_type = m.jnt_type[jntid]
-    qposid = m.jnt_qposadr[jntid]
-
-    if jnt_type == wp.static(JointType.FREE.value):
-      dif = wp.vec3(
-        d.qpos[worldid, qposid + 0] - m.qpos_spring[qposid + 0],
-        d.qpos[worldid, qposid + 1] - m.qpos_spring[qposid + 1],
-        d.qpos[worldid, qposid + 2] - m.qpos_spring[qposid + 2],
-      )
-      d.qfrc_spring[worldid, dofid + 0] = -stiffness * dif[0]
-      d.qfrc_spring[worldid, dofid + 1] = -stiffness * dif[1]
-      d.qfrc_spring[worldid, dofid + 2] = -stiffness * dif[2]
-      rot = wp.quat(
-        d.qpos[worldid, qposid + 3],
-        d.qpos[worldid, qposid + 4],
-        d.qpos[worldid, qposid + 5],
-        d.qpos[worldid, qposid + 6],
-      )
-      ref = wp.quat(
-        m.qpos_spring[qposid + 3],
-        m.qpos_spring[qposid + 4],
-        m.qpos_spring[qposid + 5],
-        m.qpos_spring[qposid + 6],
-      )
-      dif = math.quat_sub(rot, ref)
-      d.qfrc_spring[worldid, dofid + 3] = -stiffness * dif[0]
-      d.qfrc_spring[worldid, dofid + 4] = -stiffness * dif[1]
-      d.qfrc_spring[worldid, dofid + 5] = -stiffness * dif[2]
-    elif jnt_type == wp.static(JointType.BALL.value):
-      rot = wp.quat(
-        d.qpos[worldid, qposid + 0],
-        d.qpos[worldid, qposid + 1],
-        d.qpos[worldid, qposid + 2],
-        d.qpos[worldid, qposid + 3],
-      )
-      ref = wp.quat(
-        m.qpos_spring[qposid + 0],
-        m.qpos_spring[qposid + 1],
-        m.qpos_spring[qposid + 2],
-        m.qpos_spring[qposid + 3],
-      )
-      dif = math.quat_sub(rot, ref)
-      d.qfrc_spring[worldid, dofid + 0] = -stiffness * dif[0]
-      d.qfrc_spring[worldid, dofid + 1] = -stiffness * dif[1]
-      d.qfrc_spring[worldid, dofid + 2] = -stiffness * dif[2]
-    else:  # mjJNT_SLIDE, mjJNT_HINGE
-      fdif = d.qpos[worldid, qposid] - m.qpos_spring[qposid]
-      d.qfrc_spring[worldid, dofid] = -stiffness * fdif
-
-  @kernel
-  def _damper_passive(m: Model, d: Data):
-    worldid, dofid = wp.tid()
-    damping = m.dof_damping[dofid]
-    qfrc_damper = -damping * d.qvel[worldid, dofid]
-
-    d.qfrc_damper[worldid, dofid] = qfrc_damper
-    d.qfrc_passive[worldid, dofid] = qfrc_damper + d.qfrc_spring[worldid, dofid]
-
   # TODO(team): mj_gravcomp
   # TODO(team): mj_ellipsoidFluidModel
   # TODO(team): mj_inertiaBoxFluidModell
 
   d.qfrc_spring.zero_()
-  wp.launch(_spring, dim=(d.nworld, m.njnt), inputs=[m, d])
-  wp.launch(_damper_passive, dim=(d.nworld, m.nv), inputs=[m, d])
+  wp.launch(
+    _spring_passive,
+    dim=(d.nworld, m.njnt),
+    inputs=[
+      m.qpos_spring,
+      m.jnt_type,
+      m.jnt_qposadr,
+      m.jnt_dofadr,
+      m.jnt_stiffness,
+      d.qpos,
+    ],
+    outputs=[d.qfrc_spring],
+  )
+  wp.launch(
+    _damper_passive,
+    dim=(d.nworld, m.nv),
+    inputs=[m.dof_damping, d.qvel, d.qfrc_spring],
+    outputs=[d.qfrc_damper, d.qfrc_passive],
+  )
