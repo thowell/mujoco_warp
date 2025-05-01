@@ -59,7 +59,6 @@ def _kinematics_root(
 def _kinematics_level(
   # Model:
   qpos0: wp.array(dtype=float),
-  body_tree: wp.array(dtype=int),  # TODO(team): fix this type...
   body_parentid: wp.array(dtype=int),
   body_jntnum: wp.array(dtype=int),
   body_jntadr: wp.array(dtype=int),
@@ -76,6 +75,8 @@ def _kinematics_level(
   xpos_in: wp.array2d(dtype=wp.vec3),
   xquat_in: wp.array2d(dtype=wp.quat),
   xmat_in: wp.array2d(dtype=wp.mat33),
+  # In:
+  body_tree_: wp.array(dtype=int),
   # Data out:
   xpos_out: wp.array2d(dtype=wp.vec3),
   xquat_out: wp.array2d(dtype=wp.quat),
@@ -84,11 +85,9 @@ def _kinematics_level(
   ximat_out: wp.array2d(dtype=wp.mat33),
   xanchor_out: wp.array2d(dtype=wp.vec3),
   xaxis_out: wp.array2d(dtype=wp.vec3),
-  # In:
-  # leveladr: int
 ):
   worldid, nodeid = wp.tid()
-  bodyid = body_tree[nodeid]
+  bodyid = body_tree_[nodeid]
   jntadr = body_jntadr[bodyid]
   jntnum = body_jntnum[bodyid]
   qpos = qpos_in[worldid]
@@ -216,7 +215,6 @@ def kinematics(m: Model, d: Data):
       dim=(d.nworld, end - beg),
       inputs=[
         m.qpos0,
-        body_tree,
         m.body_parentid,
         m.body_jntnum,
         m.body_jntadr,
@@ -232,6 +230,7 @@ def kinematics(m: Model, d: Data):
         d.xpos,
         d.xquat,
         d.xmat,
+        body_tree,
       ],
       outputs=[d.xpos, d.xquat, d.xmat, d.xipos, d.ximat, d.xanchor, d.xaxis],
     )
