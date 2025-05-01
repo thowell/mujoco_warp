@@ -87,22 +87,22 @@ class SmoothTest(parameterized.TestCase):
     _assert_eq(d.light_xpos.numpy()[0], mjd.light_xpos, "light_xpos")
     _assert_eq(d.light_xdir.numpy()[0], mjd.light_xdir, "light_xdir")
 
-  # @parameterized.parameters(True, False)
-  # def test_crb(self, sparse: bool):
-  #   """Tests crb."""
-  #   mjm, mjd, m, d = test_util.fixture("pendula.xml", sparse=sparse)
+  @parameterized.parameters(True, False)
+  def test_crb(self, sparse: bool):
+    """Tests crb."""
+    mjm, mjd, m, d = test_util.fixture("pendula.xml", sparse=sparse)
 
-  #   d.crb.zero_()
+    d.crb.zero_()
 
-  #   mjwarp.crb(m, d)
-  #   _assert_eq(d.crb.numpy()[0], mjd.crb, "crb")
+    mjwarp.crb(m, d)
+    _assert_eq(d.crb.numpy()[0], mjd.crb, "crb")
 
-  #   if sparse:
-  #     _assert_eq(d.qM.numpy()[0, 0], mjd.qM, "qM")
-  #   else:
-  #     qM = np.zeros((mjm.nv, mjm.nv))
-  #     mujoco.mj_fullM(mjm, qM, mjd.qM)
-  #     _assert_eq(d.qM.numpy()[0], qM, "qM")
+    if sparse:
+      _assert_eq(d.qM.numpy()[0, 0], mjd.qM, "qM")
+    else:
+      qM = np.zeros((mjm.nv, mjm.nv))
+      mujoco.mj_fullM(mjm, qM, mjd.qM)
+      _assert_eq(d.qM.numpy()[0], qM, "qM")
 
   # @parameterized.parameters(True, False)
   # def test_factor_m(self, sparse: bool):
