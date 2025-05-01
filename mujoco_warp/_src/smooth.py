@@ -208,7 +208,7 @@ def kinematics(m: Model, d: Data):
   )
 
   for i in range(1, len(m.body_tree)):
-    body_tree = m.body_tree[i].numpy()
+    body_tree = m.body_tree[i]
     beg, end = body_tree[0], body_tree[-1]
     wp.launch(
       _kinematics_level,
@@ -392,7 +392,7 @@ def com_pos(m: Model, d: Data):
   )
 
   for i in reversed(range(len(m.body_tree))):
-    body_tree = m.body_tree[i].numpy()
+    body_tree = m.body_tree[i]
     beg, end = body_tree[0], body_tree[-1]
     wp.launch(
       _subtree_com_acc,
