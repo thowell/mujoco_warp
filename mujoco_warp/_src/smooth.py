@@ -252,104 +252,189 @@ def kinematics(m: Model, d: Data):
     )
 
 
-# @event_scope
-# def com_pos(m: Model, d: Data):
-#   """Map inertias and motion dofs to global frame centered at subtree-CoM."""
+@kernel
+def _subtree_com_init(
+  # Model:
+  body_mass: wp.array(dtype=float),
+  # Data in:
+  xipos_in: wp.array2d(dtype=wp.vec3),
+  # Data out:
+  xipos_out: wp.array2d(dtype=wp.vec3),
+):
+  worldid, bodyid = wp.tid()
+  xipos_out[worldid, bodyid] = xipos_in[worldid, bodyid] * body_mass[bodyid]
 
-#   @kernel
-#   def subtree_com_init(m: Model, d: Data):
-#     worldid, bodyid = wp.tid()
-#     d.subtree_com[worldid, bodyid] = d.xipos[worldid, bodyid] * m.body_mass[bodyid]
 
-#   @kernel
-#   def subtree_com_acc(m: Model, d: Data, leveladr: int):
-#     worldid, nodeid = wp.tid()
-#     bodyid = m.body_tree[leveladr + nodeid]
-#     pid = m.body_parentid[bodyid]
-#     wp.atomic_add(d.subtree_com, worldid, pid, d.subtree_com[worldid, bodyid])
+@kernel
+def _subtree_com_acc(
+  # Model:
+  body_parentid: wp.array(dtype=int),
+  # In:
+  body_tree_: wp.array(dtype=int),
+  # Data out:
+  subtree_com_out: wp.array2d(dtype=wp.vec3),
+):
+  worldid, nodeid = wp.tid()
+  bodyid = body_tree_[nodeid]
+  pid = body_parentid[bodyid]
+  wp.atomic_add(subtree_com_out, worldid, pid, subtree_com_out[worldid, bodyid])
 
-#   @kernel
-#   def subtree_div(m: Model, d: Data):
-#     worldid, bodyid = wp.tid()
-#     d.subtree_com[worldid, bodyid] /= m.subtree_mass[bodyid]
 
-#   @kernel
-#   def cinert(m: Model, d: Data):
-#     worldid, bodyid = wp.tid()
-#     mat = d.ximat[worldid, bodyid]
-#     inert = m.body_inertia[bodyid]
-#     mass = m.body_mass[bodyid]
-#     dif = d.xipos[worldid, bodyid] - d.subtree_com[worldid, m.body_rootid[bodyid]]
-#     # express inertia in com-based frame (mju_inertCom)
+@kernel
+def _subtree_div(
+  # Model:
+  subtree_mass: wp.array(dtype=float),
+  # Data out:
+  subtree_com_out: wp.array2d(dtype=wp.vec3),
+):
+  worldid, bodyid = wp.tid()
+  subtree_com_out[worldid, bodyid] /= subtree_mass[bodyid]
 
-#     res = vec10()
-#     # res_rot = mat * diag(inert) * mat'
-#     tmp = mat @ wp.diag(inert) @ wp.transpose(mat)
-#     res[0] = tmp[0, 0]
-#     res[1] = tmp[1, 1]
-#     res[2] = tmp[2, 2]
-#     res[3] = tmp[0, 1]
-#     res[4] = tmp[0, 2]
-#     res[5] = tmp[1, 2]
-#     # res_rot -= mass * dif_cross * dif_cross
-#     res[0] += mass * (dif[1] * dif[1] + dif[2] * dif[2])
-#     res[1] += mass * (dif[0] * dif[0] + dif[2] * dif[2])
-#     res[2] += mass * (dif[0] * dif[0] + dif[1] * dif[1])
-#     res[3] -= mass * dif[0] * dif[1]
-#     res[4] -= mass * dif[0] * dif[2]
-#     res[5] -= mass * dif[1] * dif[2]
-#     # res_tran = mass * dif
-#     res[6] = mass * dif[0]
-#     res[7] = mass * dif[1]
-#     res[8] = mass * dif[2]
-#     # res_mass = mass
-#     res[9] = mass
 
-#     d.cinert[worldid, bodyid] = res
+@kernel
+def _cinert(
+  # Model:
+  body_rootid: wp.array(dtype=int),
+  body_inertia: wp.array(dtype=wp.vec3),
+  body_mass: wp.array(dtype=float),
+  # Data in:
+  xipos_in: wp.array2d(dtype=wp.vec3),
+  ximat_in: wp.array2d(dtype=wp.mat33),
+  subtree_com_in: wp.array2d(dtype=wp.vec3),
+  # Data out:
+  cinert_out: wp.array2d(dtype=vec10),
+):
+  worldid, bodyid = wp.tid()
+  mat = ximat_in[worldid, bodyid]
+  inert = body_inertia[bodyid]
+  mass = body_mass[bodyid]
+  dif = xipos_in[worldid, bodyid] - subtree_com_in[worldid, body_rootid[bodyid]]
+  # express inertia in com-based frame (mju_inertCom)
 
-#   @kernel
-#   def cdof(m: Model, d: Data):
-#     worldid, jntid = wp.tid()
-#     bodyid = m.jnt_bodyid[jntid]
-#     dofid = m.jnt_dofadr[jntid]
-#     jnt_type = m.jnt_type[jntid]
-#     xaxis = d.xaxis[worldid, jntid]
-#     xmat = wp.transpose(d.xmat[worldid, bodyid])
+  res = vec10()
+  # res_rot = mat * diag(inert) * mat'
+  tmp = mat @ wp.diag(inert) @ wp.transpose(mat)
+  res[0] = tmp[0, 0]
+  res[1] = tmp[1, 1]
+  res[2] = tmp[2, 2]
+  res[3] = tmp[0, 1]
+  res[4] = tmp[0, 2]
+  res[5] = tmp[1, 2]
+  # res_rot -= mass * dif_cross * dif_cross
+  res[0] += mass * (dif[1] * dif[1] + dif[2] * dif[2])
+  res[1] += mass * (dif[0] * dif[0] + dif[2] * dif[2])
+  res[2] += mass * (dif[0] * dif[0] + dif[1] * dif[1])
+  res[3] -= mass * dif[0] * dif[1]
+  res[4] -= mass * dif[0] * dif[2]
+  res[5] -= mass * dif[1] * dif[2]
+  # res_tran = mass * dif
+  res[6] = mass * dif[0]
+  res[7] = mass * dif[1]
+  res[8] = mass * dif[2]
+  # res_mass = mass
+  res[9] = mass
 
-#     # compute com-anchor vector
-#     offset = d.subtree_com[worldid, m.body_rootid[bodyid]] - d.xanchor[worldid, jntid]
+  cinert_out[worldid, bodyid] = res
 
-#     res = d.cdof[worldid]
-#     if jnt_type == wp.static(JointType.FREE.value):
-#       res[dofid + 0] = wp.spatial_vector(0.0, 0.0, 0.0, 1.0, 0.0, 0.0)
-#       res[dofid + 1] = wp.spatial_vector(0.0, 0.0, 0.0, 0.0, 1.0, 0.0)
-#       res[dofid + 2] = wp.spatial_vector(0.0, 0.0, 0.0, 0.0, 0.0, 1.0)
-#       # I_3 rotation in child frame (assume no subsequent rotations)
-#       res[dofid + 3] = wp.spatial_vector(xmat[0], wp.cross(xmat[0], offset))
-#       res[dofid + 4] = wp.spatial_vector(xmat[1], wp.cross(xmat[1], offset))
-#       res[dofid + 5] = wp.spatial_vector(xmat[2], wp.cross(xmat[2], offset))
-#     elif jnt_type == wp.static(JointType.BALL.value):  # ball
-#       # I_3 rotation in child frame (assume no subsequent rotations)
-#       res[dofid + 0] = wp.spatial_vector(xmat[0], wp.cross(xmat[0], offset))
-#       res[dofid + 1] = wp.spatial_vector(xmat[1], wp.cross(xmat[1], offset))
-#       res[dofid + 2] = wp.spatial_vector(xmat[2], wp.cross(xmat[2], offset))
-#     elif jnt_type == wp.static(JointType.SLIDE.value):
-#       res[dofid] = wp.spatial_vector(wp.vec3(0.0), xaxis)
-#     elif jnt_type == wp.static(JointType.HINGE.value):  # hinge
-#       res[dofid] = wp.spatial_vector(xaxis, wp.cross(xaxis, offset))
 
-#   wp.launch(subtree_com_init, dim=(d.nworld, m.nbody), inputs=[m, d])
+@kernel
+def _cdof(
+  # Model:
+  jnt_bodyid: wp.array(dtype=int),
+  jnt_dofadr: wp.array(dtype=int),
+  jnt_type: wp.array(dtype=int),
+  body_rootid: wp.array(dtype=int),
+  # Data in:
+  xaxis_in: wp.array2d(dtype=wp.vec3),
+  xmat_in: wp.array2d(dtype=wp.mat33),
+  subtree_com_in: wp.array2d(dtype=wp.vec3),
+  xanchor_in: wp.array2d(dtype=wp.vec3),
+  # Data out:
+  cdof_out: wp.array2d(dtype=wp.spatial_vector),
+):
+  worldid, jntid = wp.tid()
+  bodyid = jnt_bodyid[jntid]
+  dofid = jnt_dofadr[jntid]
+  jnt_type_ = jnt_type[jntid]
+  xaxis = xaxis_in[worldid, jntid]
+  xmat = wp.transpose(xmat_in[worldid, bodyid])
 
-#   body_treeadr = m.body_treeadr.numpy()
+  # compute com-anchor vector
+  offset = subtree_com_in[worldid, body_rootid[bodyid]] - xanchor_in[worldid, jntid]
 
-#   for i in reversed(range(len(body_treeadr))):
-#     beg = body_treeadr[i]
-#     end = m.nbody if i == len(body_treeadr) - 1 else body_treeadr[i + 1]
-#     wp.launch(subtree_com_acc, dim=(d.nworld, end - beg), inputs=[m, d, beg])
+  res = cdof_out[worldid]
+  if jnt_type_ == wp.static(JointType.FREE.value):
+    res[dofid + 0] = wp.spatial_vector(0.0, 0.0, 0.0, 1.0, 0.0, 0.0)
+    res[dofid + 1] = wp.spatial_vector(0.0, 0.0, 0.0, 0.0, 1.0, 0.0)
+    res[dofid + 2] = wp.spatial_vector(0.0, 0.0, 0.0, 0.0, 0.0, 1.0)
+    # I_3 rotation in child frame (assume no subsequent rotations)
+    res[dofid + 3] = wp.spatial_vector(xmat[0], wp.cross(xmat[0], offset))
+    res[dofid + 4] = wp.spatial_vector(xmat[1], wp.cross(xmat[1], offset))
+    res[dofid + 5] = wp.spatial_vector(xmat[2], wp.cross(xmat[2], offset))
+  elif jnt_type_ == wp.static(JointType.BALL.value):  # ball
+    # I_3 rotation in child frame (assume no subsequent rotations)
+    res[dofid + 0] = wp.spatial_vector(xmat[0], wp.cross(xmat[0], offset))
+    res[dofid + 1] = wp.spatial_vector(xmat[1], wp.cross(xmat[1], offset))
+    res[dofid + 2] = wp.spatial_vector(xmat[2], wp.cross(xmat[2], offset))
+  elif jnt_type_ == wp.static(JointType.SLIDE.value):
+    res[dofid] = wp.spatial_vector(wp.vec3(0.0), xaxis)
+  elif jnt_type_ == wp.static(JointType.HINGE.value):  # hinge
+    res[dofid] = wp.spatial_vector(xaxis, wp.cross(xaxis, offset))
 
-#   wp.launch(subtree_div, dim=(d.nworld, m.nbody), inputs=[m, d])
-#   wp.launch(cinert, dim=(d.nworld, m.nbody), inputs=[m, d])
-#   wp.launch(cdof, dim=(d.nworld, m.njnt), inputs=[m, d])
+
+@event_scope
+def com_pos(m: Model, d: Data):
+  """Map inertias and motion dofs to global frame centered at subtree-CoM."""
+  wp.launch(
+    _subtree_com_init,
+    dim=(d.nworld, m.nbody),
+    inputs=[m.body_mass, d.xipos, d.subtree_com],
+  )
+
+  for i in reversed(range(len(m.body_tree))):
+    body_tree = m.body_tree[i].numpy()
+    beg, end = body_tree[0], body_tree[-1]
+    wp.launch(
+      _subtree_com_acc,
+      dim=(d.nworld, end - beg),
+      inputs=[m.body_parentid, body_tree],
+      outputs=[d.subtree_com],
+    )
+
+  wp.launch(
+    _subtree_div,
+    dim=(d.nworld, m.nbody),
+    inputs=[m.subtree_mass],
+    outputs=[d.subtree_com],
+  )
+  wp.launch(
+    _cinert,
+    dim=(d.nworld, m.nbody),
+    inputs=[
+      m.body_rootid,
+      m.body_inertia,
+      m.body_mass,
+      d.xipos,
+      d.ximat,
+      d.subtree_com,
+    ],
+    outputs=[d.cinert],
+  )
+  wp.launch(
+    _cdof,
+    dim=(d.nworld, m.njnt),
+    inputs=[
+      m.jnt_bodyid,
+      m.jnt_dofadr,
+      m.jnt_type,
+      m.body_rootid,
+      d.xaxis,
+      d.xmat,
+      d.subtree_com,
+      d.xanchor,
+    ],
+    outputs=[d.cdof],
+  )
 
 
 # @event_scope

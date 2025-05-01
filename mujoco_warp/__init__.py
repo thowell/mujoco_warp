@@ -40,12 +40,14 @@ from ._src.passive import passive as passive
 from ._src.sensor import sensor_acc as sensor_acc
 from ._src.sensor import sensor_pos as sensor_pos
 from ._src.sensor import sensor_vel as sensor_vel
+
 # from ._src.smooth import camlight as camlight
-# from ._src.smooth import com_pos as com_pos
+from ._src.smooth import com_pos as com_pos
 # from ._src.smooth import com_vel as com_vel
 # from ._src.smooth import crb as crb
 # from ._src.smooth import factor_m as factor_m
 from ._src.smooth import kinematics as kinematics
+
 # from ._src.smooth import rne as rne
 # from ._src.smooth import rne_postconstraint as rne_postconstraint
 # from ._src.smooth import solve_m as solve_m

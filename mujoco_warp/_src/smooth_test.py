@@ -60,17 +60,17 @@ class SmoothTest(parameterized.TestCase):
     _assert_eq(d.site_xpos.numpy()[0], mjd.site_xpos, "site_xpos")
     _assert_eq(d.site_xmat.numpy()[0], mjd.site_xmat.reshape((-1, 3, 3)), "site_xmat")
 
-  # def test_com_pos(self):
-  #   """Tests com_pos."""
-  #   _, mjd, m, d = test_util.fixture("pendula.xml")
+  def test_com_pos(self):
+    """Tests com_pos."""
+    _, mjd, m, d = test_util.fixture("pendula.xml")
 
-  #   for arr in (d.subtree_com, d.cinert, d.cdof):
-  #     arr.zero_()
+    for arr in (d.subtree_com, d.cinert, d.cdof):
+      arr.zero_()
 
-  #   mjwarp.com_pos(m, d)
-  #   _assert_eq(d.subtree_com.numpy()[0], mjd.subtree_com, "subtree_com")
-  #   _assert_eq(d.cinert.numpy()[0], mjd.cinert, "cinert")
-  #   _assert_eq(d.cdof.numpy()[0], mjd.cdof, "cdof")
+    mjwarp.com_pos(m, d)
+    _assert_eq(d.subtree_com.numpy()[0], mjd.subtree_com, "subtree_com")
+    _assert_eq(d.cinert.numpy()[0], mjd.cinert, "cinert")
+    _assert_eq(d.cdof.numpy()[0], mjd.cdof, "cdof")
 
   # def test_camlight(self):
   #   """Tests camlight."""

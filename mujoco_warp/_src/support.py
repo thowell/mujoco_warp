@@ -155,7 +155,7 @@ def mul_m(
           tile.adr,
           # note reshape: tile_matmul expects 2d input
           vec.reshape(vec.shape + (1,)),
-          skip
+          skip,
         ],
         outputs=[res.reshape(res.shape + (1,))],
         # TODO(team): develop heuristic for block dim, or make configurable
