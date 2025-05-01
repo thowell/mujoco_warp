@@ -24,7 +24,6 @@ from absl.testing import parameterized
 import mujoco_warp as mjwarp
 
 from . import test_util
-from .support import contact_force_kernel
 from .types import ConeType
 
 wp.config.verify_cuda = True
@@ -111,12 +110,10 @@ class SupportTest(parameterized.TestCase):
     mj_force = np.zeros(6, dtype=float)
     mujoco.mj_contactForce(mjm, mjd, 0, mj_force)
 
+    contact_ids = wp.zeros(1, dtype=int)
     force = wp.zeros(1, dtype=wp.spatial_vector)
-    wp.launch(
-      kernel=contact_force_kernel,
-      dim=1,
-      inputs=[m, d, force, wp.array([0], dtype=int), to_world_frame],
-    )
+
+    mjwarp.contact_force(m, d, contact_ids, to_world_frame, force)
 
     if to_world_frame:
       frame = mjd.contact.frame[0].reshape((3, 3))
