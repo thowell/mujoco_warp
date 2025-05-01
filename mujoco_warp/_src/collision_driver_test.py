@@ -21,7 +21,6 @@ from absl.testing import parameterized
 
 import mujoco_warp as mjwarp
 
-from . import io
 from . import test_util
 
 
@@ -177,25 +176,25 @@ class CollisionTest(parameterized.TestCase):
             <body pos="0 0 0.1" euler="30 30 0">
               <freejoint/>
               <geom size="0.05 0.1" type="cylinder"/>
-            </body>           
+            </body>
           </worldbody>
         </mujoco>
         """,
     "plane_cylinder_2": """
         <mujoco>
           <worldbody>
-            <geom size="40 40 40" type="plane" euler="3 0 0"/>            
+            <geom size="40 40 40" type="plane" euler="3 0 0"/>
             <body pos="0.2 0 0.04" euler="90 0 0">
               <freejoint/>
               <geom size="0.05 0.1" type="cylinder"/>
-            </body>            
+            </body>
           </worldbody>
         </mujoco>
         """,
     "plane_cylinder_3": """
         <mujoco>
           <worldbody>
-            <geom size="40 40 40" type="plane" euler="3 0 0"/>            
+            <geom size="40 40 40" type="plane" euler="3 0 0"/>
             <body pos="0.5 0 0.1" euler="3 0 0">
               <freejoint/>
               <geom size="0.05 0.1" type="cylinder"/>
@@ -247,7 +246,7 @@ class CollisionTest(parameterized.TestCase):
 
   @parameterized.parameters(_FIXTURES.keys())
   def test_collision(self, fixture):
-    """Tests convex collision with different geometries."""
+    """Tests collisions with different geometries."""
     mjm, mjd, m, d = test_util.fixture(xml=self._FIXTURES[fixture])
 
     mujoco.mj_collision(mjm, mjd)
@@ -273,7 +272,8 @@ class CollisionTest(parameterized.TestCase):
 
   def test_contact_exclude(self):
     """Tests contact exclude."""
-    mjm = mujoco.MjModel.from_xml_string("""
+    _, _, m, _ = test_util.fixture(
+      xml="""
       <mujoco>
         <worldbody>
           <body name="body1">
@@ -293,15 +293,16 @@ class CollisionTest(parameterized.TestCase):
           <exclude body1="body1" body2="body2"/>
         </contact>
       </mujoco>
-    """)
-    geompair, pairid = io.geom_pair(mjm)
-    self.assertEqual(geompair.shape[0], 3)
-    np.testing.assert_equal(pairid, np.array([-2, -1, -1]))
+    """
+    )
+    self.assertEqual(m.nxn_geom_pair.numpy().shape[0], 3)
+    np.testing.assert_equal(m.nxn_pairid.numpy(), np.array([-2, -1, -1]))
 
   def test_contact_pair(self):
     """Tests contact pair."""
     # no pairs
-    mjm = mujoco.MjModel.from_xml_string("""
+    _, _, m, _ = test_util.fixture(
+      xml="""
       <mujoco>
         <worldbody>
           <body>
@@ -310,12 +311,13 @@ class CollisionTest(parameterized.TestCase):
           </body>
         </worldbody>
       </mujoco>
-    """)
-    _, pairid = io.geom_pair(mjm)
-    self.assertTrue((pairid == -1).all())
+    """
+    )
+    self.assertTrue((m.nxn_pairid.numpy() == -1).all())
 
     # 1 pair
-    mjm = mujoco.MjModel.from_xml_string("""
+    _, _, m, d = test_util.fixture(
+      xml="""
       <mujoco>
         <worldbody>
           <body>
@@ -331,14 +333,21 @@ class CollisionTest(parameterized.TestCase):
           <pair geom1="geom1" geom2="geom2" margin="2" gap="3" condim="6" friction="5 4 3 2 1" solref="-.25 -.5" solreffriction="2 4" solimp=".1 .2 .3 .4 .5"/>
         </contact>
       </mujoco>
-    """)
-    _, pairid = io.geom_pair(mjm)
-    self.assertTrue((pairid == 0).all())
+    """
+    )
+    self.assertTrue((m.nxn_pairid.numpy() == 0).all())
 
-    # generate contact
-    m = mjwarp.put_model(mjm)
-    d = mjwarp.make_data(mjm)
-    mjwarp.kinematics(m, d)
+    for arr in (
+      d.ncon,
+      d.contact.includemargin,
+      d.contact.dim,
+      d.contact.friction,
+      d.contact.solref,
+      d.contact.solreffriction,
+      d.contact.solimp,
+    ):
+      arr.zero_()
+
     mjwarp.collision(m, d)
 
     self.assertEqual(d.ncon.numpy()[0], 1)
@@ -354,7 +363,8 @@ class CollisionTest(parameterized.TestCase):
     )
 
     # 1 pair: override contype and conaffinity
-    mjm = mujoco.MjModel.from_xml_string("""
+    _, _, m, d = test_util.fixture(
+      xml="""
       <mujoco>
         <worldbody>
           <body name="body1">
@@ -370,14 +380,21 @@ class CollisionTest(parameterized.TestCase):
           <pair geom1="geom1" geom2="geom2" margin="2" gap="3" condim="6" friction="5 4 3 2 1" solref="-.25 -.5" solreffriction="2 4" solimp=".1 .2 .3 .4 .5"/>
         </contact>
       </mujoco>
-    """)
-    _, pairid = io.geom_pair(mjm)
-    self.assertTrue((pairid == 0).all())
+    """
+    )
+    self.assertTrue((m.nxn_pairid.numpy() == 0).all())
 
-    # generate contact
-    m = mjwarp.put_model(mjm)
-    d = mjwarp.make_data(mjm)
-    mjwarp.kinematics(m, d)
+    for arr in (
+      d.ncon,
+      d.contact.includemargin,
+      d.contact.dim,
+      d.contact.friction,
+      d.contact.solref,
+      d.contact.solreffriction,
+      d.contact.solimp,
+    ):
+      arr.zero_()
+
     mjwarp.collision(m, d)
 
     self.assertEqual(d.ncon.numpy()[0], 1)
@@ -393,7 +410,8 @@ class CollisionTest(parameterized.TestCase):
     )
 
     # 1 pair: override exclude
-    mjm = mujoco.MjModel.from_xml_string("""
+    _, _, m, d = test_util.fixture(
+      xml="""
       <mujoco>
         <worldbody>
           <body name="body1">
@@ -410,14 +428,21 @@ class CollisionTest(parameterized.TestCase):
           <pair geom1="geom1" geom2="geom2" margin="2" gap="3" condim="6" friction="5 4 3 2 1" solref="-.25 -.5" solreffriction="2 4" solimp=".1 .2 .3 .4 .5"/>
         </contact>
       </mujoco>
-    """)
-    _, pairid = io.geom_pair(mjm)
-    self.assertTrue((pairid == 0).all())
+    """
+    )
+    self.assertTrue((m.nxn_pairid.numpy() == 0).all())
 
-    # generate contact
-    m = mjwarp.put_model(mjm)
-    d = mjwarp.make_data(mjm)
-    mjwarp.kinematics(m, d)
+    for arr in (
+      d.ncon,
+      d.contact.includemargin,
+      d.contact.dim,
+      d.contact.friction,
+      d.contact.solref,
+      d.contact.solreffriction,
+      d.contact.solimp,
+    ):
+      arr.zero_()
+
     mjwarp.collision(m, d)
 
     self.assertEqual(d.ncon.numpy()[0], 1)
@@ -433,7 +458,8 @@ class CollisionTest(parameterized.TestCase):
     )
 
     # 1 pair 1 exclude
-    mjm = mujoco.MjModel.from_xml_string("""
+    _, _, m, d = test_util.fixture(
+      xml="""
       <mujoco>
         <worldbody>
           <body name="body1">
@@ -454,14 +480,21 @@ class CollisionTest(parameterized.TestCase):
           <pair geom1="geom2" geom2="geom3" margin="2" gap="3" condim="6" friction="5 4 3 2 1" solref="-.25 -.5" solreffriction="2 4" solimp=".1 .2 .3 .4 .5"/>
         </contact>
       </mujoco>
-    """)
-    _, pairid = io.geom_pair(mjm)
-    np.testing.assert_equal(pairid, np.array([-2, -1, 0]))
+    """
+    )
+    np.testing.assert_equal(m.nxn_pairid.numpy(), np.array([-2, -1, 0]))
 
-    # generate contact
-    m = mjwarp.put_model(mjm)
-    d = mjwarp.make_data(mjm)
-    mjwarp.kinematics(m, d)
+    for arr in (
+      d.ncon,
+      d.contact.includemargin,
+      d.contact.dim,
+      d.contact.friction,
+      d.contact.solref,
+      d.contact.solreffriction,
+      d.contact.solimp,
+    ):
+      arr.zero_()
+
     mjwarp.collision(m, d)
 
     self.assertEqual(d.ncon.numpy()[0], 2)
