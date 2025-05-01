@@ -25,6 +25,7 @@ from .math import make_frame
 from .types import Data
 from .types import GeomType
 from .types import Model
+from .types import vec5
 
 BOX_BOX_BLOCK_DIM = 32
 
@@ -189,39 +190,97 @@ def face_axis_alignment(a: wp.vec3, R: wp.mat33) -> wp.int32:
 
 
 @wp.kernel(enable_backward=False)
-def box_box_kernel(
-  m: Model,
-  d: Data,
-  num_kernels: int,
+def _box_box(
+  # Model:
+  geom_type: wp.array(dtype=int),
+  geom_condim: wp.array(dtype=int),
+  geom_priority: wp.array(dtype=int),
+  geom_solmix: wp.array(dtype=float),
+  geom_solref: wp.array(dtype=wp.vec2),
+  geom_solimp: wp.array(dtype=vec5),
+  geom_size: wp.array(dtype=wp.vec3),
+  geom_friction: wp.array(dtype=wp.vec3),
+  geom_margin: wp.array(dtype=float),
+  geom_gap: wp.array(dtype=float),
+  pair_dim: wp.array(dtype=int),
+  pair_solref: wp.array(dtype=wp.vec2),
+  pair_solreffriction: wp.array(dtype=wp.vec2),
+  pair_solimp: wp.array(dtype=vec5),
+  pair_margin: wp.array(dtype=float),
+  pair_gap: wp.array(dtype=float),
+  pair_friction: wp.array(dtype=vec5),
+  # Data in:
+  nconmax_in: int,
+  geom_xpos_in: wp.array2d(dtype=wp.vec3),
+  geom_xmat_in: wp.array2d(dtype=wp.mat33),
+  collision_pair_in: wp.array(dtype=wp.vec2i),
+  collision_pairid_in: wp.array(dtype=int),
+  collision_worldid_in: wp.array(dtype=int),
+  ncollision_in: wp.array(dtype=int),
+  # In:
+  num_kernels_in: int,
+  # Data out:
+  ncon_out: wp.array(dtype=int),
+  # Out:
+  dist_out: wp.array(dtype=float),
+  pos_out: wp.array(dtype=wp.vec3),
+  frame_out: wp.array(dtype=wp.mat33),
+  includemargin_out: wp.array(dtype=float),
+  condim_out: wp.array(dtype=int),
+  friction_out: wp.array(dtype=vec5),
+  solref_out: wp.array(dtype=wp.vec2),
+  solreffriction_out: wp.array(dtype=wp.vec2),
+  solimp_out: wp.array(dtype=vec5),
+  geoms_out: wp.array(dtype=wp.vec2i),
+  worldid_out: wp.array(dtype=int),
 ):
   """Calculates contacts between pairs of boxes."""
   tid, axis_idx = wp.tid()
 
-  for bp_idx in range(tid, min(d.ncollision[0], d.nconmax), num_kernels):
-    geoms = d.collision_pair[bp_idx]
+  for bp_idx in range(tid, min(ncollision_in[0], nconmax_in), num_kernels_in):
+    geoms = collision_pair_in[bp_idx]
 
     ga, gb = geoms[0], geoms[1]
 
-    if m.geom_type[ga] != int(GeomType.BOX.value) or m.geom_type[gb] != int(
+    if geom_type[ga] != int(GeomType.BOX.value) or geom_type[gb] != int(
       GeomType.BOX.value
     ):
       continue
 
-    worldid = d.collision_worldid[bp_idx]
+    worldid = collision_worldid_in[bp_idx]
 
     geoms, margin, gap, condim, friction, solref, solreffriction, solimp = (
-      contact_params(m, d, tid)
+      contact_params(
+        geom_condim,
+        geom_priority,
+        geom_solmix,
+        geom_solref,
+        geom_solimp,
+        geom_friction,
+        geom_margin,
+        geom_gap,
+        pair_dim,
+        pair_solref,
+        pair_solreffriction,
+        pair_solimp,
+        pair_margin,
+        pair_gap,
+        pair_friction,
+        collision_pair_in,
+        collision_pairid_in,
+        tid,
+      )
     )
 
     # transformations
-    a_pos, b_pos = d.geom_xpos[worldid, ga], d.geom_xpos[worldid, gb]
-    a_mat, b_mat = d.geom_xmat[worldid, ga], d.geom_xmat[worldid, gb]
+    a_pos, b_pos = geom_xpos_in[worldid, ga], geom_xpos_in[worldid, gb]
+    a_mat, b_mat = geom_xmat_in[worldid, ga], geom_xmat_in[worldid, gb]
     b_mat_inv = wp.transpose(b_mat)
     trans_atob = b_mat_inv @ (a_pos - b_pos)
     rot_atob = b_mat_inv @ a_mat
 
-    a_size = m.geom_size[ga]
-    b_size = m.geom_size[gb]
+    a_size = geom_size[ga]
+    b_size = geom_size[gb]
     a = box(rot_atob, trans_atob, a_size)
     b = box(wp.identity(3, wp.float32), wp.vec3(0.0), b_size)
 
@@ -312,12 +371,13 @@ def box_box_kernel(
       for i in range(4):
         pos[i] = pos[idx]
 
-    margin = wp.max(m.geom_margin[ga], m.geom_margin[gb])
+    margin = wp.max(geom_margin[ga], geom_margin[gb])
     for i in range(4):
       pos_glob = b_mat @ pos[i] + b_pos
       n_glob = b_mat @ sep_axis
+
       write_contact(
-        d,
+        nconmax_in,
         dist[i],
         pos_glob,
         make_frame(n_glob),
@@ -330,6 +390,18 @@ def box_box_kernel(
         solimp,
         geoms,
         worldid,
+        ncon_out,
+        dist_out,
+        pos_out,
+        frame_out,
+        includemargin_out,
+        condim_out,
+        friction_out,
+        solref_out,
+        solreffriction_out,
+        solimp_out,
+        geoms_out,
+        worldid_out,
       )
 
 
@@ -575,12 +647,50 @@ def box_box_narrowphase(
 ):
   """Calculates contacts between pairs of boxes."""
   kernel_ratio = 16
-  num_threads = math.ceil(
-    d.nconmax / kernel_ratio
-  )  # parallel threads excluding tile dim
+  nthread = math.ceil(d.nconmax / kernel_ratio)  # parallel threads excluding tile dim
   wp.launch_tiled(
-    kernel=box_box_kernel,
-    dim=num_threads,
-    inputs=[m, d, num_threads],
+    kernel=_box_box,
+    dim=nthread,
+    inputs=[
+      m.geom_type,
+      m.geom_condim,
+      m.geom_priority,
+      m.geom_solmix,
+      m.geom_solref,
+      m.geom_solimp,
+      m.geom_size,
+      m.geom_friction,
+      m.geom_margin,
+      m.geom_gap,
+      m.pair_dim,
+      m.pair_solref,
+      m.pair_solreffriction,
+      m.pair_solimp,
+      m.pair_margin,
+      m.pair_gap,
+      m.pair_friction,
+      d.nconmax,
+      d.geom_xpos,
+      d.geom_xmat,
+      d.collision_pair,
+      d.collision_pairid,
+      d.collision_worldid,
+      d.ncollision,
+      nthread,
+    ],
+    outputs=[
+      d.ncon,
+      d.contact.dist,
+      d.contact.pos,
+      d.contact.frame,
+      d.contact.includemargin,
+      d.contact.dim,
+      d.contact.friction,
+      d.contact.solref,
+      d.contact.solreffriction,
+      d.contact.solimp,
+      d.contact.geom,
+      d.contact.worldid,
+    ],
     block_dim=BOX_BOX_BLOCK_DIM,
   )

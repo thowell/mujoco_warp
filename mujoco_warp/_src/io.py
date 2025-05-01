@@ -454,7 +454,9 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
     pair_margin=wp.array(mjm.pair_margin, dtype=float),
     pair_gap=wp.array(mjm.pair_gap, dtype=float),
     pair_friction=wp.array(mjm.pair_friction, dtype=types.vec5),
-    condim_max=np.max(mjm.geom_condim),  # TODO(team): get max after filtering,
+    condim_max=np.max(mjm.pair_dim)
+    if mjm.npair
+    else np.max(mjm.geom_condim),  # TODO(team): get max after filtering,
     tendon_adr=wp.array(mjm.tendon_adr, dtype=int),
     tendon_num=wp.array(mjm.tendon_num, dtype=int),
     tendon_limited=wp.array(mjm.tendon_limited, dtype=int),
@@ -588,7 +590,10 @@ def make_data(
       solimp=wp.zeros((nconmax,), dtype=types.vec5),
       dim=wp.zeros((nconmax,), dtype=int),
       geom=wp.zeros((nconmax,), dtype=wp.vec2i),
-      efc_address=wp.zeros((nconmax, np.max(mjm.geom_condim)), dtype=int),
+      efc_address=wp.zeros(
+        (nconmax, np.max(mjm.pair_dim) if mjm.npair else np.max(mjm.geom_condim)),
+        dtype=int,
+      ),
       worldid=wp.zeros((nconmax,), dtype=int),
     ),
     efc=types.Constraint(
@@ -760,7 +765,9 @@ def put_data(
     mjd.moment_colind,
   )
 
-  contact_efc_address = np.zeros((nconmax, np.max(mjm.geom_condim)), dtype=int)
+  contact_efc_address = np.zeros(
+    (nconmax, np.max(mjm.pair_dim) if mjm.npair else np.max(mjm.geom_condim)), dtype=int
+  )
   for i in range(nworld):
     for j in range(mjd.ncon):
       condim = mjd.contact.dim[j]
@@ -889,7 +896,7 @@ def put_data(
     efc=types.Constraint(
       worldid=arr(efc_worldid),
       id=padtile(mjd.efc_id, njmax),
-      J=padtile(mjd.efc_J, njmax),
+      J=padtile(efc_J, njmax),
       pos=padtile(mjd.efc_pos, njmax),
       margin=padtile(mjd.efc_margin, njmax),
       D=padtile(mjd.efc_D, njmax),
