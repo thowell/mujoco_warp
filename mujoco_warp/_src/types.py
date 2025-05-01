@@ -892,7 +892,7 @@ class Model:
   actuator_dyntype: wp.array(dtype=int)
   actuator_gaintype: wp.array(dtype=int)
   actuator_biastype: wp.array(dtype=int)
-  actuator_trnid: wp.array2d(dtype=wp.vec2i)
+  actuator_trnid: wp.array(dtype=wp.vec2i)
   actuator_actadr: wp.array(dtype=int)
   actuator_actnum: wp.array(dtype=int)
   actuator_ctrllimited: wp.array(dtype=bool)
