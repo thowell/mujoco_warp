@@ -407,21 +407,21 @@ def transform_force(frc: wp.spatial_vector, offset: wp.vec3) -> wp.spatial_vecto
 
 @wp.func
 def jac(
-  body_dofid: wp.array(dtype=int),
+  dof_bodyid: wp.array(dtype=int),
   body_parentid: wp.array(dtype=int),
   body_rootid: wp.array(dtype=int),
-  subtree_com_in: wp.array(dtype=wp.vec3),
-  cdof_in: wp.array(dtype=wp.spatial_vector),
+  subtree_com_in: wp.array2d(dtype=wp.vec3),
+  cdof_in: wp.array2d(dtype=wp.spatial_vector),
   point: wp.vec3,
   bodyid: wp.int32,
   dofid: wp.int32,
   worldid: wp.int32,
 ) -> Tuple[wp.vec3, wp.vec3]:
-  dof_bodyid = body_dofid[dofid]
-  in_tree = int(dof_bodyid == 0)
+  dof_bodyid_ = dof_bodyid[dofid]
+  in_tree = int(dof_bodyid_ == 0)
   parentid = bodyid
   while parentid != 0:
-    if parentid == dof_bodyid:
+    if parentid == dof_bodyid_:
       in_tree = 1
       break
     parentid = body_parentid[parentid]

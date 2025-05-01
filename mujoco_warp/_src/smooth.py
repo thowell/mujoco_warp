@@ -1778,6 +1778,7 @@ def _angular_momentum(
   xipos_in: wp.array2d(dtype=wp.vec3),
   subtree_com_in: wp.array2d(dtype=wp.vec3),
   subtree_bodyvel_in: wp.array2d(dtype=wp.spatial_vector),
+  subtree_linvel_in: wp.array2d(dtype=wp.vec3),
   # In:
   body_tree_: wp.array(dtype=int),
   # Data out:
@@ -1859,113 +1860,270 @@ def subtree_vel(m: Model, d: Data):
         d.xipos,
         d.subtree_com,
         d.subtree_bodyvel,
+        d.subtree_linvel,
         body_tree,
       ],
       outputs=[d.subtree_angmom],
     )
 
 
-# def tendon(m: Model, d: Data):
-#   """Computes tendon lengths and moments."""
+@kernel
+def _joint_tendon(
+  # Model:
+  tendon_jnt_adr: wp.array(dtype=int),
+  wrap_jnt_adr: wp.array(dtype=int),
+  wrap_objid: wp.array(dtype=int),
+  wrap_prm: wp.array(dtype=float),
+  jnt_qposadr: wp.array(dtype=int),
+  jnt_dofadr: wp.array(dtype=int),
+  # Data in:
+  qpos_in: wp.array2d(dtype=float),
+  # Data out:
+  ten_length_out: wp.array2d(dtype=float),
+  ten_J_out: wp.array3d(dtype=float),
+):
+  worldid, wrapid = wp.tid()
 
-#   if not m.ntendon:
-#     return
+  tendon_jnt_adr_ = tendon_jnt_adr[wrapid]
+  wrap_jnt_adr_ = wrap_jnt_adr[wrapid]
 
-#   d.ten_length.zero_()
-#   d.ten_J.zero_()
+  wrap_objid_ = wrap_objid[wrap_jnt_adr_]
+  prm = wrap_prm[wrap_jnt_adr_]
 
-#   # process joint tendons
-#   if m.wrap_jnt_adr.size:
+  # add to length
+  L = prm * qpos_in[worldid, jnt_qposadr[wrap_objid_]]
+  # TODO(team): compare atomic_add and for loop
+  wp.atomic_add(ten_length_out[worldid], tendon_jnt_adr_, L)
 
-#     @kernel
-#     def _joint_tendon(m: Model, d: Data):
-#       worldid, wrapid = wp.tid()
+  # add to moment
+  ten_J_out[worldid, tendon_jnt_adr_, jnt_dofadr[wrap_objid_]] = prm
 
-#       tendon_jnt_adr = m.tendon_jnt_adr[wrapid]
-#       wrap_jnt_adr = m.wrap_jnt_adr[wrapid]
 
-#       wrap_objid = m.wrap_objid[wrap_jnt_adr]
-#       prm = m.wrap_prm[wrap_jnt_adr]
+@kernel
+def _spatial_site_tendon(
+  # Model:
+  wrap_site_adr: wp.array(dtype=int),
+  wrap_site_pair_adr: wp.array(dtype=int),
+  tendon_site_pair_adr: wp.array(dtype=int),
+  wrap_objid: wp.array(dtype=int),
+  site_bodyid: wp.array(dtype=int),
+  body_parentid: wp.array(dtype=int),
+  body_rootid: wp.array(dtype=int),
+  dof_bodyid: wp.array(dtype=int),
+  # Data in:
+  site_xpos_in: wp.array2d(dtype=wp.vec3),
+  subtree_com_in: wp.array2d(dtype=wp.vec3),
+  cdof_in: wp.array2d(dtype=wp.spatial_vector),
+  # In:
+  n_site_pair: int,
+  nv: int,
+  # Data out:
+  wrap_xpos_out: wp.array2d(dtype=wp.spatial_vector),
+  wrap_obj_out: wp.array2d(dtype=wp.vec2i),
+  ten_length_out: wp.array2d(dtype=float),
+  ten_J_out: wp.array3d(dtype=float),
+):
+  worldid, elementid = wp.tid()
+  site_adr = wrap_site_adr[elementid]
 
-#       # add to length
-#       L = prm * d.qpos[worldid, m.jnt_qposadr[wrap_objid]]
-#       # TODO(team): compare atomic_add and for loop
-#       wp.atomic_add(d.ten_length[worldid], tendon_jnt_adr, L)
+  site_xpos = site_xpos_in[worldid, wrap_objid[site_adr]]
 
-#       # add to moment
-#       d.ten_J[worldid, tendon_jnt_adr, m.jnt_dofadr[wrap_objid]] = prm
+  rowid = elementid // 2
+  colid = elementid % 2
+  if colid == 0:
+    wrap_xpos_out[worldid, rowid][0] = site_xpos[0]
+    wrap_xpos_out[worldid, rowid][1] = site_xpos[1]
+    wrap_xpos_out[worldid, rowid][2] = site_xpos[2]
+  else:
+    wrap_xpos_out[worldid, rowid][3] = site_xpos[0]
+    wrap_xpos_out[worldid, rowid][4] = site_xpos[1]
+    wrap_xpos_out[worldid, rowid][5] = site_xpos[2]
 
-#     wp.launch(_joint_tendon, dim=(d.nworld, m.wrap_jnt_adr.size), inputs=[m, d])
+  wrap_obj_out[worldid, rowid][colid] = -1
 
-#   # process spatial site tendons
-#   if m.wrap_site_adr.size:
-#     d.wrap_xpos.zero_()
-#     d.wrap_obj.zero_()
+  if elementid < n_site_pair:
+    # site pairs
+    site_pair_adr = wrap_site_pair_adr[elementid]
+    ten_adr = tendon_site_pair_adr[elementid]
 
-#     N_SITE_PAIR = m.wrap_site_pair_adr.size
+    id0 = wrap_objid[site_pair_adr + 0]
+    id1 = wrap_objid[site_pair_adr + 1]
 
-#     @kernel
-#     def _spatial_site_tendon(m: Model, d: Data):
-#       worldid, elementid = wp.tid()
-#       site_adr = m.wrap_site_adr[elementid]
+    pnt0 = site_xpos_in[worldid, id0]
+    pnt1 = site_xpos_in[worldid, id1]
+    dif = pnt1 - pnt0
+    vec, length = math.normalize_with_norm(dif)
+    wp.atomic_add(ten_length_out[worldid], ten_adr, length)
 
-#       site_xpos = d.site_xpos[worldid, m.wrap_objid[site_adr]]
+    if length < MJ_MINVAL:
+      vec = wp.vec3(1.0, 0.0, 0.0)
 
-#       rowid = elementid // 2
-#       colid = elementid % 2
-#       if colid == 0:
-#         d.wrap_xpos[worldid, rowid][0] = site_xpos[0]
-#         d.wrap_xpos[worldid, rowid][1] = site_xpos[1]
-#         d.wrap_xpos[worldid, rowid][2] = site_xpos[2]
-#       else:
-#         d.wrap_xpos[worldid, rowid][3] = site_xpos[0]
-#         d.wrap_xpos[worldid, rowid][4] = site_xpos[1]
-#         d.wrap_xpos[worldid, rowid][5] = site_xpos[2]
+    body0 = site_bodyid[id0]
+    body1 = site_bodyid[id1]
+    if body0 != body1:
+      for i in range(nv):
+        J = float(0.0)
 
-#       d.wrap_obj[worldid, rowid][colid] = -1
+        jacp1, _ = support.jac(
+          dof_bodyid,
+          body_parentid,
+          body_rootid,
+          subtree_com_in,
+          cdof_in,
+          pnt0,
+          body0,
+          i,
+          worldid,
+        )
+        jacp2, _ = support.jac(
+          dof_bodyid,
+          body_parentid,
+          body_rootid,
+          subtree_com_in,
+          cdof_in,
+          pnt1,
+          body1,
+          i,
+          worldid,
+        )
+        dif = jacp2 - jacp1
+        for xyz in range(3):
+          J += vec[xyz] * dif[xyz]
+        if J:
+          wp.atomic_add(ten_J_out[worldid, ten_adr], i, J)
 
-#       if elementid < N_SITE_PAIR:
-#         # site pairs
-#         site_pair_adr = m.wrap_site_pair_adr[elementid]
-#         ten_adr = m.tendon_site_pair_adr[elementid]
 
-#         id0 = m.wrap_objid[site_pair_adr + 0]
-#         id1 = m.wrap_objid[site_pair_adr + 1]
+@kernel
+def _spatial_tendon(
+  # Model:
+  ten_wrapnum_site: wp.array(dtype=int),
+  ten_wrapadr_site: wp.array(dtype=int),
+  # Data out:
+  ten_wrapnum_out: wp.array2d(dtype=int),
+  ten_wrapadr_out: wp.array2d(dtype=int),
+):
+  worldid, tenid = wp.tid()
 
-#         pnt0 = d.site_xpos[worldid, id0]
-#         pnt1 = d.site_xpos[worldid, id1]
-#         dif = pnt1 - pnt0
-#         vec, length = math.normalize_with_norm(dif)
-#         wp.atomic_add(d.ten_length[worldid], ten_adr, length)
+  ten_wrapnum_out[worldid, tenid] = ten_wrapnum_site[tenid]
+  # TODO(team): geom wrap
 
-#         if length < MJ_MINVAL:
-#           vec = wp.vec3(1.0, 0.0, 0.0)
+  ten_wrapadr_out[worldid, tenid] = ten_wrapadr_site[tenid]
+  # TODO(team): geom wrap
 
-#         body0 = m.site_bodyid[id0]
-#         body1 = m.site_bodyid[id1]
-#         if body0 != body1:
-#           for i in range(m.nv):
-#             J = float(0.0)
-#             jacp1, _ = support.jac(m, d, pnt0, body0, i, worldid)
-#             jacp2, _ = support.jac(m, d, pnt1, body1, i, worldid)
-#             dif = jacp2 - jacp1
-#             for xyz in range(3):
-#               J += vec[xyz] * dif[xyz]
-#             if J:
-#               wp.atomic_add(d.ten_J[worldid, ten_adr], i, J)
 
-#     wp.launch(_spatial_site_tendon, dim=(d.nworld, m.wrap_site_adr.size), inputs=[m, d])
+def tendon(m: Model, d: Data):
+  """Computes tendon lengths and moments."""
 
-#     @kernel
-#     def _spatial_tendon(m: Model, d: Data):
-#       worldid, tenid = wp.tid()
+  if not m.ntendon:
+    return
 
-#       d.ten_wrapnum[worldid, tenid] = m.ten_wrapnum_site[tenid]
-#       # TODO(team): geom wrap
+  d.ten_length.zero_()
+  d.ten_J.zero_()
 
-#       d.ten_wrapadr[worldid, tenid] = m.ten_wrapadr_site[tenid]
-#       # TODO(team): geom wrap
+  # process joint tendons
+  if m.wrap_jnt_adr.size:
+    wp.launch(
+      _joint_tendon,
+      dim=(d.nworld, m.wrap_jnt_adr.size),
+      inputs=[
+        m.tendon_jnt_adr,
+        m.wrap_jnt_adr,
+        m.wrap_objid,
+        m.wrap_prm,
+        m.jnt_qposadr,
+        m.jnt_dofadr,
+        d.qpos,
+      ],
+      outputs=[d.ten_length, d.ten_J],
+    )
 
-#     wp.launch(_spatial_tendon, dim=(d.nworld, m.ntendon), inputs=[m, d])
+  # process spatial site tendons
+  if m.wrap_site_adr.size:
+    d.wrap_xpos.zero_()
+    d.wrap_obj.zero_()
 
-#   # TODO(team): geom wrap, pulleys
+    n_site_pair = m.wrap_site_pair_adr.size
+    wp.launch(
+      _spatial_site_tendon,
+      dim=(d.nworld, m.wrap_site_adr.size),
+      inputs=[
+        m.wrap_site_adr,
+        m.wrap_site_pair_adr,
+        m.tendon_site_pair_adr,
+        m.wrap_objid,
+        m.site_bodyid,
+        m.body_parentid,
+        m.body_rootid,
+        m.dof_bodyid,
+        d.site_xpos,
+        d.subtree_com,
+        d.cdof,
+        n_site_pair,
+        m.nv,
+      ],
+      outputs=[d.wrap_xpos, d.wrap_obj, d.ten_length, d.ten_J],
+    )
+
+    wp.launch(
+      _spatial_tendon,
+      dim=(d.nworld, m.ntendon),
+      inputs=[m.ten_wrapnum_site, m.ten_wrapadr_site],
+      outputs=[d.ten_wrapnum, d.ten_wrapadr],
+    )
+
+  # TODO(team): geom wrap, pulleys
+
+  d.ten_J.zero_()
+
+  # process joint tendons
+  if m.wrap_jnt_adr.size:
+    wp.launch(
+      _joint_tendon,
+      dim=(d.nworld, m.wrap_jnt_adr.size),
+      inputs=[
+        m.tendon_jnt_adr,
+        m.wrap_jnt_adr,
+        m.wrap_objid,
+        m.wrap_prm,
+        m.jnt_qposadr,
+        m.jnt_dofadr,
+        d.qpos,
+      ],
+      outputs=[d.ten_length, d.ten_J],
+    )
+
+  # process spatial site tendons
+  if m.wrap_site_adr.size:
+    d.wrap_xpos.zero_()
+    d.wrap_obj.zero_()
+
+    n_site_pair = m.wrap_site_pair_adr.size
+    wp.launch(
+      _spatial_site_tendon,
+      dim=(d.nworld, m.wrap_site_adr.size),
+      inputs=[
+        m.wrap_site_adr,
+        m.wrap_site_pair_adr,
+        m.tendon_site_pair_adr,
+        m.wrap_objid,
+        m.site_bodyid,
+        m.body_parentid,
+        m.body_rootid,
+        m.dof_bodyid,
+        d.site_xpos,
+        d.subtree_com,
+        d.cdof,
+        n_site_pair,
+        m.nv,
+      ],
+      outputs=[d.wrap_xpos, d.wrap_obj, d.ten_length, d.ten_J],
+    )
+
+    wp.launch(
+      _spatial_tendon,
+      dim=(d.nworld, m.ntendon),
+      inputs=[m.ten_wrapnum_site, m.ten_wrapadr_site],
+      outputs=[d.ten_wrapnum, d.ten_wrapadr],
+    )
+
+  # TODO(team): geom wrap, pulleys

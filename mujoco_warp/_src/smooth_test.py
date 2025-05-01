@@ -281,38 +281,40 @@ class SmoothTest(parameterized.TestCase):
     _assert_eq(d.subtree_linvel.numpy()[0], mjd.subtree_linvel, "subtree_linvel")
     _assert_eq(d.subtree_angmom.numpy()[0], mjd.subtree_angmom, "subtree_angmom")
 
-  # @parameterized.parameters(
-  #   ("tendon/fixed.xml"),
-  #   ("tendon/site.xml"),
-  #   ("tendon/fixed_site.xml"),
-  #   ("tendon/site_fixed.xml"),
-  # )
-  # def test_tendon(self, xml):
-  #   """Tests tendon."""
-  #   mjm, mjd, m, d = test_util.fixture(xml, keyframe=0)
+  @parameterized.parameters(
+    ("tendon/fixed.xml"),
+    ("tendon/site.xml"),
+    ("tendon/fixed_site.xml"),
+    ("tendon/site_fixed.xml"),
+  )
+  def test_tendon(self, xml):
+    """Tests tendon."""
+    mjm, mjd, m, d = test_util.fixture(xml, keyframe=0)
 
-  #   for arr in (d.ten_length, d.ten_J, d.actuator_length, d.actuator_moment):
-  #     arr.zero_()
+    for arr in (d.ten_length, d.ten_J, d.actuator_length, d.actuator_moment):
+      arr.zero_()
 
-  #   mjwarp.tendon(m, d)
-  #   mjwarp.transmission(m, d)
+    mjwarp.tendon(m, d)
+    mjwarp.transmission(m, d)
 
-  #   _assert_eq(d.ten_length.numpy()[0], mjd.ten_length, "ten_length")
-  #   _assert_eq(d.ten_J.numpy()[0], mjd.ten_J.reshape((mjm.ntendon, mjm.nv)), "ten_J")
-  #   _assert_eq(d.wrap_xpos.numpy()[0], mjd.wrap_xpos, "wrap_xpos")
-  #   _assert_eq(d.wrap_obj.numpy()[0], mjd.wrap_obj, "wrap_obj")
-  #   _assert_eq(d.ten_wrapnum.numpy()[0], mjd.ten_wrapnum, "ten_wrapnum")
-  #   _assert_eq(d.ten_wrapadr.numpy()[0], mjd.ten_wrapadr, "ten_wrapadr")
-  #   _assert_eq(d.actuator_length.numpy()[0], mjd.actuator_length, "actuator_length")
-  #   actuator_moment = np.zeros((mjm.nu, mjm.nv))
-  #   mujoco.mju_sparse2dense(
-  #     actuator_moment,
-  #     mjd.actuator_moment,
-  #     mjd.moment_rownnz,
-  #     mjd.moment_rowadr,
-  #     mjd.moment_colind,
-  #   )
-  #   _assert_eq(d.actuator_moment.numpy()[0], actuator_moment, "actuator_moment")
+    _assert_eq(d.ten_length.numpy()[0], mjd.ten_length, "ten_length")
+    _assert_eq(d.ten_J.numpy()[0], mjd.ten_J.reshape((mjm.ntendon, mjm.nv)), "ten_J")
+    _assert_eq(d.wrap_xpos.numpy()[0], mjd.wrap_xpos, "wrap_xpos")
+    _assert_eq(d.wrap_obj.numpy()[0], mjd.wrap_obj, "wrap_obj")
+    _assert_eq(d.ten_wrapnum.numpy()[0], mjd.ten_wrapnum, "ten_wrapnum")
+    _assert_eq(d.ten_wrapadr.numpy()[0], mjd.ten_wrapadr, "ten_wrapadr")
+    _assert_eq(d.actuator_length.numpy()[0], mjd.actuator_length, "actuator_length")
+    actuator_moment = np.zeros((mjm.nu, mjm.nv))
+    mujoco.mju_sparse2dense(
+      actuator_moment,
+      mjd.actuator_moment,
+      mjd.moment_rownnz,
+      mjd.moment_rowadr,
+      mjd.moment_colind,
+    )
+    _assert_eq(d.actuator_moment.numpy()[0], actuator_moment, "actuator_moment")
+
+  # TODO(team): test factor_solve_i
 
 
 if __name__ == "__main__":
