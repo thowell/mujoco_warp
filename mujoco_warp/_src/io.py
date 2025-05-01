@@ -823,7 +823,7 @@ def put_data(
     ctrl=tile(mjd.ctrl),
     qfrc_applied=tile(mjd.qfrc_applied),
     xfrc_applied=tile(mjd.xfrc_applied),
-    eq_active=tile(mjd.eq_active),
+    eq_active=tile(mjd.eq_active.astype(bool)),
     mocap_pos=tile(mjd.mocap_pos, dtype=wp.vec3),
     mocap_quat=tile(mjd.mocap_quat, dtype=wp.quat),
     qacc=tile(mjd.qacc),
@@ -885,7 +885,7 @@ def put_data(
     efc=types.Constraint(
       worldid=arr(efc_worldid),
       id=padtile(mjd.efc_id, njmax),
-      J=padtile(mjd.efc_J, njmax),
+      J=padtile(efc_J, njmax),
       pos=padtile(mjd.efc_pos, njmax),
       margin=padtile(mjd.efc_margin, njmax),
       D=padtile(mjd.efc_D, njmax),
