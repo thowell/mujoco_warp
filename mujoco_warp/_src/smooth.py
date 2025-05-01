@@ -435,100 +435,185 @@ def com_pos(m: Model, d: Data):
   )
 
 
-# @event_scope
-# def camlight(m: Model, d: Data):
-#   """Computes camera and light positions and orientations."""
+@kernel
+def _cam_local_to_global(
+  # Model:
+  cam_bodyid: wp.array(dtype=int),
+  cam_pos: wp.array(dtype=wp.vec3),
+  cam_quat: wp.array(dtype=wp.quat),
+  # Data in:
+  xpos_in: wp.array2d(dtype=wp.vec3),
+  xquat_in: wp.array2d(dtype=wp.quat),
+  # Data out:
+  cam_xpos_out: wp.array2d(dtype=wp.vec3),
+  cam_xmat_out: wp.array2d(dtype=wp.mat33),
+):
+  """Fixed cameras."""
+  worldid, camid = wp.tid()
+  bodyid = cam_bodyid[camid]
+  xpos = xpos_in[worldid, bodyid]
+  xquat = xquat_in[worldid, bodyid]
+  cam_xpos_out[worldid, camid] = xpos + math.rot_vec_quat(cam_pos[camid], xquat)
+  cam_xmat_out[worldid, camid] = math.quat_to_mat(math.mul_quat(xquat, cam_quat[camid]))
 
-#   @kernel
-#   def cam_local_to_global(m: Model, d: Data):
-#     """Fixed cameras."""
-#     worldid, camid = wp.tid()
-#     bodyid = m.cam_bodyid[camid]
-#     xpos = d.xpos[worldid, bodyid]
-#     xquat = d.xquat[worldid, bodyid]
-#     d.cam_xpos[worldid, camid] = xpos + math.rot_vec_quat(m.cam_pos[camid], xquat)
-#     d.cam_xmat[worldid, camid] = math.quat_to_mat(
-#       math.mul_quat(xquat, m.cam_quat[camid])
-#     )
 
-#   @kernel
-#   def cam_fn(m: Model, d: Data):
-#     worldid, camid = wp.tid()
-#     is_target_cam = (m.cam_mode[camid] == wp.static(CamLightType.TARGETBODY.value)) or (
-#       m.cam_mode[camid] == wp.static(CamLightType.TARGETBODYCOM.value)
-#     )
-#     invalid_target = is_target_cam and (m.cam_targetbodyid[camid] < 0)
-#     if invalid_target:
-#       return
-#     elif m.cam_mode[camid] == wp.static(CamLightType.TRACK.value):
-#       body_xpos = d.xpos[worldid, m.cam_bodyid[camid]]
-#       d.cam_xpos[worldid, camid] = body_xpos + m.cam_pos0[camid]
-#     elif m.cam_mode[camid] == wp.static(CamLightType.TRACKCOM.value):
-#       d.cam_xpos[worldid, camid] = (
-#         d.subtree_com[worldid, m.cam_bodyid[camid]] + m.cam_poscom0[camid]
-#       )
-#     elif m.cam_mode[camid] == wp.static(CamLightType.TARGETBODY.value) or m.cam_mode[
-#       camid
-#     ] == wp.static(CamLightType.TARGETBODYCOM.value):
-#       pos = d.xpos[worldid, m.cam_targetbodyid[camid]]
-#       if m.cam_mode[camid] == wp.static(CamLightType.TARGETBODYCOM.value):
-#         pos = d.subtree_com[worldid, m.cam_targetbodyid[camid]]
-#       # zaxis = -desired camera direction, in global frame
-#       mat_3 = wp.normalize(d.cam_xpos[worldid, camid] - pos)
-#       # xaxis: orthogonal to zaxis and to (0,0,1)
-#       mat_1 = wp.normalize(wp.cross(wp.vec3(0.0, 0.0, 1.0), mat_3))
-#       mat_2 = wp.normalize(wp.cross(mat_3, mat_1))
-#       # fmt: off
-#       d.cam_xmat[worldid, camid] = wp.mat33(
-#         mat_1[0], mat_2[0], mat_3[0],
-#         mat_1[1], mat_2[1], mat_3[1],
-#         mat_1[2], mat_2[2], mat_3[2]
-#       )
-#       # fmt: on
+@kernel
+def _cam_fn(
+  # Model:
+  cam_mode: wp.array(dtype=int),
+  cam_targetbodyid: wp.array(dtype=int),
+  cam_pos0: wp.array(dtype=wp.vec3),
+  cam_poscom0: wp.array(dtype=wp.vec3),
+  cam_bodyid: wp.array(dtype=int),
+  # Data in:
+  xpos_in: wp.array2d(dtype=wp.vec3),
+  subtree_com_in: wp.array2d(dtype=wp.vec3),
+  # Data out:
+  cam_xpos_out: wp.array2d(dtype=wp.vec3),
+  cam_xmat_out: wp.array2d(dtype=wp.mat33),
+):
+  worldid, camid = wp.tid()
+  is_target_cam = (cam_mode[camid] == wp.static(CamLightType.TARGETBODY.value)) or (
+    cam_mode[camid] == wp.static(CamLightType.TARGETBODYCOM.value)
+  )
+  invalid_target = is_target_cam and (cam_targetbodyid[camid] < 0)
+  if invalid_target:
+    return
+  elif cam_mode[camid] == wp.static(CamLightType.TRACK.value):
+    body_xpos = xpos_in[worldid, cam_bodyid[camid]]
+    cam_xpos_out[worldid, camid] = body_xpos + cam_pos0[camid]
+  elif cam_mode[camid] == wp.static(CamLightType.TRACKCOM.value):
+    cam_xpos_out[worldid, camid] = (
+      subtree_com_in[worldid, cam_bodyid[camid]] + cam_poscom0[camid]
+    )
+  elif cam_mode[camid] == wp.static(CamLightType.TARGETBODY.value) or cam_mode[
+    camid
+  ] == wp.static(CamLightType.TARGETBODYCOM.value):
+    pos = xpos_in[worldid, cam_targetbodyid[camid]]
+    if cam_mode[camid] == wp.static(CamLightType.TARGETBODYCOM.value):
+      pos = subtree_com_in[worldid, cam_targetbodyid[camid]]
+    # zaxis = -desired camera direction, in global frame
+    mat_3 = wp.normalize(cam_xpos_out[worldid, camid] - pos)
+    # xaxis: orthogonal to zaxis and to (0,0,1)
+    mat_1 = wp.normalize(wp.cross(wp.vec3(0.0, 0.0, 1.0), mat_3))
+    mat_2 = wp.normalize(wp.cross(mat_3, mat_1))
+    # fmt: off
+    cam_xmat_out[worldid, camid] = wp.mat33(
+      mat_1[0], mat_2[0], mat_3[0],
+      mat_1[1], mat_2[1], mat_3[1],
+      mat_1[2], mat_2[2], mat_3[2]
+    )
+    # fmt: on
 
-#   @kernel
-#   def light_local_to_global(m: Model, d: Data):
-#     """Fixed lights."""
-#     worldid, lightid = wp.tid()
-#     bodyid = m.light_bodyid[lightid]
-#     xpos = d.xpos[worldid, bodyid]
-#     xquat = d.xquat[worldid, bodyid]
-#     d.light_xpos[worldid, lightid] = xpos + math.rot_vec_quat(
-#       m.light_pos[lightid], xquat
-#     )
-#     d.light_xdir[worldid, lightid] = math.rot_vec_quat(m.light_dir[lightid], xquat)
 
-#   @kernel
-#   def light_fn(m: Model, d: Data):
-#     worldid, lightid = wp.tid()
-#     is_target_light = (
-#       m.light_mode[lightid] == wp.static(CamLightType.TARGETBODY.value)
-#     ) or (m.light_mode[lightid] == wp.static(CamLightType.TARGETBODYCOM.value))
-#     invalid_target = is_target_light and (m.light_targetbodyid[lightid] < 0)
-#     if invalid_target:
-#       return
-#     elif m.light_mode[lightid] == wp.static(CamLightType.TRACK.value):
-#       body_xpos = d.xpos[worldid, m.light_bodyid[lightid]]
-#       d.light_xpos[worldid, lightid] = body_xpos + m.light_pos0[lightid]
-#     elif m.light_mode[lightid] == wp.static(CamLightType.TRACKCOM.value):
-#       d.light_xpos[worldid, lightid] = (
-#         d.subtree_com[worldid, m.light_bodyid[lightid]] + m.light_poscom0[lightid]
-#       )
-#     elif m.light_mode[lightid] == wp.static(
-#       CamLightType.TARGETBODY.value
-#     ) or m.light_mode[lightid] == wp.static(CamLightType.TARGETBODYCOM.value):
-#       pos = d.xpos[worldid, m.light_targetbodyid[lightid]]
-#       if m.light_mode[lightid] == wp.static(CamLightType.TARGETBODYCOM.value):
-#         pos = d.subtree_com[worldid, m.light_targetbodyid[lightid]]
-#       d.light_xdir[worldid, lightid] = pos - d.light_xpos[worldid, lightid]
-#     d.light_xdir[worldid, lightid] = wp.normalize(d.light_xdir[worldid, lightid])
+@kernel
+def _light_local_to_global(
+  # Model:
+  light_bodyid: wp.array(dtype=int),
+  light_pos: wp.array(dtype=wp.vec3),
+  light_dir: wp.array(dtype=wp.vec3),
+  # Data in:
+  xpos_in: wp.array2d(dtype=wp.vec3),
+  xquat_in: wp.array2d(dtype=wp.quat),
+  # Data out:
+  light_xpos_out: wp.array2d(dtype=wp.vec3),
+  light_xdir_out: wp.array2d(dtype=wp.vec3),
+):
+  """Fixed lights."""
+  worldid, lightid = wp.tid()
+  bodyid = light_bodyid[lightid]
+  xpos = xpos_in[worldid, bodyid]
+  xquat = xquat_in[worldid, bodyid]
+  light_xpos_out[worldid, lightid] = xpos + math.rot_vec_quat(light_pos[lightid], xquat)
+  light_xdir_out[worldid, lightid] = math.rot_vec_quat(light_dir[lightid], xquat)
 
-#   if m.ncam > 0:
-#     wp.launch(cam_local_to_global, dim=(d.nworld, m.ncam), inputs=[m, d])
-#     wp.launch(cam_fn, dim=(d.nworld, m.ncam), inputs=[m, d])
-#   if m.nlight > 0:
-#     wp.launch(light_local_to_global, dim=(d.nworld, m.nlight), inputs=[m, d])
-#     wp.launch(light_fn, dim=(d.nworld, m.nlight), inputs=[m, d])
+
+@kernel
+def _light_fn(
+  # Model:
+  light_mode: wp.array(dtype=int),
+  light_targetbodyid: wp.array(dtype=int),
+  light_pos0: wp.array(dtype=wp.vec3),
+  light_poscom0: wp.array(dtype=wp.vec3),
+  light_bodyid: wp.array(dtype=int),
+  # Data in:
+  xpos_in: wp.array2d(dtype=wp.vec3),
+  subtree_com_in: wp.array2d(dtype=wp.vec3),
+  light_xpos_in: wp.array2d(dtype=wp.vec3),
+  # Data out:
+  light_xpos_out: wp.array2d(dtype=wp.vec3),
+  light_xdir_out: wp.array2d(dtype=wp.vec3),
+):
+  worldid, lightid = wp.tid()
+  is_target_light = (
+    light_mode[lightid] == wp.static(CamLightType.TARGETBODY.value)
+  ) or (light_mode[lightid] == wp.static(CamLightType.TARGETBODYCOM.value))
+  invalid_target = is_target_light and (light_targetbodyid[lightid] < 0)
+  if invalid_target:
+    return
+  elif light_mode[lightid] == wp.static(CamLightType.TRACK.value):
+    body_xpos = xpos_in[worldid, light_bodyid[lightid]]
+    light_xpos_out[worldid, lightid] = body_xpos + light_pos0[lightid]
+  elif light_mode[lightid] == wp.static(CamLightType.TRACKCOM.value):
+    light_xpos_out[worldid, lightid] = (
+      subtree_com_in[worldid, light_bodyid[lightid]] + light_poscom0[lightid]
+    )
+  elif light_mode[lightid] == wp.static(CamLightType.TARGETBODY.value) or light_mode[
+    lightid
+  ] == wp.static(CamLightType.TARGETBODYCOM.value):
+    pos = xpos_in[worldid, light_targetbodyid[lightid]]
+    if light_mode[lightid] == wp.static(CamLightType.TARGETBODYCOM.value):
+      pos = subtree_com_in[worldid, light_targetbodyid[lightid]]
+    light_xdir_out[worldid, lightid] = pos - light_xpos_in[worldid, lightid]
+  light_xdir_out[worldid, lightid] = wp.normalize(light_xdir_out[worldid, lightid])
+
+
+@event_scope
+def camlight(m: Model, d: Data):
+  """Computes camera and light positions and orientations."""
+  if m.ncam > 0:
+    wp.launch(
+      _cam_local_to_global,
+      dim=(d.nworld, m.ncam),
+      inputs=[m.cam_bodyid, m.cam_pos, m.cam_quat, d.xpos, d.xquat],
+      outputs=[d.cam_xpos, d.cam_xmat],
+    )
+    wp.launch(
+      _cam_fn,
+      dim=(d.nworld, m.ncam),
+      inputs=[
+        m.cam_mode,
+        m.cam_targetbodyid,
+        m.cam_pos0,
+        m.cam_poscom0,
+        m.cam_bodyid,
+        d.xpos,
+        d.subtree_com,
+      ],
+      outputs=[d.cam_xpos, d.cam_xmat],
+    )
+  if m.nlight > 0:
+    wp.launch(
+      _light_local_to_global,
+      dim=(d.nworld, m.nlight),
+      inputs=[m.light_bodyid, m.light_pos, m.light_dir, d.xpos, d.xquat],
+      outputs=[d.light_xpos, d.light_xdir],
+    )
+    wp.launch(
+      _light_fn,
+      dim=(d.nworld, m.nlight),
+      inputs=[
+        m.light_mode,
+        m.light_targetbodyid,
+        m.light_pos0,
+        m.light_poscom0,
+        m.light_bodyid,
+        d.xpos,
+        d.subtree_com,
+        d.light_xpos,
+      ],
+      outputs=[d.light_xpos, d.light_xdir],
+    )
 
 
 # @event_scope
