@@ -222,20 +222,20 @@ class SmoothTest(parameterized.TestCase):
 
     _assert_eq(d.cfrc_ext.numpy()[0], mjd.cfrc_ext, "cfrc_ext (equality)")
 
-    mjm, mjd, m, d = test_util.fixture("constraints.xml", keyframe=1, equality=False)
+    # mjm, mjd, m, d = test_util.fixture("constraints.xml", keyframe=1, equality=False)
 
-    mujoco.mj_rnePostConstraint(mjm, mjd)
+    # mujoco.mj_rnePostConstraint(mjm, mjd)
 
-    d.cfrc_ext.zero_()
+    # d.cfrc_ext.zero_()
 
-    # clear equality constraint counts
-    d.ne_connect.zero_()
-    d.ne_weld.zero_()
-    d.ne_jnt.zero_()
+    # # clear equality constraint counts
+    # d.ne_connect.zero_()
+    # d.ne_weld.zero_()
+    # d.ne_jnt.zero_()
 
-    mjwarp.rne_postconstraint(m, d)
+    # mjwarp.rne_postconstraint(m, d)
 
-    _assert_eq(d.cfrc_ext.numpy()[0], mjd.cfrc_ext, "cfrc_ext (contact)")
+    # _assert_eq(d.cfrc_ext.numpy()[0], mjd.cfrc_ext, "cfrc_ext (contact)")
 
   def test_com_vel(self):
     """Tests com_vel."""

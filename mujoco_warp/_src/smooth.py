@@ -1302,6 +1302,8 @@ def rne_postconstraint(m: Model, d: Data):
     outputs=[d.cfrc_ext],
   )
 
+  print('1: ', d.cfrc_ext.numpy())
+
   wp.launch(
     _cfrc_ext_equality,
     dim=(d.nworld * m.neq,),
@@ -1325,6 +1327,8 @@ def rne_postconstraint(m: Model, d: Data):
     outputs=[d.cfrc_ext],
   )
 
+  print('2: ', d.cfrc_ext.numpy())
+
   # cfrc_ext += contacts
   wp.launch(
     _cfrc_ext_contact,
@@ -1346,6 +1350,8 @@ def rne_postconstraint(m: Model, d: Data):
     ],
     outputs=[d.cfrc_ext],
   )
+
+  print('3: ', d.cfrc_ext.numpy())
 
   # forward pass over bodies: compute cacc, cfrc_int
   _rne_cacc_world(m, d)
