@@ -193,108 +193,126 @@ def _ball_quat(m: Model, d: Data, worldid: int, objid: int) -> wp.quat:
 
 @wp.func
 def _frame_pos(
-  m: Model, d: Data, worldid: int, objid: int, objtype: int, refid: int
+  m: Model, d: Data, worldid: int, objid: int, objtype: int, refid: int, reftype: int
 ) -> wp.vec3:
   if objtype == int(ObjType.BODY.value):
     xpos = d.xipos[worldid, objid]
-    if refid == -1:
-      return xpos
+  elif objtype == int(ObjType.XBODY.value):
+    xpos = d.xpos[worldid, objid]
+  elif objtype == int(ObjType.GEOM.value):
+    xpos = d.geom_xpos[worldid, objid]
+  elif objtype == int(ObjType.SITE.value):
+    xpos = d.site_xpos[worldid, objid]
+  elif objtype == int(ObjType.CAMERA.value):
+    xpos = d.cam_xpos[worldid, objid]
+  else:  # UNKNOWN
+    xpos = wp.vec3(0.0)
+
+  if refid == -1:
+    return xpos
+
+  if reftype == int(ObjType.BODY.value):
     xpos_ref = d.xipos[worldid, refid]
     xmat_ref = d.ximat[worldid, refid]
   elif objtype == int(ObjType.XBODY.value):
-    xpos = d.xpos[worldid, objid]
-    if refid == -1:
-      return xpos
     xpos_ref = d.xpos[worldid, refid]
     xmat_ref = d.xmat[worldid, refid]
-  elif objtype == int(ObjType.GEOM.value):
-    xpos = d.geom_xpos[worldid, objid]
-    if refid == -1:
-      return xpos
+  elif reftype == int(ObjType.GEOM.value):
     xpos_ref = d.geom_xpos[worldid, refid]
     xmat_ref = d.geom_xmat[worldid, refid]
-  elif objtype == int(ObjType.SITE.value):
-    xpos = d.site_xpos[worldid, objid]
-    if refid == -1:
-      return xpos
+  elif reftype == int(ObjType.SITE.value):
     xpos_ref = d.site_xpos[worldid, refid]
     xmat_ref = d.site_xmat[worldid, refid]
-
-  # TODO(team): camera
-
+  elif reftype == int(ObjType.CAMERA.value):
+    xpos_ref = d.cam_xpos[worldid, refid]
+    xmat_ref = d.cam_xmat[worldid, refid]
   else:  # UNKNOWN
-    return wp.vec3(0.0)
+    xpos_ref = wp.vec3(0.0)
+    xmat_ref = wp.identity(3, wp.float32)
 
   return wp.transpose(xmat_ref) @ (xpos - xpos_ref)
 
 
 @wp.func
 def _frame_axis(
-  m: Model, d: Data, worldid: int, objid: int, objtype: int, refid: int, frame_axis: int
+  m: Model,
+  d: Data,
+  worldid: int,
+  objid: int,
+  objtype: int,
+  refid: int,
+  reftype: int,
+  frame_axis: int,
 ) -> wp.vec3:
   if objtype == int(ObjType.BODY.value):
     xmat = d.ximat[worldid, objid]
     axis = wp.vec3(xmat[0, frame_axis], xmat[1, frame_axis], xmat[2, frame_axis])
-    if refid == -1:
-      return axis
-    xmat_ref = d.ximat[worldid, refid]
   elif objtype == int(ObjType.XBODY.value):
     xmat = d.xmat[worldid, objid]
     axis = wp.vec3(xmat[0, frame_axis], xmat[1, frame_axis], xmat[2, frame_axis])
-    if refid == -1:
-      return axis
-    xmat_ref = d.xmat[worldid, refid]
   elif objtype == int(ObjType.GEOM.value):
     xmat = d.geom_xmat[worldid, objid]
     axis = wp.vec3(xmat[0, frame_axis], xmat[1, frame_axis], xmat[2, frame_axis])
-    if refid == -1:
-      return axis
-    xmat_ref = d.geom_xmat[worldid, refid]
   elif objtype == int(ObjType.SITE.value):
     xmat = d.site_xmat[worldid, objid]
     axis = wp.vec3(xmat[0, frame_axis], xmat[1, frame_axis], xmat[2, frame_axis])
-    if refid == -1:
-      return axis
-    xmat_ref = d.site_xmat[worldid, refid]
-
-  # TODO(team): camera
-
+  elif objtype == int(ObjType.CAMERA.value):
+    xmat = d.cam_xmat[worldid, objid]
+    axis = wp.vec3(xmat[0, frame_axis], xmat[1, frame_axis], xmat[2, frame_axis])
   else:  # UNKNOWN
-    xmat = wp.identity(3, dtype=wp.float32)
-    return wp.vec3(xmat[0, frame_axis], xmat[1, frame_axis], xmat[2, frame_axis])
+    axis = wp.vec3(xmat[0, frame_axis], xmat[1, frame_axis], xmat[2, frame_axis])
+
+  if refid == -1:
+    return axis
+
+  if reftype == int(ObjType.BODY.value):
+    xmat_ref = d.ximat[worldid, refid]
+  elif reftype == int(ObjType.XBODY.value):
+    xmat_ref = d.xmat[worldid, refid]
+  elif reftype == int(ObjType.GEOM.value):
+    xmat_ref = d.geom_xmat[worldid, refid]
+  elif reftype == int(ObjType.SITE.value):
+    xmat_ref = d.site_xmat[worldid, refid]
+  elif reftype == int(ObjType.CAMERA.value):
+    xmat_ref = d.cam_xmat[worldid, refid]
+  else:  # UNKNOWN
+    xmat_ref = wp.identity(3, dtype=wp.float32)
 
   return wp.transpose(xmat_ref) @ axis
 
 
 @wp.func
 def _frame_quat(
-  m: Model, d: Data, worldid: int, objid: int, objtype: int, refid: int
+  m: Model, d: Data, worldid: int, objid: int, objtype: int, refid: int, reftype: int
 ) -> wp.quat:
   if objtype == int(ObjType.BODY.value):
     quat = math.mul_quat(d.xquat[worldid, objid], m.body_iquat[objid])
-    if refid == -1:
-      return quat
-    refquat = math.mul_quat(d.xquat[worldid, refid], m.body_iquat[refid])
   elif objtype == int(ObjType.XBODY.value):
     quat = d.xquat[worldid, objid]
-    if refid == -1:
-      return quat
-    refquat = d.xquat[worldid, refid]
   elif objtype == int(ObjType.GEOM.value):
     quat = math.mul_quat(d.xquat[worldid, m.geom_bodyid[objid]], m.geom_quat[objid])
-    if refid == -1:
-      return quat
-    refquat = math.mul_quat(d.xquat[worldid, m.geom_bodyid[refid]], m.geom_quat[refid])
   elif objtype == int(ObjType.SITE.value):
     quat = math.mul_quat(d.xquat[worldid, m.site_bodyid[objid]], m.site_quat[objid])
-    if refid == -1:
-      return quat
-    refquat = math.mul_quat(d.xquat[worldid, m.site_bodyid[refid]], m.site_quat[refid])
-
-  # TODO(team): camera
-
+  elif objtype == int(ObjType.CAMERA.value):
+    quat = math.mul_quat(d.xquat[worldid, m.cam_bodyid[objid]], m.cam_quat[objid])
   else:  # UNKNOWN
-    return wp.quat(1.0, 0.0, 0.0, 0.0)
+    quat = wp.quat(1.0, 0.0, 0.0, 0.0)
+
+  if refid == -1:
+    return quat
+
+  if reftype == int(ObjType.BODY.value):
+    refquat = math.mul_quat(d.xquat[worldid, refid], m.body_iquat[refid])
+  elif reftype == int(ObjType.XBODY.value):
+    refquat = d.xquat[worldid, refid]
+  elif reftype == int(ObjType.GEOM.value):
+    refquat = math.mul_quat(d.xquat[worldid, m.geom_bodyid[refid]], m.geom_quat[refid])
+  elif reftype == int(ObjType.SITE.value):
+    refquat = math.mul_quat(d.xquat[worldid, m.site_bodyid[refid]], m.site_quat[refid])
+  elif reftype == int(ObjType.CAMERA.value):
+    refquat = math.mul_quat(d.xquat[worldid, m.cam_bodyid[refid]], m.cam_quat[refid])
+  else:  # UNKNOWN
+    refquat = wp.quat(1.0, 0.0, 0.0, 0.0)
 
   return math.mul_quat(math.quat_inv(refquat), quat)
 
@@ -348,7 +366,8 @@ def sensor_pos(m: Model, d: Data):
     elif sensortype == int(SensorType.FRAMEPOS.value):
       objtype = m.sensor_objtype[posadr]
       refid = m.sensor_refid[posadr]
-      framepos = _frame_pos(m, d, worldid, objid, objtype, refid)
+      reftype = m.sensor_reftype[posadr]
+      framepos = _frame_pos(m, d, worldid, objid, objtype, refid, reftype)
       framepos = _apply_cutoff(m, posadr, 3, framepos)
       d.sensordata[worldid, adr + 0] = framepos[0]
       d.sensordata[worldid, adr + 1] = framepos[1]
@@ -360,20 +379,22 @@ def sensor_pos(m: Model, d: Data):
     ):
       objtype = m.sensor_objtype[posadr]
       refid = m.sensor_refid[posadr]
+      reftype = m.sensor_reftype[posadr]
       if sensortype == int(SensorType.FRAMEXAXIS.value):
         axis = 0
       elif sensortype == int(SensorType.FRAMEYAXIS.value):
         axis = 1
       elif sensortype == int(SensorType.FRAMEZAXIS.value):
         axis = 2
-      frameaxis = _frame_axis(m, d, worldid, objid, objtype, refid, axis)
+      frameaxis = _frame_axis(m, d, worldid, objid, objtype, refid, reftype, axis)
       d.sensordata[worldid, adr + 0] = frameaxis[0]
       d.sensordata[worldid, adr + 1] = frameaxis[1]
       d.sensordata[worldid, adr + 2] = frameaxis[2]
     elif sensortype == int(SensorType.FRAMEQUAT.value):
       objtype = m.sensor_objtype[posadr]
       refid = m.sensor_refid[posadr]
-      frame_quat = _frame_quat(m, d, worldid, objid, objtype, refid)
+      reftype = m.sensor_reftype[posadr]
+      frame_quat = _frame_quat(m, d, worldid, objid, objtype, refid, reftype)
       d.sensordata[worldid, adr + 0] = frame_quat[0]
       d.sensordata[worldid, adr + 1] = frame_quat[1]
       d.sensordata[worldid, adr + 2] = frame_quat[2]
@@ -704,7 +725,9 @@ def _framelinacc(m: Model, d: Data, worldid: int, objid: int, objtype: int) -> w
   elif objtype == int(ObjType.SITE.value):
     bodyid = m.site_bodyid[objid]
     pos = d.site_xpos[worldid, objid]
-  # TODO(team): camera
+  elif objtype == int(ObjType.CAMERA.value):
+    bodyid = m.cam_bodyid[objid]
+    pos = d.cam_xpos[worldid, objid]
   else:  # UNKNOWN
     bodyid = 0
     pos = wp.vec3(0.0)
@@ -728,7 +751,8 @@ def _frameangacc(m: Model, d: Data, worldid: int, objid: int, objtype: int) -> w
     bodyid = m.geom_bodyid[objid]
   elif objtype == int(ObjType.SITE.value):
     bodyid = m.site_bodyid[objid]
-  # TODO(team): camera
+  elif objtype == int(ObjType.CAMERA.value):
+    bodyid = m.cam_bodyid[objid]
   else:  # UNKNOWN
     bodyid = 0
 
