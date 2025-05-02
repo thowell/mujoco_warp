@@ -1579,7 +1579,7 @@ def _solve_LD_sparse(
 ):
   """Computes sparse backsubstitution: x = inv(L'*D*L)*y"""
 
-  @kernel
+  @nested_kernel
   def x_acc_up(
     # In:
     L: array3df,
@@ -1592,7 +1592,7 @@ def _solve_LD_sparse(
     i, k, Madr_ki = update[0], update[1], update[2]
     wp.atomic_sub(x[worldid], i, L[worldid, 0, Madr_ki] * x[worldid, k])
 
-  @kernel
+  @nested_kernel
   def qLDiag_mul(
     # In:
     D: array2df,
@@ -1602,7 +1602,7 @@ def _solve_LD_sparse(
     worldid, dofid = wp.tid()
     x[worldid, dofid] *= D[worldid, dofid]
 
-  @kernel
+  @nested_kernel
   def x_acc_down(
     # In:
     L: array3df,
@@ -1618,40 +1618,15 @@ def _solve_LD_sparse(
   wp.copy(x, y)
   for qLD_updates in reversed(m.qLD_updates):
     wp.launch(
-      x_acc_up, dim=(d.nworld, qLD_updates.size), inputs=[m, L, qLD_updates], out=[x]
+      x_acc_up, dim=(d.nworld, qLD_updates.size), inputs=[L, qLD_updates], outputs=[x]
     )
 
   wp.launch(qLDiag_mul, dim=(d.nworld, m.nv), inputs=[D], outputs=[x])
 
-  for qLD_updates in range(m.qLD_updates):
+  for qLD_updates in m.qLD_updates:
     wp.launch(
-      x_acc_down, dim=(d.nworld, qLD_updates.size), inputs=[L, qLD_updates], out=[x]
+      x_acc_down, dim=(d.nworld, qLD_updates.size), inputs=[L, qLD_updates], outputs=[x]
     )
-
-
-# def _tile_cholesky(tile: TileSet):
-#   """Returns a kernel for dense Cholesky factorizaton of a tile."""
-
-#   @nested_kernel
-#   def cholesky(
-#     # Data In:
-#     qM_in: wp.array3d(dtype=float),
-#     # In:
-#     adr: wp.array(dtype=int),
-#     # Out:
-#     L_out: wp.array3d(dtype=float),
-#   ):
-#     worldid, nodeid = wp.tid()
-#     TILE_SIZE = wp.static(tile.size)
-
-#     dofid = adr[nodeid]
-#     M_tile = wp.tile_load(
-#       qM_in[worldid], shape=(TILE_SIZE, TILE_SIZE), offset=(dofid, dofid)
-#     )
-#     L_tile = wp.tile_cholesky(M_tile)
-#     wp.tile_store(L_out[worldid], L_tile, offset=(dofid, dofid))
-
-#   return cholesky
 
 
 def _tile_cho_solve(tile: TileSet):
@@ -1662,12 +1637,14 @@ def _tile_cho_solve(tile: TileSet):
     # In:
     L: array3df,
     y: array2df,
+    adr: wp.array(dtype=int),
     # Out:
     x: array2df,
   ):
-    worldid, dofid = wp.tid()
-
+    worldid, nodeid = wp.tid()
     TILE_SIZE = wp.static(tile.size)
+
+    dofid = adr[nodeid]
     y_slice = wp.tile_load(y[worldid], shape=(TILE_SIZE,), offset=(dofid,))
     L_tile = wp.tile_load(
       L[worldid], shape=(TILE_SIZE, TILE_SIZE), offset=(dofid, dofid)
@@ -1688,7 +1665,7 @@ def _solve_LD_dense(m: Model, d: Data, L: array3df, x: array2df, y: array2df):
     wp.launch_tiled(
       _tile_cho_solve(tile),
       dim=(d.nworld, tile.adr.size),
-      inputs=[L, y],
+      inputs=[L, y, tile.adr],
       outputs=[x],
       block_dim=block_dim,
     )
