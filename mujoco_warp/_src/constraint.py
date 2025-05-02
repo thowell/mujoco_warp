@@ -27,9 +27,10 @@ wp.config.enable_backward = False
 
 @wp.func
 def _update_efc_row(
+  # Model in:
+  opt_timestep: float,
   # In:
   refsafe: int,
-  timestep: float,
   efcid: int,
   pos_aref: float,
   pos_imp: float,
@@ -40,7 +41,7 @@ def _update_efc_row(
   Jqvel: float,
   frictionloss: float,
   id: int,
-  # Out:
+  # Data out:
   efc_D_out: wp.array(dtype=float),
   efc_aref_out: wp.array(dtype=float),
   efc_pos_out: wp.array(dtype=float),
@@ -59,7 +60,7 @@ def _update_efc_row(
 
   # TODO(team): wp.static?
   if not refsafe:
-    timeconst = wp.max(timeconst, 2.0 * timestep)
+    timeconst = wp.max(timeconst, 2.0 * opt_timestep)
 
   dmin = wp.clamp(dmin, types.MJ_MINIMP, types.MJ_MAXIMP)
   dmax = wp.clamp(dmax, types.MJ_MINIMP, types.MJ_MAXIMP)
@@ -107,6 +108,7 @@ def _efc_equality_connect(
   eq_solimp: wp.array(dtype=vec5),
   eq_data: wp.array(dtype=vec11),
   eq_connect_adr: wp.array(dtype=int),
+  opt_timestep: float,
   # Data in:
   nefc_in: wp.array(dtype=int),
   qvel_in: wp.array2d(dtype=float),
@@ -118,10 +120,8 @@ def _efc_equality_connect(
   cdof_in: wp.array2d(dtype=wp.spatial_vector),
   # In:
   refsafe_in: int,
-  timestep_in: float,
   # Data out:
   ne_connect_out: wp.array(dtype=int),
-  # Out:
   efc_J_out: wp.array2d(dtype=float),
   efc_D_out: wp.array(dtype=float),
   efc_aref_out: wp.array(dtype=float),
@@ -206,8 +206,8 @@ def _efc_equality_connect(
     efc_worldid_out[efcidi] = worldid
 
     _update_efc_row(
+      opt_timestep,
       refsafe_in,
-      timestep_in,
       efcidi,
       pos[i],
       pos_imp,
@@ -240,6 +240,7 @@ def _efc_equality_joint(
   eq_solimp: wp.array(dtype=vec5),
   eq_data: wp.array(dtype=vec11),
   eq_jnt_adr: wp.array(dtype=int),
+  opt_timestep: float,
   # Data in:
   ne_connect_in: wp.array(dtype=int),
   ne_weld_in: wp.array(dtype=int),
@@ -249,10 +250,8 @@ def _efc_equality_joint(
   eq_active_in: wp.array2d(dtype=bool),
   # In:
   refsafe_in: int,
-  timestep_in: float,
   # Data out:
   ne_jnt_out: wp.array(dtype=int),
-  # Out:
   efc_J_out: wp.array2d(dtype=float),
   efc_D_out: wp.array(dtype=float),
   efc_aref_out: wp.array(dtype=float),
@@ -303,8 +302,8 @@ def _efc_equality_joint(
 
   # Update constraint parameters
   _update_efc_row(
+    opt_timestep,
     refsafe_in,
-    timestep_in,
     efcid,
     pos,
     pos,
@@ -331,15 +330,14 @@ def _efc_friction(
   dof_frictionloss: wp.array(dtype=float),
   dof_solimp: wp.array(dtype=vec5),
   dof_solref: wp.array(dtype=wp.vec2),
+  opt_timestep: float,
   # Data in:
   qvel_in: wp.array2d(dtype=float),
   # In:
   refsafe_in: int,
-  timestep_in: float,
   # Data out:
   nf_out: wp.array(dtype=int),
   nefc_out: wp.array(dtype=int),
-  # Out:
   efc_J_out: wp.array2d(dtype=float),
   efc_D_out: wp.array(dtype=float),
   efc_aref_out: wp.array(dtype=float),
@@ -363,8 +361,8 @@ def _efc_friction(
   Jqvel = qvel_in[worldid, dofid]
 
   _update_efc_row(
+    opt_timestep,
     refsafe_in,
-    timestep_in,
     efcid,
     0.0,
     0.0,
@@ -402,6 +400,7 @@ def _efc_equality_weld(
   eq_solimp: wp.array(dtype=vec5),
   eq_data: wp.array(dtype=vec11),
   eq_wld_adr: wp.array(dtype=int),
+  opt_timestep: float,
   # Data in:
   ne_connect_in: wp.array(dtype=int),
   nefc_in: wp.array(dtype=int),
@@ -415,10 +414,8 @@ def _efc_equality_weld(
   cdof_in: wp.array2d(dtype=wp.spatial_vector),
   # In:
   refsafe_in: int,
-  timestep_in: float,
   # Data out:
   ne_weld_out: wp.array(dtype=int),
-  # Out:
   efc_J_out: wp.array2d(dtype=float),
   efc_D_out: wp.array(dtype=float),
   efc_aref_out: wp.array(dtype=float),
@@ -525,8 +522,8 @@ def _efc_equality_weld(
 
   for i in range(3):
     _update_efc_row(
+      opt_timestep,
       refsafe_in,
-      timestep_in,
       efcid + i,
       cpos[i],
       pos_imp,
@@ -549,8 +546,8 @@ def _efc_equality_weld(
 
   for i in range(3):
     _update_efc_row(
+      opt_timestep,
       refsafe_in,
-      timestep_in,
       efcid + 3 + i,
       crot[i],
       pos_imp,
@@ -581,16 +578,15 @@ def _efc_limit_slide_hinge(
   jnt_margin: wp.array(dtype=float),
   jnt_limited_slide_hinge_adr: wp.array(dtype=int),
   dof_invweight0: wp.array(dtype=float),
+  opt_timestep: float,
   # Data in:
   nefc_in: wp.array(dtype=int),
   qpos_in: wp.array2d(dtype=float),
   qvel_in: wp.array2d(dtype=float),
   # In:
   refsafe_in: int,
-  timestep_in: float,
   # Data out:
   nl_out: wp.array(dtype=int),
-  # Out:
   efc_J_out: wp.array2d(dtype=float),
   efc_D_out: wp.array(dtype=float),
   efc_aref_out: wp.array(dtype=float),
@@ -622,8 +618,8 @@ def _efc_limit_slide_hinge(
     Jqvel = J * qvel_in[worldid, dofadr]
 
     _update_efc_row(
+      opt_timestep,
       refsafe_in,
-      timestep_in,
       efcid,
       pos,
       pos,
@@ -654,16 +650,15 @@ def _efc_limit_ball(
   jnt_margin: wp.array(dtype=float),
   jnt_limited_ball_adr: wp.array(dtype=int),
   dof_invweight0: wp.array(dtype=float),
+  opt_timestep: float,
   # Data in:
   nefc_in: wp.array(dtype=int),
   qpos_in: wp.array2d(dtype=float),
   qvel_in: wp.array2d(dtype=float),
   # In:
   refsafe_in: int,
-  timestep_in: float,
   # Data out:
   nl_out: wp.array(dtype=int),
-  # Out:
   efc_J_out: wp.array2d(dtype=float),
   efc_D_out: wp.array(dtype=float),
   efc_aref_out: wp.array(dtype=float),
@@ -705,8 +700,8 @@ def _efc_limit_ball(
     Jqvel -= axis[2] * qvel_in[worldid, dofadr + 2]
 
     _update_efc_row(
+      opt_timestep,
       refsafe_in,
-      timestep_in,
       efcid,
       pos,
       pos,
@@ -741,6 +736,7 @@ def _efc_limit_tendon(
   tendon_invweight0: wp.array(dtype=float),
   wrap_objid: wp.array(dtype=int),
   wrap_type: wp.array(dtype=int),
+  opt_timestep: float,
   # Data in:
   nefc_in: wp.array(dtype=int),
   qvel_in: wp.array2d(dtype=float),
@@ -748,10 +744,8 @@ def _efc_limit_tendon(
   ten_J_in: wp.array3d(dtype=float),
   # In:
   refsafe_in: int,
-  timestep_in: float,
   # Data out:
   nl_out: wp.array(dtype=int),
-  # Out:
   efc_J_out: wp.array2d(dtype=float),
   efc_D_out: wp.array(dtype=float),
   efc_aref_out: wp.array(dtype=float),
@@ -794,8 +788,8 @@ def _efc_limit_tendon(
         Jqvel += J * qvel_in[worldid, i]
 
     _update_efc_row(
+      opt_timestep,
       refsafe_in,
-      timestep_in,
       efcid,
       pos,
       pos,
@@ -824,15 +818,15 @@ def _efc_contact_pyramidal(
   body_invweight0: wp.array2d(dtype=float),
   dof_bodyid: wp.array(dtype=int),
   geom_bodyid: wp.array(dtype=int),
+  opt_impratio: float,
+  opt_timestep: float,
   # Data in:
   ncon_in: wp.array(dtype=int),
   qvel_in: wp.array2d(dtype=float),
   subtree_com_in: wp.array2d(dtype=wp.vec3),
   cdof_in: wp.array2d(dtype=wp.spatial_vector),
   # In:
-  impratio_in: float,
   refsafe_in: int,
-  timestep_in: float,
   dist_in: wp.array(dtype=float),
   condim_in: wp.array(dtype=int),
   includemargin_in: wp.array(dtype=float),
@@ -845,7 +839,6 @@ def _efc_contact_pyramidal(
   solimp_in: wp.array(dtype=vec5),
   # Data out:
   nefc_out: wp.array(dtype=int),
-  # Out:
   efc_J_out: wp.array2d(dtype=float),
   efc_D_out: wp.array(dtype=float),
   efc_aref_out: wp.array(dtype=float),
@@ -893,7 +886,7 @@ def _efc_contact_pyramidal(
       fri0 = friction[0]
       frii = friction[dimid2 - 1]
       invweight = invweight + fri0 * fri0 * invweight
-      invweight = invweight * 2.0 * fri0 * fri0 / impratio_in
+      invweight = invweight * 2.0 * fri0 * fri0 / opt_impratio
 
     Jqvel = float(0.0)
     for i in range(nv):
@@ -941,8 +934,8 @@ def _efc_contact_pyramidal(
       Jqvel += J * qvel_in[worldid, i]
 
     _update_efc_row(
+      opt_timestep,
       refsafe_in,
-      timestep_in,
       efcid,
       pos,
       pos,
@@ -971,15 +964,15 @@ def _efc_contact_elliptic(
   body_invweight0: wp.array2d(dtype=float),
   dof_bodyid: wp.array(dtype=int),
   geom_bodyid: wp.array(dtype=int),
+  opt_impratio: float,
+  opt_timestep: float,
   # Data in:
   ncon_in: wp.array(dtype=int),
   qvel_in: wp.array2d(dtype=float),
   subtree_com_in: wp.array2d(dtype=wp.vec3),
   cdof_in: wp.array2d(dtype=wp.spatial_vector),
   # In:
-  impratio_in: float,
   refsafe_in: int,
-  timestep_in: float,
   dist_in: wp.array(dtype=float),
   condim_in: wp.array(dtype=int),
   includemargin_in: wp.array(dtype=float),
@@ -993,7 +986,6 @@ def _efc_contact_elliptic(
   solimp_in: wp.array(dtype=vec5),
   # Data out:
   nefc_out: wp.array(dtype=int),
-  # Out:
   efc_J_out: wp.array2d(dtype=float),
   efc_D_out: wp.array(dtype=float),
   efc_aref_out: wp.array(dtype=float),
@@ -1081,7 +1073,7 @@ def _efc_contact_elliptic(
         ref = solreffriction
 
       # TODO(team): precompute 1 / impratio
-      invweight = invweight / impratio_in
+      invweight = invweight / opt_impratio
       friction = friction_in[conid]
 
       if dimid > 1:
@@ -1093,8 +1085,8 @@ def _efc_contact_elliptic(
       pos_aref = 0.0
 
     _update_efc_row(
+      opt_timestep,
       refsafe_in,
-      timestep_in,
       efcid,
       pos_aref,
       pos,
@@ -1175,6 +1167,7 @@ def make_constraint(m: types.Model, d: types.Data):
           m.eq_solimp,
           m.eq_data,
           m.eq_connect_adr,
+          m.opt.timestep,
           d.nefc,
           d.qvel,
           d.eq_active,
@@ -1184,7 +1177,6 @@ def make_constraint(m: types.Model, d: types.Data):
           d.subtree_com,
           d.cdof,
           refsafe,
-          m.opt.timestep,
         ],
         outputs=[
           d.ne_connect,
@@ -1217,6 +1209,7 @@ def make_constraint(m: types.Model, d: types.Data):
           m.eq_solimp,
           m.eq_data,
           m.eq_wld_adr,
+          m.opt.timestep,
           d.ne_connect,
           d.nefc,
           d.qvel,
@@ -1228,7 +1221,6 @@ def make_constraint(m: types.Model, d: types.Data):
           d.subtree_com,
           d.cdof,
           refsafe,
-          m.opt.timestep,
         ],
         outputs=[
           d.ne_weld,
@@ -1256,6 +1248,7 @@ def make_constraint(m: types.Model, d: types.Data):
           m.eq_solimp,
           m.eq_data,
           m.eq_jnt_adr,
+          m.opt.timestep,
           d.ne_connect,
           d.ne_weld,
           d.nefc,
@@ -1263,7 +1256,6 @@ def make_constraint(m: types.Model, d: types.Data):
           d.qvel,
           d.eq_active,
           refsafe,
-          m.opt.timestep,
         ],
         outputs=[
           d.ne_jnt,
@@ -1301,9 +1293,9 @@ def make_constraint(m: types.Model, d: types.Data):
           m.dof_frictionloss,
           m.dof_solimp,
           m.dof_solref,
+          m.opt.timestep,
           d.qvel,
           refsafe,
-          m.opt.timestep,
         ],
         outputs=[
           d.nf,
@@ -1335,11 +1327,11 @@ def make_constraint(m: types.Model, d: types.Data):
             m.jnt_margin,
             m.jnt_limited_ball_adr,
             m.dof_invweight0,
+            m.opt.timestep,
             d.nefc,
             d.qpos,
             d.qvel,
             refsafe,
-            m.opt.timestep,
           ],
           outputs=[
             d.nl,
@@ -1368,11 +1360,11 @@ def make_constraint(m: types.Model, d: types.Data):
             m.jnt_margin,
             m.jnt_limited_slide_hinge_adr,
             m.dof_invweight0,
+            m.opt.timestep,
             d.nefc,
             d.qpos,
             d.qvel,
             refsafe,
-            m.opt.timestep,
           ],
           outputs=[
             d.nl,
@@ -1405,12 +1397,12 @@ def make_constraint(m: types.Model, d: types.Data):
             m.tendon_invweight0,
             m.wrap_objid,
             m.wrap_type,
+            m.opt.timestep,
             d.nefc,
             d.qvel,
             d.ten_length,
             d.ten_J,
             refsafe,
-            m.opt.timestep,
           ],
           outputs=[
             d.nl,
@@ -1446,13 +1438,13 @@ def make_constraint(m: types.Model, d: types.Data):
             m.body_invweight0,
             m.dof_bodyid,
             m.geom_bodyid,
+            m.opt.impratio,
+            m.opt.timestep,
             d.ncon,
             d.qvel,
             d.subtree_com,
             d.cdof,
-            m.opt.impratio,
             refsafe,
-            m.opt.timestep,
             d.contact.dist,
             d.contact.dim,
             d.contact.includemargin,
@@ -1487,13 +1479,13 @@ def make_constraint(m: types.Model, d: types.Data):
             m.body_invweight0,
             m.dof_bodyid,
             m.geom_bodyid,
+            m.opt.impratio,
+            m.opt.timestep,
             d.ncon,
             d.qvel,
             d.subtree_com,
             d.cdof,
-            m.opt.impratio,
             refsafe,
-            m.opt.timestep,
             d.contact.dist,
             d.contact.dim,
             d.contact.includemargin,

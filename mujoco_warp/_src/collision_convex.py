@@ -13,8 +13,6 @@
 # limitations under the License.
 # ==============================================================================
 
-from typing import Any
-
 import warp as wp
 
 from .collision_primitive import Geom
@@ -733,12 +731,11 @@ def gjk_epa_pipeline(
     ncollision_in: wp.array(dtype=int),
     # Data out:
     ncon_out: wp.array(dtype=int),
-    # Out:
-    dist_out: wp.array(dtype=float),
-    pos_out: wp.array(dtype=wp.vec3),
-    frame_out: wp.array(dtype=wp.mat33),
-    geoms_out: wp.array(dtype=wp.vec2i),
-    worldid_out: wp.array(dtype=int),
+    contact_dist_out: wp.array(dtype=float),
+    contact_pos_out: wp.array(dtype=wp.vec3),
+    contact_frame_out: wp.array(dtype=wp.mat33),
+    contact_geom_out: wp.array(dtype=wp.vec2i),
+    contact_worldid_out: wp.array(dtype=int),
   ):
     # Check if we generated max contacts for this env.
     # TODO(btaba): move max_contact_points_per_env culling to a point later
@@ -794,11 +791,11 @@ def gjk_epa_pipeline(
 
     cid = wp.atomic_add(ncon_out, 0, count)
     for i in range(count):
-      dist_out[cid + i] = -depth
-      geoms_out[cid + i] = geoms
-      frame_out[cid + i] = make_frame(normal)
-      pos_out[cid + i] = points[i]
-      worldid_out[cid + i] = worldid
+      contact_dist_out[cid + i] = -depth
+      contact_geom_out[cid + i] = geoms
+      contact_frame_out[cid + i] = make_frame(normal)
+      contact_pos_out[cid + i] = points[i]
+      contact_worldid_out[cid + i] = worldid
 
   return gjk_epa_sparse
 
