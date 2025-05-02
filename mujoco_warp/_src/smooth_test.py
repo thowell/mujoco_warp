@@ -153,89 +153,89 @@ class SmoothTest(parameterized.TestCase):
 
     # TODO(team): test DisableBit.GRAVITY
 
-  # @parameterized.parameters(True, False)
-  # def test_rne_postconstraint(self, gravity):
-  #   """Tests rne_postconstraint."""
-  #   mjm, mjd, m, d = test_util.fixture("pendula.xml", gravity=gravity)
+  @parameterized.parameters(True, False)
+  def test_rne_postconstraint(self, gravity):
+    """Tests rne_postconstraint."""
+    mjm, mjd, m, d = test_util.fixture("pendula.xml", gravity=gravity)
 
-  #   mjd.xfrc_applied = np.random.uniform(
-  #     low=-0.01, high=0.01, size=mjd.xfrc_applied.shape
-  #   )
-  #   d.xfrc_applied = wp.array(
-  #     np.expand_dims(mjd.xfrc_applied, axis=0), dtype=wp.spatial_vector
-  #   )
+    mjd.xfrc_applied = np.random.uniform(
+      low=-0.01, high=0.01, size=mjd.xfrc_applied.shape
+    )
+    d.xfrc_applied = wp.array(
+      np.expand_dims(mjd.xfrc_applied, axis=0), dtype=wp.spatial_vector
+    )
 
-  #   mujoco.mj_rnePostConstraint(mjm, mjd)
+    mujoco.mj_rnePostConstraint(mjm, mjd)
 
-  #   for arr in (d.cacc, d.cfrc_int, d.cfrc_ext):
-  #     arr.zero_()
+    for arr in (d.cacc, d.cfrc_int, d.cfrc_ext):
+      arr.zero_()
 
-  #   mjwarp.rne_postconstraint(m, d)
+    mjwarp.rne_postconstraint(m, d)
 
-  #   _assert_eq(d.cacc.numpy()[0], mjd.cacc, "cacc")
-  #   _assert_eq(d.cfrc_int.numpy()[0], mjd.cfrc_int, "cfrc_int")
-  #   _assert_eq(d.cfrc_ext.numpy()[0], mjd.cfrc_ext, "cfrc_ext")
+    _assert_eq(d.cacc.numpy()[0], mjd.cacc, "cacc")
+    _assert_eq(d.cfrc_int.numpy()[0], mjd.cfrc_int, "cfrc_int")
+    _assert_eq(d.cfrc_ext.numpy()[0], mjd.cfrc_ext, "cfrc_ext")
 
-  #   _EQUALITY = """
-  #     <mujoco>
-  #       <option gravity="1 1 -1">
-  #         <flag contact="disable"/>
-  #       </option>
-  #       <worldbody>
-  #         <site name="siteworld"/>
-  #         <body name="body0">
-  #           <geom type="sphere" size=".1"/>
-  #           <freejoint/>
-  #         </body>
-  #         <body name="body1">
-  #           <geom type="sphere" size=".1"/>
-  #           <site name="site1"/>
-  #           <freejoint/>
-  #         </body>
-  #         <body name="body2">
-  #           <geom type="sphere" size=".1"/>
-  #           <freejoint/>
-  #         </body>
-  #         <body name="body3">
-  #           <geom type="sphere" size=".1"/>
-  #           <site name="site3" quat="0 1 0 0"/>
-  #           <freejoint/>
-  #         </body>
-  #       </worldbody>
-  #       <equality>
-  #         <connect body1="body0" anchor="1 1 1"/>
-  #         <connect site1="siteworld" site2="site1"/>
-  #         <weld body1="body2" relpose="1 1 1 0 1 0 0"/>
-  #         <weld site1="siteworld" site2="site3"/>
-  #       </equality>
-  #       <keyframe>
-  #         <key qpos="0 0 0 1 0 0 0 1 1 1 1 0 0 0 0 0 0 1 0 0 0 1 1 1 1 0 0 0"/>
-  #       </keyframe>
-  #     </mujoco>
-  #     """
-  #   mjm, mjd, m, d = test_util.fixture(xml=_EQUALITY, kick=True, keyframe=0)
+    _EQUALITY = """
+      <mujoco>
+        <option gravity="1 1 -1">
+          <flag contact="disable"/>
+        </option>
+        <worldbody>
+          <site name="siteworld"/>
+          <body name="body0">
+            <geom type="sphere" size=".1"/>
+            <freejoint/>
+          </body>
+          <body name="body1">
+            <geom type="sphere" size=".1"/>
+            <site name="site1"/>
+            <freejoint/>
+          </body>
+          <body name="body2">
+            <geom type="sphere" size=".1"/>
+            <freejoint/>
+          </body>
+          <body name="body3">
+            <geom type="sphere" size=".1"/>
+            <site name="site3" quat="0 1 0 0"/>
+            <freejoint/>
+          </body>
+        </worldbody>
+        <equality>
+          <connect body1="body0" anchor="1 1 1"/>
+          <connect site1="siteworld" site2="site1"/>
+          <weld body1="body2" relpose="1 1 1 0 1 0 0"/>
+          <weld site1="siteworld" site2="site3"/>
+        </equality>
+        <keyframe>
+          <key qpos="0 0 0 1 0 0 0 1 1 1 1 0 0 0 0 0 0 1 0 0 0 1 1 1 1 0 0 0"/>
+        </keyframe>
+      </mujoco>
+      """
+    mjm, mjd, m, d = test_util.fixture(xml=_EQUALITY, kick=True, keyframe=0)
 
-  #   mujoco.mj_rnePostConstraint(mjm, mjd)
+    mujoco.mj_rnePostConstraint(mjm, mjd)
 
-  #   d.cfrc_ext.zero_()
-  #   mjwarp.rne_postconstraint(m, d)
+    d.cfrc_ext.zero_()
+    mjwarp.rne_postconstraint(m, d)
 
-  #   _assert_eq(d.cfrc_ext.numpy()[0], mjd.cfrc_ext, "cfrc_ext (equality)")
+    _assert_eq(d.cfrc_ext.numpy()[0], mjd.cfrc_ext, "cfrc_ext (equality)")
 
-  #   mjm, mjd, m, d = test_util.fixture("constraints.xml", keyframe=1, equality=False)
+    mjm, mjd, m, d = test_util.fixture("constraints.xml", keyframe=1, equality=False)
 
-  #   mujoco.mj_rnePostConstraint(mjm, mjd)
+    mujoco.mj_rnePostConstraint(mjm, mjd)
 
-  #   d.cfrc_ext.zero_()
+    d.cfrc_ext.zero_()
 
-  #   # clear equality constraint counts
-  #   d.ne_connect.zero_()
-  #   d.ne_weld.zero_()
-  #   d.ne_jnt.zero_()
+    # clear equality constraint counts
+    d.ne_connect.zero_()
+    d.ne_weld.zero_()
+    d.ne_jnt.zero_()
 
-  #   mjwarp.rne_postconstraint(m, d)
+    mjwarp.rne_postconstraint(m, d)
 
-  #   _assert_eq(d.cfrc_ext.numpy()[0], mjd.cfrc_ext, "cfrc_ext (contact)")
+    _assert_eq(d.cfrc_ext.numpy()[0], mjd.cfrc_ext, "cfrc_ext (contact)")
 
   def test_com_vel(self):
     """Tests com_vel."""

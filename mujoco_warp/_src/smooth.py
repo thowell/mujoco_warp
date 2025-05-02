@@ -1102,14 +1102,13 @@ def _cfrc_ext(
   worldid, bodyid = wp.tid()
   if bodyid == 0:
     cfrc_ext_out[worldid, 0] = wp.spatial_vector(0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
-    return
-
-  xfrc_applied = xfrc_applied_in[worldid, bodyid]
-  subtree_com = subtree_com_in[worldid, body_rootid[bodyid]]
-  xipos = xipos_in[worldid, bodyid]
-  cfrc_ext_out[worldid, bodyid] = support.transform_force(
-    xfrc_applied, subtree_com - xipos
-  )
+  else:
+    xfrc_applied = xfrc_applied_in[worldid, bodyid]
+    subtree_com = subtree_com_in[worldid, body_rootid[bodyid]]
+    xipos = xipos_in[worldid, bodyid]
+    cfrc_ext_out[worldid, bodyid] = support.transform_force(
+      xfrc_applied, subtree_com - xipos
+    )
 
 
 @kernel
@@ -1128,7 +1127,6 @@ def _cfrc_ext_equality(
   xmat_in: wp.array2d(dtype=wp.mat33),
   xpos_in: wp.array2d(dtype=wp.vec3),
   subtree_com_in: wp.array2d(dtype=wp.vec3),
-  cfrc_ext_in: wp.array2d(dtype=wp.spatial_vector),
   # In:
   efc_force_in: wp.array(dtype=float),
   efc_worldid_in: wp.array(dtype=int),
@@ -1219,6 +1217,15 @@ def _cfrc_ext_equality(
 
     # apply
     wp.atomic_sub(cfrc_ext_out[worldid], bodyid2, cfrc_com)
+
+
+@wp.func
+def transform_force(
+  force: wp.vec3, torque: wp.vec3, offset: wp.vec3
+) -> wp.spatial_vector:
+  torque -= wp.cross(offset, force)
+  return wp.spatial_vector(torque, force)
+
 
 
 @kernel
@@ -1312,7 +1319,6 @@ def rne_postconstraint(m: Model, d: Data):
       d.xmat,
       d.xpos,
       d.subtree_com,
-      d.cfrc_ext,
       d.efc.force,
       d.efc.worldid,
       d.efc.id,
