@@ -15,7 +15,6 @@
 
 """Public API for MJWarp."""
 
-
 from ._src.collision_driver import collision as collision
 from ._src.collision_driver import nxn_broadphase as nxn_broadphase
 from ._src.collision_driver import sap_broadphase as sap_broadphase
@@ -23,15 +22,15 @@ from ._src.collision_primitive import primitive_narrowphase as primitive_narrowp
 from ._src.constraint import make_constraint as make_constraint
 
 # from ._src.constraint import make_constraint as make_constraint
-# from ._src.forward import euler as euler
-# from ._src.forward import forward as forward
-# from ._src.forward import fwd_acceleration as fwd_acceleration
-# from ._src.forward import fwd_actuation as fwd_actuation
-# from ._src.forward import fwd_position as fwd_position
-# from ._src.forward import fwd_velocity as fwd_velocity
-# from ._src.forward import implicit as implicit
-# from ._src.forward import rungekutta4 as rungekutta4
-# from ._src.forward import step as step
+from ._src.forward import euler as euler
+from ._src.forward import forward as forward
+from ._src.forward import fwd_acceleration as fwd_acceleration
+from ._src.forward import fwd_actuation as fwd_actuation
+from ._src.forward import fwd_position as fwd_position
+from ._src.forward import fwd_velocity as fwd_velocity
+from ._src.forward import implicit as implicit
+from ._src.forward import rungekutta4 as rungekutta4
+from ._src.forward import step as step
 from ._src.io import get_data_into as get_data_into
 from ._src.io import make_data as make_data
 from ._src.io import put_data as put_data
