@@ -838,7 +838,7 @@ def put_data(
     qacc_warmstart=tile(mjd.qacc_warmstart),
     ctrl=tile(mjd.ctrl),
     qfrc_applied=tile(mjd.qfrc_applied),
-    xfrc_applied=tile(mjd.xfrc_applied),
+    xfrc_applied=tile(mjd.xfrc_applied, dtype=wp.spatial_vector),
     eq_active=tile(mjd.eq_active.astype(bool)),
     mocap_pos=tile(mjd.mocap_pos, dtype=wp.vec3),
     mocap_quat=tile(mjd.mocap_quat, dtype=wp.quat),
