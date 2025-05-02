@@ -218,14 +218,16 @@ def analyze(source: str, filename: str, type_source: str) -> List[Issue]:
 
       # paramater type must match field type (or generic types if no corresponding field)
       if expected_type is None:
-        expected_type = ("int", "float", "bool")
+        expected_type = ("int", "float", "bool", "array3df", "array2df", "wp.vec3")
         if param_type not in expected_type and not param_type.startswith("wp.array"):
-          issues.append(TypeMismatch(param, kernel, "int, float, bool, wp.array", None))
+          issues.append(TypeMismatch(param, kernel, ", ".join(expected_type), None))
       elif param_type != expected_type:
         issues.append(TypeMismatch(param, kernel, expected_type, param_source))
 
-      # Model params must not have in/out suffix, Data/other params must
-      if (param_source == "Model") == has_suffix:
+      # Model params must not have in/out suffix, Data params must, other params optional
+      if param_source == "Model" and has_suffix:
+        issues.append(InvalidSuffix(param, kernel, param_source))
+      elif param_source == "Data" and not has_suffix:
         issues.append(InvalidSuffix(param, kernel, param_source))
 
       source_order = {"Model": 0, "Data": 1, None: 2}[param_source]

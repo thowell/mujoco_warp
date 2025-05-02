@@ -798,7 +798,12 @@ def put_data(
         dtype = wp.bool
       else:
         raise ValueError(f"Unsupported dtype: {x.dtype}")
-    return wp.array(x, dtype=dtype)
+    wp_array = {
+      1: wp.array,
+      2: wp.array2d,
+      3: wp.array3d,
+    }[x.ndim]
+    return wp_array(x, dtype=dtype)
 
   def tile(x, dtype=None):
     return arr(np.tile(x, (nworld,) + (1,) * len(x.shape)), dtype)
@@ -833,7 +838,7 @@ def put_data(
     qacc_warmstart=tile(mjd.qacc_warmstart),
     ctrl=tile(mjd.ctrl),
     qfrc_applied=tile(mjd.qfrc_applied),
-    xfrc_applied=tile(mjd.xfrc_applied),
+    xfrc_applied=tile(mjd.xfrc_applied, dtype=wp.spatial_vector),
     eq_active=tile(mjd.eq_active.astype(bool)),
     mocap_pos=tile(mjd.mocap_pos, dtype=wp.vec3),
     mocap_quat=tile(mjd.mocap_quat, dtype=wp.quat),

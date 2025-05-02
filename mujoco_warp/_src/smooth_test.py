@@ -314,6 +314,8 @@ class SmoothTest(parameterized.TestCase):
     )
     _assert_eq(d.actuator_moment.numpy()[0], actuator_moment, "actuator_moment")
 
+  # TODO(team): test factor_solve_i
+
 
 if __name__ == "__main__":
   wp.init()

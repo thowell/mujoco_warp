@@ -82,7 +82,7 @@ import warp as wp
 from mujoco_warp.warp_util import kernel
 
 @kernel
-def test_data_suffix(qpos_invalid: int):
+def test_data_suffix(qpos: int):
     pass
 """
 
@@ -136,14 +136,14 @@ from mujoco_warp.warp_util import kernel
 @kernel
 def test_no_issues(
     # Model:
-    qpos0: wp.array(dtype=wp.float32, ndim=1),
-    geom_pos: wp.array(dtype=wp.vec3, ndim=1),
+    qpos0: wp.array(dtype=float),
+    geom_pos: wp.array(dtype=wp.vec3),
     # Data in:
-    qpos_in: wp.array(dtype=wp.float32, ndim=2),
-    qvel_in: wp.array(dtype=wp.float32, ndim=2),
-    act_in: wp.array(dtype=wp.float32, ndim=2),
+    qpos_in: wp.array2d(dtype=float),
+    qvel_in: wp.array2d(dtype=float),
+    act_in: wp.array2d(dtype=float),
     # Data out:
-    act_out: wp.array(dtype=wp.float32, ndim=2)
+    act_out: wp.array2d(dtype=float)
 ):
     x = qpos0  # Reading Model field is fine
     y = act_in  # Reading Data _in field is fine
@@ -249,7 +249,7 @@ class TestAnalyzer(absltest.TestCase):
     for iss in issues:
       print(f"{iss.node.lineno}:{iss}")
 
-    self.assertEqual(len(issues), 0)
+    self.assertEqual(len(issues), 0, issues)
 
   def test_non_kernel_function(self):
     """Test that non-kernel functions aren't analyzed."""

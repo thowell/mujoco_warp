@@ -15,7 +15,6 @@
 
 """Public API for MJWarp."""
 
-
 from ._src.collision_driver import collision as collision
 from ._src.collision_driver import nxn_broadphase as nxn_broadphase
 from ._src.collision_driver import sap_broadphase as sap_broadphase
@@ -41,18 +40,19 @@ from ._src.sensor import sensor_acc as sensor_acc
 from ._src.sensor import sensor_pos as sensor_pos
 from ._src.sensor import sensor_vel as sensor_vel
 
-# from ._src.smooth import camlight as camlight
-# from ._src.smooth import com_pos as com_pos
-# from ._src.smooth import com_vel as com_vel
-# from ._src.smooth import crb as crb
-# from ._src.smooth import factor_m as factor_m
-# from ._src.smooth import kinematics as kinematics
-# from ._src.smooth import rne as rne
-# from ._src.smooth import rne_postconstraint as rne_postconstraint
-# from ._src.smooth import solve_m as solve_m
-# from ._src.smooth import subtree_vel as subtree_vel
-# from ._src.smooth import tendon as tendon
-# from ._src.smooth import transmission as transmission
+from ._src.smooth import camlight as camlight
+from ._src.smooth import com_pos as com_pos
+from ._src.smooth import com_vel as com_vel
+from ._src.smooth import crb as crb
+from ._src.smooth import factor_m as factor_m
+from ._src.smooth import kinematics as kinematics
+from ._src.smooth import rne as rne
+from ._src.smooth import rne_postconstraint as rne_postconstraint
+from ._src.smooth import solve_m as solve_m
+from ._src.smooth import subtree_vel as subtree_vel
+from ._src.smooth import tendon as tendon
+from ._src.smooth import transmission as transmission
+
 # from ._src.solver import solve as solve
 from ._src.support import contact_force as contact_force
 from ._src.support import mul_m as mul_m
