@@ -875,7 +875,6 @@ def _linesearch_iterative(m: types.Model, d: types.Data):
         d.efc.mid, d.efc.mid_alpha
       ])  # fmt: skip
 
-
     if m.opt.cone == types.ConeType.ELLIPTIC:
       wp.launch(
         linesearch_iterative_next_quad_elliptic0,
