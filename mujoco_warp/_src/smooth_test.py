@@ -121,25 +121,25 @@ class SmoothTest(parameterized.TestCase):
     else:
       _assert_eq(d.qLD.numpy()[0], qLD, "qLD (dense)")
 
-  # @parameterized.parameters(True, False)
-  # def test_solve_m(self, sparse: bool):
-  #   """Tests solve_m."""
-  #   mjm, mjd, m, d = test_util.fixture("pendula.xml", sparse=sparse)
+  @parameterized.parameters(True, False)
+  def test_solve_m(self, sparse: bool):
+    """Tests solve_m."""
+    mjm, mjd, m, d = test_util.fixture("pendula.xml", sparse=sparse)
 
-  #   qfrc_smooth = np.tile(mjd.qfrc_smooth, (1, 1))
-  #   qacc_smooth = np.zeros(
-  #     shape=(
-  #       1,
-  #       mjm.nv,
-  #     ),
-  #     dtype=float,
-  #   )
-  #   mujoco.mj_solveM(mjm, mjd, qacc_smooth, qfrc_smooth)
+    qfrc_smooth = np.tile(mjd.qfrc_smooth, (1, 1))
+    qacc_smooth = np.zeros(
+      shape=(
+        1,
+        mjm.nv,
+      ),
+      dtype=float,
+    )
+    mujoco.mj_solveM(mjm, mjd, qacc_smooth, qfrc_smooth)
 
-  #   d.qacc_smooth.zero_()
+    d.qacc_smooth.zero_()
 
-  #   mjwarp.solve_m(m, d, d.qacc_smooth, d.qfrc_smooth)
-  #   _assert_eq(d.qacc_smooth.numpy()[0], qacc_smooth[0], "qacc_smooth")
+    mjwarp.solve_m(m, d, d.qacc_smooth, d.qfrc_smooth)
+    _assert_eq(d.qacc_smooth.numpy()[0], qacc_smooth[0], "qacc_smooth")
 
   @parameterized.parameters(True, False)
   def test_rne(self, gravity):
