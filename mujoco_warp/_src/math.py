@@ -277,3 +277,8 @@ def closest_segment_to_segment_points(
   if d1 < d2:
     return new_a, best_b
   return best_a, new_b
+
+
+@wp.func
+def _safe_div(x: wp.float32, y: wp.float32) -> wp.float32:
+  return x / wp.where(y != 0.0, y, types.MJ_MINVAL)
