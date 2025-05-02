@@ -102,9 +102,9 @@ def _eval_pt_elliptic(
 def linesearch_iterative_gtol(
   # Model:
   nv: int,
-  stat_meaninertia_in: wp.array(dtype=float),
-  opt_tolerance_in: float,
-  opt_ls_tolerance_in: float,
+  opt_tolerance: float,
+  opt_ls_tolerance: float,
+  stat_meaninertia: float,
   # Data in:
   efc_search_dot_in: wp.array(dtype=float),
   efc_done_in: wp.array(dtype=bool),
@@ -117,8 +117,8 @@ def linesearch_iterative_gtol(
     return
 
   snorm = wp.math.sqrt(efc_search_dot_in[worldid])
-  scale = stat_meaninertia_in * wp.float(wp.max(1, nv))
-  efc_gtol_out[worldid] = opt_tolerance_in * opt_ls_tolerance_in * snorm * scale
+  scale = stat_meaninertia * wp.float(wp.max(1, nv))
+  efc_gtol_out[worldid] = opt_tolerance * opt_ls_tolerance * snorm * scale
 
 
 @wp.kernel
@@ -141,15 +141,15 @@ def linesearch_iterative_init_p0_gauss(
 @wp.kernel
 def linesearch_iterative_init_p0_elliptic0(
   # Data in:
-  nefc_in: wp.array(dtype=int),
   ne_in: wp.array(dtype=int),
   nf_in: wp.array(dtype=int),
   nl_in: wp.array(dtype=int),
+  nefc_in: wp.array(dtype=int),
   efc_worldid_in: wp.array(dtype=int),
   efc_Jaref_in: wp.array(dtype=float),
-  efc_condim_in: wp.array(dtype=int),
   efc_quad_in: wp.array(dtype=wp.vec3),
   efc_done_in: wp.array(dtype=bool),
+  efc_condim_in: wp.array(dtype=int),
   # Data out:
   efc_p0_out: wp.array(dtype=wp.vec3),
 ):
@@ -183,18 +183,18 @@ def linesearch_iterative_init_p0_elliptic1(
   opt_impratio: float,
   # Data in:
   ncon_in: wp.array(dtype=int),
-  contact_friction_in: wp.array(dtype=wp.vec5),
+  contact_friction_in: wp.array(dtype=types.vec5),
   contact_dim_in: wp.array(dtype=int),
   contact_efc_address_in: wp.array2d(dtype=int),
   contact_worldid_in: wp.array(dtype=int),
   efc_D_in: wp.array(dtype=float),
   efc_jv_in: wp.array(dtype=float),
   efc_quad_in: wp.array(dtype=wp.vec3),
+  efc_done_in: wp.array(dtype=bool),
   efc_u_in: wp.array2d(dtype=float),
   efc_uu_in: wp.array(dtype=float),
   efc_uv_in: wp.array(dtype=float),
   efc_vv_in: wp.array(dtype=float),
-  efc_done_in: wp.array(dtype=bool),
   # Data out:
   efc_p0_out: wp.array(dtype=wp.vec3),
 ):
@@ -231,9 +231,9 @@ def linesearch_iterative_init_p0_elliptic1(
 @wp.kernel
 def linesearch_iterative_init_p0_pyramidal(
   # Data in:
-  nefc_in: wp.array(dtype=int),
   ne_in: wp.array(dtype=int),
   nf_in: wp.array(dtype=int),
+  nefc_in: wp.array(dtype=int),
   efc_worldid_in: wp.array(dtype=int),
   efc_Jaref_in: wp.array(dtype=float),
   efc_quad_in: wp.array(dtype=wp.vec3),
@@ -267,7 +267,7 @@ def linesearch_iterative_init_lo_gauss(
   efc_p0_in: wp.array(dtype=wp.vec3),
   # Data out:
   efc_lo_out: wp.array(dtype=wp.vec3),
-  efc_lo_alpha_out: wp.array(dtype=wp.float32),
+  efc_lo_alpha_out: wp.array(dtype=float),
 ):
   worldid = wp.tid()
 
@@ -283,17 +283,17 @@ def linesearch_iterative_init_lo_gauss(
 @wp.kernel
 def linesearch_iterative_init_lo_elliptic0(
   # Data in:
-  nefc_in: wp.array(dtype=int),
   ne_in: wp.array(dtype=int),
   nf_in: wp.array(dtype=int),
   nl_in: wp.array(dtype=int),
+  nefc_in: wp.array(dtype=int),
   efc_worldid_in: wp.array(dtype=int),
   efc_Jaref_in: wp.array(dtype=float),
   efc_jv_in: wp.array(dtype=float),
-  efc_condim_in: wp.array(dtype=int),
-  efc_lo_alpha_in: wp.array(dtype=wp.float32),
   efc_quad_in: wp.array(dtype=wp.vec3),
   efc_done_in: wp.array(dtype=bool),
+  efc_lo_alpha_in: wp.array(dtype=float),
+  efc_condim_in: wp.array(dtype=int),
   # Data out:
   efc_lo_out: wp.array(dtype=wp.vec3),
 ):
@@ -328,19 +328,19 @@ def linesearch_iterative_init_lo_elliptic1(
   opt_impratio: float,
   # Data in:
   ncon_in: wp.array(dtype=int),
-  contact_worldid_in: wp.array(dtype=int),
+  contact_friction_in: wp.array(dtype=types.vec5),
   contact_dim_in: wp.array(dtype=int),
   contact_efc_address_in: wp.array2d(dtype=int),
-  contact_friction_in: wp.array(dtype=wp.vec5),
+  contact_worldid_in: wp.array(dtype=int),
   efc_D_in: wp.array(dtype=float),
-  efc_lo_alpha_in: wp.array(dtype=wp.float32),
+  efc_jv_in: wp.array(dtype=float),
   efc_quad_in: wp.array(dtype=wp.vec3),
+  efc_done_in: wp.array(dtype=bool),
+  efc_lo_alpha_in: wp.array(dtype=float),
   efc_u_in: wp.array2d(dtype=float),
   efc_uu_in: wp.array(dtype=float),
   efc_uv_in: wp.array(dtype=float),
   efc_vv_in: wp.array(dtype=float),
-  efc_jv_in: wp.array(dtype=float),
-  efc_done_in: wp.array(dtype=bool),
   # Data out:
   efc_lo_out: wp.array(dtype=wp.vec3),
 ):
@@ -376,15 +376,15 @@ def linesearch_iterative_init_lo_elliptic1(
 @wp.kernel
 def linesearch_iterative_init_lo_pyramidal(
   # Data in:
-  nefc_in: wp.array(dtype=int),
   ne_in: wp.array(dtype=int),
   nf_in: wp.array(dtype=int),
+  nefc_in: wp.array(dtype=int),
+  efc_worldid_in: wp.array(dtype=int),
   efc_Jaref_in: wp.array(dtype=float),
   efc_jv_in: wp.array(dtype=float),
-  efc_lo_alpha_in: wp.array(dtype=wp.float32),
   efc_quad_in: wp.array(dtype=wp.vec3),
   efc_done_in: wp.array(dtype=bool),
-  efc_worldid_in: wp.array(dtype=int),
+  efc_lo_alpha_in: wp.array(dtype=float),
   # Data out:
   efc_lo_out: wp.array(dtype=wp.vec3),
 ):
@@ -412,12 +412,12 @@ def linesearch_iterative_init_bounds(
   efc_done_in: wp.array(dtype=bool),
   efc_p0_in: wp.array(dtype=wp.vec3),
   efc_lo_in: wp.array(dtype=wp.vec3),
-  efc_lo_alpha_in: wp.array(dtype=wp.float32),
+  efc_lo_alpha_in: wp.array(dtype=float),
   # Data out:
   efc_lo_out: wp.array(dtype=wp.vec3),
-  efc_lo_alpha_out: wp.array(dtype=wp.float32),
+  efc_lo_alpha_out: wp.array(dtype=float),
   efc_hi_out: wp.array(dtype=wp.vec3),
-  efc_hi_alpha_out: wp.array(dtype=wp.float32),
+  efc_hi_alpha_out: wp.array(dtype=float),
 ):
   worldid = wp.tid()
 
@@ -438,20 +438,20 @@ def linesearch_iterative_init_bounds(
 @wp.kernel
 def linesearch_iterative_next_alpha_gauss(
   # Data in:
-  efc_ls_done_in: wp.array(dtype=bool),
-  efc_done_in: wp.array(dtype=bool),
-  efc_lo_in: wp.array(dtype=wp.vec3),
-  efc_lo_alpha_in: wp.array(dtype=wp.float32),
-  efc_hi_in: wp.array(dtype=wp.vec3),
-  efc_hi_alpha_in: wp.array(dtype=wp.float32),
   efc_quad_gauss_in: wp.array(dtype=wp.vec3),
+  efc_done_in: wp.array(dtype=bool),
+  efc_ls_done_in: wp.array(dtype=bool),
+  efc_lo_in: wp.array(dtype=wp.vec3),
+  efc_lo_alpha_in: wp.array(dtype=float),
+  efc_hi_in: wp.array(dtype=wp.vec3),
+  efc_hi_alpha_in: wp.array(dtype=float),
   # Data out:
   efc_lo_next_out: wp.array(dtype=wp.vec3),
-  efc_lo_next_alpha_out: wp.array(dtype=wp.float32),
+  efc_lo_next_alpha_out: wp.array(dtype=float),
   efc_hi_next_out: wp.array(dtype=wp.vec3),
-  efc_hi_next_alpha_out: wp.array(dtype=wp.float32),
+  efc_hi_next_alpha_out: wp.array(dtype=float),
   efc_mid_out: wp.array(dtype=wp.vec3),
-  efc_mid_alpha_out: wp.array(dtype=wp.float32),
+  efc_mid_alpha_out: wp.array(dtype=float),
 ):
   worldid = wp.tid()
 
@@ -483,20 +483,20 @@ def linesearch_iterative_next_alpha_gauss(
 @wp.kernel
 def linesearch_iterative_next_quad_elliptic0(
   # Data in:
-  nefc_in: wp.array(dtype=int),
   ne_in: wp.array(dtype=int),
   nf_in: wp.array(dtype=int),
   nl_in: wp.array(dtype=int),
-  efc_ls_done_in: wp.array(dtype=bool),
-  efc_done_in: wp.array(dtype=bool),
+  nefc_in: wp.array(dtype=int),
+  efc_worldid_in: wp.array(dtype=int),
   efc_Jaref_in: wp.array(dtype=float),
   efc_jv_in: wp.array(dtype=float),
   efc_quad_in: wp.array(dtype=wp.vec3),
-  efc_lo_next_alpha_in: wp.array(dtype=wp.float32),
-  efc_hi_next_alpha_in: wp.array(dtype=wp.float32),
-  efc_mid_alpha_in: wp.array(dtype=wp.float32),
+  efc_done_in: wp.array(dtype=bool),
+  efc_ls_done_in: wp.array(dtype=bool),
+  efc_lo_next_alpha_in: wp.array(dtype=float),
+  efc_hi_next_alpha_in: wp.array(dtype=float),
+  efc_mid_alpha_in: wp.array(dtype=float),
   efc_condim_in: wp.array(dtype=int),
-  efc_worldid_in: wp.array(dtype=int),
   # Data out:
   efc_lo_next_out: wp.array(dtype=wp.vec3),
   efc_hi_next_out: wp.array(dtype=wp.vec3),
@@ -562,23 +562,21 @@ def linesearch_iterative_next_quad_elliptic1(
   opt_impratio: float,
   # Data in:
   ncon_in: wp.array(dtype=int),
-  contact_worldid_in: wp.array(dtype=int),
+  contact_friction_in: wp.array(dtype=types.vec5),
   contact_dim_in: wp.array(dtype=int),
   contact_efc_address_in: wp.array2d(dtype=int),
-  contact_friction_in: wp.array(dtype=wp.vec5),
-  efc_ls_done_in: wp.array(dtype=bool),
-  efc_done_in: wp.array(dtype=bool),
-  efc_Jaref_in: wp.array(dtype=float),
-  efc_jv_in: wp.array(dtype=float),
+  contact_worldid_in: wp.array(dtype=int),
   efc_D_in: wp.array(dtype=float),
+  efc_jv_in: wp.array(dtype=float),
+  efc_quad_in: wp.array(dtype=wp.vec3),
+  efc_done_in: wp.array(dtype=bool),
+  efc_lo_next_alpha_in: wp.array(dtype=float),
+  efc_hi_next_alpha_in: wp.array(dtype=float),
+  efc_mid_alpha_in: wp.array(dtype=float),
   efc_u_in: wp.array2d(dtype=float),
   efc_uu_in: wp.array(dtype=float),
   efc_uv_in: wp.array(dtype=float),
   efc_vv_in: wp.array(dtype=float),
-  efc_quad_in: wp.array(dtype=wp.vec3),
-  efc_lo_next_alpha_in: wp.array(dtype=wp.float32),
-  efc_hi_next_alpha_in: wp.array(dtype=wp.float32),
-  efc_mid_alpha_in: wp.array(dtype=wp.float32),
   # Data out:
   efc_lo_next_out: wp.array(dtype=wp.vec3),
   efc_hi_next_out: wp.array(dtype=wp.vec3),
@@ -624,18 +622,18 @@ def linesearch_iterative_next_quad_elliptic1(
 @wp.kernel
 def linesearch_iterative_next_quad_pyramidal(
   # Data in:
-  nefc_in: wp.array(dtype=int),
   ne_in: wp.array(dtype=int),
   nf_in: wp.array(dtype=int),
-  efc_ls_done_in: wp.array(dtype=bool),
-  efc_done_in: wp.array(dtype=bool),
+  nefc_in: wp.array(dtype=int),
+  efc_worldid_in: wp.array(dtype=int),
   efc_Jaref_in: wp.array(dtype=float),
   efc_jv_in: wp.array(dtype=float),
   efc_quad_in: wp.array(dtype=wp.vec3),
-  efc_lo_next_alpha_in: wp.array(dtype=wp.float32),
-  efc_hi_next_alpha_in: wp.array(dtype=wp.float32),
-  efc_mid_alpha_in: wp.array(dtype=wp.float32),
-  efc_worldid_in: wp.array(dtype=int),
+  efc_done_in: wp.array(dtype=bool),
+  efc_ls_done_in: wp.array(dtype=bool),
+  efc_lo_next_alpha_in: wp.array(dtype=float),
+  efc_hi_next_alpha_in: wp.array(dtype=float),
+  efc_mid_alpha_in: wp.array(dtype=float),
   # Data out:
   efc_lo_next_out: wp.array(dtype=wp.vec3),
   efc_hi_next_out: wp.array(dtype=wp.vec3),
@@ -676,27 +674,27 @@ def linesearch_iterative_next_quad_pyramidal(
 @wp.kernel
 def linesearch_iterative_swap(
   # Data in:
+  efc_gtol_in: wp.array(dtype=float),
   efc_done_in: wp.array(dtype=bool),
   efc_ls_done_in: wp.array(dtype=bool),
-  efc_gtol_in: wp.array(dtype=float),
-  efc_lo_in: wp.array(dtype=wp.vec3),
-  efc_lo_alpha_in: wp.array(dtype=wp.float32),
-  efc_hi_in: wp.array(dtype=wp.vec3),
-  efc_hi_alpha_in: wp.array(dtype=wp.float32),
-  efc_lo_next_in: wp.array(dtype=wp.vec3),
-  efc_lo_next_alpha_in: wp.array(dtype=wp.float32),
-  efc_hi_next_in: wp.array(dtype=wp.vec3),
-  efc_hi_next_alpha_in: wp.array(dtype=wp.float32),
-  efc_mid_in: wp.array(dtype=wp.vec3),
-  efc_mid_alpha_in: wp.array(dtype=wp.float32),
   efc_p0_in: wp.array(dtype=wp.vec3),
+  efc_lo_in: wp.array(dtype=wp.vec3),
+  efc_lo_alpha_in: wp.array(dtype=float),
+  efc_hi_in: wp.array(dtype=wp.vec3),
+  efc_hi_alpha_in: wp.array(dtype=float),
+  efc_lo_next_in: wp.array(dtype=wp.vec3),
+  efc_lo_next_alpha_in: wp.array(dtype=float),
+  efc_hi_next_in: wp.array(dtype=wp.vec3),
+  efc_hi_next_alpha_in: wp.array(dtype=float),
+  efc_mid_in: wp.array(dtype=wp.vec3),
+  efc_mid_alpha_in: wp.array(dtype=float),
   # Data out:
+  efc_alpha_out: wp.array(dtype=float),
   efc_ls_done_out: wp.array(dtype=bool),
-  efc_alpha_out: wp.array(dtype=wp.float32),
   efc_lo_out: wp.array(dtype=wp.vec3),
-  efc_lo_alpha_out: wp.array(dtype=wp.float32),
+  efc_lo_alpha_out: wp.array(dtype=float),
   efc_hi_out: wp.array(dtype=wp.vec3),
-  efc_hi_alpha_out: wp.array(dtype=wp.float32),
+  efc_hi_alpha_out: wp.array(dtype=float),
 ):
   worldid = wp.tid()
 
@@ -771,7 +769,7 @@ def _linesearch_iterative(m: types.Model, d: types.Data):
     linesearch_iterative_gtol,
     dim=(d.nworld,),
     inputs=[
-      m.nv, m.stat.meaninertia, m.opt.tolerance, m.opt.ls_tolerance, d.efc.search_dot,
+      m.nv, m.opt.tolerance, m.opt.ls_tolerance, m.stat.meaninertia, d.efc.search_dot,
       d.efc.done
     ],
     outputs=[d.efc.gtol])  # fmt: skip
@@ -790,8 +788,8 @@ def _linesearch_iterative(m: types.Model, d: types.Data):
       linesearch_iterative_init_p0_elliptic0,
       dim=(d.njmax,),
       inputs=[
-        d.nefc, d.ne, d.nf, d.nl, d.efc.worldid, d.efc.Jaref, d.efc.condim, d.efc.quad,
-        d.efc.done
+        d.ne, d.nf, d.nl, d.nefc, d.efc.worldid, d.efc.Jaref, d.efc.quad, d.efc.done,
+        d.efc.condim
       ],
       outputs=[d.efc.p0])  # fmt: skip
     wp.launch(
@@ -800,7 +798,7 @@ def _linesearch_iterative(m: types.Model, d: types.Data):
       inputs=[
         m.opt.impratio, d.ncon, d.contact.friction, d.contact.dim,
         d.contact.efc_address, d.contact.worldid, d.efc.D, d.efc.jv, d.efc.quad,
-        d.efc.u, d.efc.uu, d.efc.uv, d.efc.vv, d.efc.done
+        d.efc.done, d.efc.u, d.efc.uu, d.efc.uv, d.efc.vv
       ],
       outputs=[d.efc.p0])  # fmt: skip
   else:
@@ -808,7 +806,7 @@ def _linesearch_iterative(m: types.Model, d: types.Data):
       linesearch_iterative_init_p0_pyramidal,
       dim=(d.njmax,),
       inputs=[
-        d.nefc, d.ne, d.nf, d.efc.worldid, d.efc.Jaref, d.efc.quad, d.efc.done
+        d.ne, d.nf, d.nefc, d.efc.worldid, d.efc.Jaref, d.efc.quad, d.efc.done
       ], outputs=[d.efc.p0])  # fmt: skip
 
   wp.launch(
@@ -824,17 +822,17 @@ def _linesearch_iterative(m: types.Model, d: types.Data):
       linesearch_iterative_init_lo_elliptic0,
       dim=(d.njmax,),
       inputs=[
-        d.nefc, d.ne, d.nf, d.nl, d.efc.worldid, d.efc.Jaref, d.efc.jv, d.efc.condim,
-        d.efc.lo_alpha, d.efc.quad, d.efc.done
+        d.ne, d.nf, d.nl, d.nefc, d.efc.worldid, d.efc.Jaref, d.efc.jv, d.efc.quad,
+        d.efc.done, d.efc.lo_alpha, d.efc.condim
       ],
-      outputs=[d.efc.lo, d.efc.lo_alpha])  # fmt: skip
+      outputs=[d.efc.lo])  # fmt: skip
     wp.launch(
       linesearch_iterative_init_lo_elliptic1,
       dim=(d.nconmax),
       inputs=[
-        m.opt.impratio, d.ncon, d.contact.worldid, d.contact.dim, d.contact.efc_address,
-        d.contact.friction, d.efc.D, d.efc.lo_alpha, d.efc.quad, d.efc.u, d.efc.uu,
-        d.efc.uv, d.efc.vv, d.efc.jv, d.efc.done
+        m.opt.impratio, d.ncon, d.contact.friction, d.contact.dim,
+        d.contact.efc_address, d.contact.worldid, d.efc.D, d.efc.jv, d.efc.quad,
+        d.efc.done, d.efc.u, d.efc.uu, d.efc.uv, d.efc.vv
       ],
       outputs=[d.efc.lo])  # fmt: skip
   else:
@@ -842,8 +840,8 @@ def _linesearch_iterative(m: types.Model, d: types.Data):
       linesearch_iterative_init_lo_pyramidal,
       dim=(d.njmax,),
       inputs=[
-        d.nefc, d.ne, d.nf, d.efc.Jaref, d.efc.jv, d.efc.lo_alpha, d.efc.quad,
-        d.efc.done, d.efc.worldid
+        d.ne, d.nf, d.nefc, d.efc.worldid, d.efc.Jaref, d.efc.jv,
+        d.efc.quad, d.efc.done, d.efc.lo_alpha
       ],
       outputs=[d.efc.lo])  # fmt: skip
 
@@ -852,12 +850,8 @@ def _linesearch_iterative(m: types.Model, d: types.Data):
   wp.launch(
     linesearch_iterative_init_bounds,
     dim=(d.nworld,),
-    inputs=[
-      d.efc.done, d.efc.p0, d.efc.lo, d.efc.lo_alpha
-    ],
-    outputs=[
-      d.efc.lo, d.efc.lo_alpha, d.efc.hi, d.efc.hi_alpha
-    ])  # fmt: skip
+    inputs=[d.efc.done, d.efc.p0, d.efc.lo, d.efc.lo_alpha],
+    outputs=[d.efc.lo, d.efc.lo_alpha, d.efc.hi, d.efc.hi_alpha])  # fmt: skip
 
   for _ in range(m.opt.ls_iterations):
     # note: we always launch ls_iterations kernels, but the kernels may early exit if done is true
@@ -867,8 +861,8 @@ def _linesearch_iterative(m: types.Model, d: types.Data):
       linesearch_iterative_next_alpha_gauss,
       dim=(d.nworld,),
       inputs=[
-        d.efc.ls_done, d.efc.done, d.efc.lo, d.efc.lo_alpha, d.efc.hi, d.efc.hi_alpha,
-        d.efc.quad_gauss, d.efc.hi_alpha, d.efc.quad_gauss
+        d.efc.quad_gauss, d.efc.done, d.efc.ls_done, d.efc.lo, d.efc.lo_alpha, d.efc.hi,
+        d.efc.hi_alpha
       ],
       outputs=[
         d.efc.lo_next, d.efc.lo_next_alpha, d.efc.hi_next, d.efc.hi_next_alpha,
@@ -880,124 +874,175 @@ def _linesearch_iterative(m: types.Model, d: types.Data):
         linesearch_iterative_next_quad_elliptic0,
         dim=(d.njmax,),
         inputs=[
-          d.nefc, d.ne, d.nf, d.nl, d.efc.ls_done, d.efc.done, d.efc.Jaref, d.efc.jv,
-          d.efc.quad, d.efc.lo_next_alpha, d.efc.hi_next_alpha, d.efc.mid_alpha,
-          d.efc.condim, d.efc.worldid
+          d.ne, d.nf, d.nl, d.nefc, d.efc.worldid, d.efc.Jaref, d.efc.jv, d.efc.quad,
+          d.efc.done, d.efc.ls_done, d.efc.lo_next_alpha, d.efc.hi_next_alpha,
+          d.efc.mid_alpha, d.efc.condim
         ],
-        outputs=[
-          d.efc.lo_next, d.efc.hi_next, d.efc.mid
-        ])  # fmt: skip
+        outputs=[d.efc.lo_next, d.efc.hi_next, d.efc.mid])  # fmt: skip
       wp.launch(
         linesearch_iterative_next_quad_elliptic1,
         dim=(d.nconmax),
         inputs=[
-          m.opt.impratio, d.ncon, d.contact.worldid, d.contact.dim, d.contact.efc_address,
-          d.contact.friction, d.efc.ls_done, d.efc.done, d.efc.Jaref, d.efc.jv, d.efc.D,
-          d.efc.u, d.efc.uu, d.efc.uv, d.efc.vv, d.efc.quad, d.efc.lo_next_alpha,
-          d.efc.hi_next_alpha, d.efc.mid_alpha
+          m.opt.impratio, d.ncon, d.contact.friction, d.contact.dim,
+          d.contact.efc_address, d.contact.worldid, d.efc.D, d.efc.jv, d.efc.quad,
+          d.efc.done, d.efc.ls_done, d.efc.lo_next_alpha, d.efc.hi_next_alpha,
+          d.efc.mid_alpha, d.efc.u, d.efc.uu, d.efc.uv, d.efc.vv
         ],
-        outputs=[
-          d.efc.lo_next, d.efc.hi_next, d.efc.mid
-        ])  # fmt: skip
+        outputs=[d.efc.lo_next, d.efc.hi_next, d.efc.mid])  # fmt: skip
   else:
     wp.launch(
       linesearch_iterative_next_quad_pyramidal,
       dim=(d.njmax,),
       inputs=[
-        d.nefc, d.ne, d.nf, d.efc.ls_done, d.efc.done, d.efc.Jaref, d.efc.jv, d.efc.quad,
-        d.efc.lo_next_alpha, d.efc.hi_next_alpha, d.efc.mid_alpha, d.efc.worldid
+        d.ne, d.nf, d.nefc, d.efc.worldid, d.efc.Jaref, d.efc.jv, d.efc.quad,
+        d.efc.done, d.efc.ls_done, d.efc.lo_next_alpha, d.efc.hi_next_alpha,
+        d.efc.mid_alpha
       ],
-      outputs=[
-        d.efc.lo_next, d.efc.hi_next, d.efc.mid
-      ])  # fmt: skip
+      outputs=[d.efc.lo_next, d.efc.hi_next, d.efc.mid])  # fmt: skip
 
   wp.launch(
     linesearch_iterative_swap,
     dim=(d.nworld,),
     inputs=[
-      d.efc.done, d.efc.ls_done, d.efc.gtol, d.efc.lo, d.efc.lo_alpha, d.efc.hi,
-      d.efc.hi_alpha, d.efc.lo_next, d.efc.lo_next_alpha, d.efc.hi_next,
-      d.efc.hi_next_alpha, d.efc.mid, d.efc.mid_alpha, d.efc.p0
+      d.efc.gtol, d.efc.done, d.efc.ls_done, d.efc.p0, d.efc.lo, d.efc.lo_alpha,
+      d.efc.hi, d.efc.hi_alpha, d.efc.lo_next, d.efc.lo_next_alpha, d.efc.hi_next,
+      d.efc.hi_next_alpha, d.efc.mid, d.efc.mid_alpha
     ],
     outputs=[
-      d.efc.ls_done, d.efc.alpha, d.efc.lo, d.efc.lo_alpha, d.efc.hi, d.efc.hi_alpha
+      d.efc.alpha, d.efc.ls_done, d.efc.lo, d.efc.lo_alpha, d.efc.hi, d.efc.hi_alpha
     ])  # fmt: skip
 
 
+@wp.kernel
+def linesearch_parallel_quad_total(
+  # Data in:
+  efc_quad_gauss_in: wp.array(dtype=wp.vec3),
+  efc_done_in: wp.array(dtype=bool),
+  # Data out:
+  efc_quad_total_candidate_out: wp.array2d(dtype=wp.vec3),
+):
+  worldid, alphaid = wp.tid()
+
+  if efc_done_in[worldid]:
+    return
+
+  efc_quad_total_candidate_out[worldid, alphaid] = efc_quad_gauss_in[worldid]
+
+
+@wp.kernel
+def linesearch_parallel_quad_total_candidate(
+  # Data in:
+  nefc_in: wp.array(dtype=int),
+  efc_worldid_in: wp.array(dtype=int),
+  efc_Jaref_in: wp.array(dtype=float),
+  efc_jv_in: wp.array(dtype=float),
+  efc_quad_in: wp.array(dtype=wp.vec3),
+  efc_done_in: wp.array(dtype=bool),
+  # Data out:
+  efc_quad_total_candidate_out: wp.array2d(dtype=wp.vec3),
+):
+  efcid, alphaid = wp.tid()
+
+  if efcid >= nefc_in[0]:
+    return
+
+  worldid = efc_worldid_in[efcid]
+
+  if efc_done_in[worldid]:
+    return
+
+  Jaref = efc_Jaref_in[efcid]
+  jv = efc_jv_in[efcid]
+  quad = efc_quad_in[efcid]
+
+  alpha = alphaid / (m.nlsp - 1)
+
+  if (Jaref + alpha * jv) < 0.0 or (efcid < d.ne[0] + d.nf[0]):
+    wp.atomic_add(efc_quad_total_candidate_out, worldid, alphaid, quad)
+
+
+@wp.kernel
+def linesearch_parallel_cost_alpha(
+  # Model:
+  nlsp: int,
+  # Data in:
+  efc_done_in: wp.array(dtype=bool),
+  efc_quad_total_candidate_in: wp.array2d(dtype=wp.vec3),
+  # Data out:
+  efc_cost_candidate_out: wp.array2d(dtype=float),
+):
+  worldid, alphaid = wp.tid()
+
+  if efc_done_in[worldid]:
+    return
+
+  alpha = alphaid / (nlsp - 1)
+  alpha_sq = alpha * alpha
+  quad_total0 = efc_quad_total_candidate_in[worldid, alphaid][0]
+  quad_total1 = efc_quad_total_candidate_in[worldid, alphaid][1]
+  quad_total2 = efc_quad_total_candidate_in[worldid, alphaid][2]
+
+  efc_cost_candidate_out[worldid, alphaid] = (
+    alpha_sq * quad_total2 + alpha * quad_total1 + quad_total0
+  )
+
+
+@wp.kernel
+def linesearch_parallel_best_alpha(
+  # Model:
+  nlsp: int,
+  # Data in:
+  efc_done_in: wp.array(dtype=bool),
+  efc_cost_candidate_in: wp.array2d(dtype=float),
+  # Data out:
+  efc_alpha_out: wp.array(dtype=float),
+):
+  worldid = wp.tid()
+
+  if efc_done_in[worldid]:
+    return
+
+  # TODO(team): investigate alternatives to wp.argmin
+  bestid = wp.argmin(efc_cost_candidate_in[worldid])
+  efc_alpha_out[worldid] = bestid / (nlsp - 1)
+
+
 def _linesearch_parallel(m: types.Model, d: types.Data):
-  ITERATIONS = m.opt.iterations
-
-  @wp.kernel
-  def _quad_total(m: types.Model, d: types.Data):
-    # TODO(team): static m?
-    worldid, alphaid = wp.tid()
-
-    if ITERATIONS > 1:
-      if d.efc.done[worldid]:
-        return
-
-    d.efc.quad_total_candidate[worldid, alphaid] = d.efc.quad_gauss[worldid]
-
-  @kernel
-  def _quad_total_candidate(m: types.Model, d: types.Data):
-    # TODO(team): static m?
-    efcid, alphaid = wp.tid()
-
-    if efcid >= d.nefc[0]:
-      return
-
-    worldid = d.efc.worldid[efcid]
-
-    if ITERATIONS > 1:
-      if d.efc.done[worldid]:
-        return
-
-    Jaref = d.efc.Jaref[efcid]
-    jv = d.efc.jv[efcid]
-    quad = d.efc.quad[efcid]
-
-    alpha = alphaid / (m.nlsp - 1)
-
-    if (Jaref + alpha * jv) < 0.0 or (efcid < d.ne[0] + d.nf[0]):
-      wp.atomic_add(d.efc.quad_total_candidate[worldid], alphaid, quad)
-
-  @kernel
-  def _cost_alpha(m: types.Model, d: types.Data):
-    # TODO(team): static m?
-    worldid, alphaid = wp.tid()
-
-    if ITERATIONS > 1:
-      if d.efc.done[worldid]:
-        return
-
-    alpha = alphaid / (m.nlsp - 1)
-    alpha_sq = alpha * alpha
-    quad_total0 = d.efc.quad_total_candidate[worldid, alphaid][0]
-    quad_total1 = d.efc.quad_total_candidate[worldid, alphaid][1]
-    quad_total2 = d.efc.quad_total_candidate[worldid, alphaid][2]
-
-    d.efc.cost_candidate[worldid, alphaid] = (
-      alpha_sq * quad_total2 + alpha * quad_total1 + quad_total0
-    )
-
-  @kernel
-  def _best_alpha(d: types.Data):
-    worldid = wp.tid()
-
-    if wp.static(m.opt.iterations) > 1:
-      if d.efc.done[worldid]:
-        return
-
-    # TODO(team): investigate alternatives to wp.argmin
-    bestid = wp.argmin(d.efc.cost_candidate[worldid])
-    d.efc.alpha[worldid] = bestid / (m.nlsp - 1)
-
-  wp.launch(_quad_total, dim=(d.nworld, m.nlsp), inputs=[m, d])
-
-  wp.launch(_quad_total_candidate, dim=(d.njmax, m.nlsp), inputs=[m, d])
-
-  wp.launch(_cost_alpha, dim=(d.nworld, m.nlsp), inputs=[m, d])
-  wp.launch(_best_alpha, dim=(d.nworld), inputs=[d])
+  wp.launch(
+    linesearch_parallel_quad_total,
+    dim=(d.nworld, m.nlsp),
+    inputs=[d.efc.quad_gauss, d.efc.done],
+    outputs=[d.efc.quad_total_candidate],
+  )
+  wp.launch(
+    linesearch_parallel_quad_total_candidate,
+    dim=(d.njmax, m.nlsp),
+    inputs=[
+      d.nefc,
+      d.efc.worldid,
+      d.efc.Jaref,
+      d.efc.jv,
+      d.efc.quad,
+      d.efc.done,
+    ],
+    outputs=[d.efc.quad_total_candidate],
+  )
+  wp.launch(
+    linesearch_parallel_cost_alpha,
+    dim=(d.nworld, m.nlsp),
+    inputs=[
+      m.nlsp,
+      d.efc.done,
+      d.efc.quad_total_candidate,
+    ],
+    outputs=[d.efc.cost_candidate],
+  )
+  wp.launch(
+    linesearch_parallel_best_alpha,
+    dim=(d.nworld),
+    inputs=[m.nlsp, d.efc.done, d.efc.cost_candidate],
+    outputs=[d.efc.alpha],
+  )
 
 
 @event_scope
@@ -1047,7 +1092,6 @@ def _linesearch(m: types.Model, d: types.Data):
 
   @kernel
   def _init_quad_gauss(m: types.Model, d: types.Data):
-    # TODO(team): static m?
     worldid, dofid = wp.tid()
 
     if ITERATIONS > 1:
@@ -1557,7 +1601,6 @@ def _update_gradient(m: types.Model, d: types.Data):
 
     @kernel
     def _zero_h_lower(m: types.Model, d: types.Data):
-      # TODO(team): static m?
       worldid, elementid = wp.tid()
 
       if ITERATIONS > 1:
@@ -1570,7 +1613,6 @@ def _update_gradient(m: types.Model, d: types.Data):
 
     @kernel
     def _set_h_qM_lower_sparse(m: types.Model, d: types.Data):
-      # TODO(team): static m?
       worldid, elementid = wp.tid()
 
       if ITERATIONS > 1:
@@ -1585,7 +1627,6 @@ def _update_gradient(m: types.Model, d: types.Data):
 
     @kernel
     def _copy_lower_triangle(m: types.Model, d: types.Data):
-      # TODO(team): static m?
       worldid, elementid = wp.tid()
 
       if ITERATIONS > 1:

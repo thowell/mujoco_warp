@@ -18,7 +18,7 @@ import ast
 import dataclasses
 import logging
 import re
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 
 @dataclasses.dataclass
@@ -104,6 +104,10 @@ class InvalidWrite(Issue):
     return f'"{self.node.id}" invalid write: parameter is read-only'
 
 
+# TODO(team): add argument order analyzer.
+# this one is tricky because just verifying order does not tell you if the arguments
+# match the parameter signature.
+
 def _get_classes(src: str) -> Dict[str, List[Tuple[str, str]]]:
   """Return classes and fields and annotations."""
   ret = {}
@@ -169,11 +173,27 @@ def analyze(source: str, filename: str, type_source: str) -> List[Issue]:
 
   # get class fields and types for Model and Data
   type_classes = _get_classes(type_source)
-  field_source = {k: "Model" for k, _ in type_classes["Model"]}
-  field_source.update({k: "Data" for k, _ in type_classes["Data"]})
-  field_type = {k: v for k, v in type_classes["Model"] + type_classes["Data"]}
-  field_order = {k: i for i, (k, _) in enumerate(type_classes["Model"])}
-  field_order.update({k: i for i, (k, _) in enumerate(type_classes["Data"])})
+  field_info = {}
+
+  for field, typ in type_classes["Model"]:
+    if field == "opt":
+      for sfield, styp in type_classes["Option"]:
+        field_info[field + "_" + sfield] = ("Model", styp, len(field_info))
+    elif field == "stat":
+      for sfield, styp in type_classes["Statistic"]:
+        field_info[field + "_" + sfield] = ("Model", styp, len(field_info))
+    else:
+      field_info[field] = ("Model", typ, len(field_info))
+
+  for field, typ in type_classes["Data"]:
+    if field == "efc":
+      for sfield, styp in type_classes["Constraint"]:
+        field_info[field + "_" + sfield] = ("Data", styp, len(field_info))
+    elif field == "contact":
+      for sfield, styp in type_classes["Contact"]:
+        field_info[field + "_" + sfield] = ("Data", styp, len(field_info))
+    else:
+      field_info[field] = ("Data", typ, len(field_info))
 
   try:
     tree = ast.parse(source, filename=filename)
@@ -191,7 +211,7 @@ def analyze(source: str, filename: str, type_source: str) -> List[Issue]:
     is_kernel = False
     for d in node.decorator_list:
       decorator_name = ast.get_source_segment(source, d)
-      if decorator_name in ("kernel", "warp_util.kernel", "wp.kernel"):
+      if decorator_name in ("kernel", "warp_util.kernel", "wp.kernel", "wp.func"):
         is_kernel = True
         break
 
@@ -235,13 +255,14 @@ def analyze(source: str, filename: str, type_source: str) -> List[Issue]:
         continue
 
       param_type = ast.get_source_segment(source, param.annotation)
+      param_type = param_type.replace("types.", "")  # ignore types module prefix
       param_types[param_name] = param_type
       has_suffix = param_name.endswith("_in") or param_name.endswith("_out")
       field_name = param_name[: param_name.rfind("_")] if has_suffix else param_name
       param_out = param_name.endswith("_out")
-      param_source = field_source.get(field_name)
-      param_order = field_order.get(field_name, len(params_ordering))
-      expected_type = field_type.get(field_name)
+      param_source, expected_type, param_order = field_info.get(
+        field_name, (None, None, None)
+      )
 
       # if parameters are multi-line, parameters must be grouped by comments of the form
       # "{source} {in | out | ""}:" e.g. "Model:" or "Data in:" or "Out:"
@@ -255,8 +276,14 @@ def analyze(source: str, filename: str, type_source: str) -> List[Issue]:
 
       # paramater type must match field type (or generic types if no corresponding field)
       if expected_type is None:
-        expected_type = ("int", "float", "bool", "array3df", "array2df", "wp.vec3")
-        if param_type not in expected_type and not param_type.startswith("wp.array"):
+        expected_type = (
+          "int",
+          "float",
+          "bool",
+          "(wp\\.)?array[1-3]df?",
+          "(wp\\.)?vec[0-9][0-9]?f?",
+        )
+        if not any(re.fullmatch(t, param_type) for t in expected_type):
           issues.append(TypeMismatch(param, kernel, ", ".join(expected_type), None))
       elif param_type != expected_type:
         issues.append(TypeMismatch(param, kernel, expected_type, param_source))
@@ -268,6 +295,7 @@ def analyze(source: str, filename: str, type_source: str) -> List[Issue]:
         issues.append(InvalidSuffix(param, kernel, param_source))
 
       source_order = {"Model": 0, "Data": 1, None: 2}[param_source]
+      param_order = len(params_ordering) if param_order is None else param_order
       params_ordering.append((param_out, source_order, param_order, param_name))
 
     # parameters must follow a specified order:

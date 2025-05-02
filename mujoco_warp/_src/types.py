@@ -379,7 +379,7 @@ class Option:
   """
 
   timestep: float
-  impratio: wp.float32
+  impratio: float
   tolerance: float
   ls_tolerance: float
   gravity: wp.vec3
@@ -492,8 +492,8 @@ class Constraint:
   gtol: wp.array(dtype=float)
   mv: wp.array2d(dtype=float)
   jv: wp.array(dtype=float)
-  quad: wp.array(dtype=wp.vec3f)
-  quad_gauss: wp.array(dtype=wp.vec3f)
+  quad: wp.array(dtype=wp.vec3)
+  quad_gauss: wp.array(dtype=wp.vec3)
   h: wp.array3d(dtype=float)
   alpha: wp.array(dtype=float)
   prev_grad: wp.array2d(dtype=float)
@@ -516,7 +516,7 @@ class Constraint:
   mid: wp.array(dtype=wp.vec3)
   mid_alpha: wp.array(dtype=float)
   cost_candidate: wp.array2d(dtype=float)
-  quad_total_candidate: wp.array2d(dtype=wp.vec3f)
+  quad_total_candidate: wp.array2d(dtype=wp.vec3)
   # elliptic cone
   u: wp.array2d(dtype=float)
   uu: wp.array(dtype=float)
@@ -922,9 +922,9 @@ class Model:
   tendon_num: wp.array(dtype=int)
   tendon_limited: wp.array(dtype=int)
   tendon_limited_adr: wp.array(dtype=int)
-  tendon_solref_lim: wp.array(dtype=wp.vec2f)
+  tendon_solref_lim: wp.array(dtype=wp.vec2)
   tendon_solimp_lim: wp.array(dtype=vec5)
-  tendon_range: wp.array(dtype=wp.vec2f)
+  tendon_range: wp.array(dtype=wp.vec2)
   tendon_margin: wp.array(dtype=float)
   tendon_length0: wp.array(dtype=float)
   tendon_invweight0: wp.array(dtype=float)
@@ -973,12 +973,12 @@ class Contact:
   """
 
   dist: wp.array(dtype=float)
-  pos: wp.array(dtype=wp.vec3f)
-  frame: wp.array(dtype=wp.mat33f)
+  pos: wp.array(dtype=wp.vec3)
+  frame: wp.array(dtype=wp.mat33)
   includemargin: wp.array(dtype=float)
   friction: wp.array(dtype=vec5)
-  solref: wp.array(dtype=wp.vec2f)
-  solreffriction: wp.array(dtype=wp.vec2f)
+  solref: wp.array(dtype=wp.vec2)
+  solreffriction: wp.array(dtype=wp.vec2)
   solimp: wp.array(dtype=vec5)
   dim: wp.array(dtype=int)
   geom: wp.array(dtype=wp.vec2i)
