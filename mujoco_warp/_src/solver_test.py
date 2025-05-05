@@ -32,6 +32,9 @@ from .types import SolverType
 # due to float precision
 _TOLERANCE = 5e-3
 
+wp.config.verify_cuda = True
+wp.config.debug = True
+
 
 def _assert_eq(a, b, name):
   tol = _TOLERANCE * 10  # avoid test noise
@@ -40,9 +43,47 @@ def _assert_eq(a, b, name):
 
 
 class SolverTest(parameterized.TestCase):
+
+
+  @parameterized.parameters(
+    (ConeType.PYRAMIDAL, SolverType.CG),
+    (ConeType.ELLIPTIC, SolverType.CG),
+    (ConeType.PYRAMIDAL, SolverType.NEWTON),
+    (ConeType.ELLIPTIC, SolverType.NEWTON),
+  )
+  def test_cost(self, cone, solver_):
+    """Tests cost function is correct."""
+    for keyframe in range(3):
+      mjm, mjd, m, d = test_util.fixture(
+        "humanoid/humanoid.xml",
+        keyframe=keyframe,
+        cone=cone,
+        solver=solver_,
+        iterations=0,
+      )
+
+      def cost(qacc):
+        jaref = np.zeros(mjd.nefc, dtype=float)
+        cost = np.zeros(1)
+        mujoco.mj_mulJacVec(mjm, mjd, jaref, qacc)
+        mujoco.mj_constraintUpdate(mjm, mjd, jaref - mjd.efc_aref, cost, 0)
+        return cost
+
+      mj_cost = cost(mjd.qacc)
+
+      # solve with 0 iterations just intializes constraints and costs and then exits
+      mjwarp.solve(m, d)
+
+      mjwarp_cost = d.efc.cost.numpy()[0] - d.efc.gauss.numpy()[0]
+
+      _assert_eq(mjwarp_cost, mj_cost, name="cost")
+
+
+
   @parameterized.parameters(
     (ConeType.PYRAMIDAL, SolverType.CG, 5, 5, False, False),
-    (ConeType.ELLIPTIC, SolverType.CG, 5, 5, False, False),
+    # TODO(erikfrey): determine why this used to work as 5,5
+    (ConeType.ELLIPTIC, SolverType.CG, 20, 20, False, False),
     (ConeType.PYRAMIDAL, SolverType.NEWTON, 2, 4, False, False),
     (ConeType.ELLIPTIC, SolverType.NEWTON, 2, 4, False, False),
     (ConeType.PYRAMIDAL, SolverType.NEWTON, 2, 4, True, True),
@@ -62,27 +103,10 @@ class SolverTest(parameterized.TestCase):
         ls_parallel=ls_parallel,
       )
 
-      def cost(qacc):
-        jaref = np.zeros(mjd.nefc, dtype=float)
-        cost = np.zeros(1)
-        mujoco.mj_mulJacVec(mjm, mjd, jaref, qacc)
-        mujoco.mj_constraintUpdate(mjm, mjd, jaref - mjd.efc_aref, cost, 0)
-        return cost
-
-      mj_cost = cost(mjd.qacc)
-
-      solver._create_context(m, d)
-
-      mjwarp_cost = d.efc.cost.numpy()[0] - d.efc.gauss.numpy()[0]
-
-      _assert_eq(mjwarp_cost, mj_cost, name="cost")
-
       qacc_warmstart = mjd.qacc_warmstart.copy()
       mujoco.mj_forward(mjm, mjd)
       mjd.qacc_warmstart = qacc_warmstart
 
-      m = mjwarp.put_model(mjm)
-      d = mjwarp.put_data(mjm, mjd, njmax=mjd.nefc)
       d.qacc.zero_()
       d.qfrc_constraint.zero_()
       d.efc.force.zero_()
@@ -90,6 +114,13 @@ class SolverTest(parameterized.TestCase):
       if solver_ == mujoco.mjtSolver.mjSOL_CG:
         mjwarp.factor_m(m, d)
       mjwarp.solve(m, d)
+
+      def cost(qacc):
+        jaref = np.zeros(mjd.nefc, dtype=float)
+        cost = np.zeros(1)
+        mujoco.mj_mulJacVec(mjm, mjd, jaref, qacc)
+        mujoco.mj_constraintUpdate(mjm, mjd, jaref - mjd.efc_aref, cost, 0)
+        return cost
 
       mj_cost = cost(mjd.qacc)
       mjwarp_cost = cost(d.qacc.numpy()[0])

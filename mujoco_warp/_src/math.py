@@ -280,5 +280,5 @@ def closest_segment_to_segment_points(
 
 
 @wp.func
-def _safe_div(x: wp.float32, y: wp.float32) -> wp.float32:
+def safe_div(x: float, y: float) -> float:
   return x / wp.where(y != 0.0, y, types.MJ_MINVAL)

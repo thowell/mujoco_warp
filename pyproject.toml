@@ -59,6 +59,7 @@ Repository = "https://github.com/google-deepmind/mujoco_warp"
 Changelog = "https://mujoco.readthedocs.io/en/stable/changelog.html"
 
 [tool.ruff]
+line-length = 100
 indent-width = 2
 
 [tool.ruff.lint]
@@ -70,6 +71,14 @@ select = [
 [tool.ruff.lint.isort]
 force-single-line = true
 single-line-exclusions = ["typing"]
+
+[tool.ruff.format]
+docstring-code-format = true
+docstring-code-line-length = 88
+
+[tool.ruff.lint.pycodestyle]
+max-doc-length = 92
+max-line-length = 100
 
 [tool.setuptools.packages.find]
 include = ["mujoco_warp"]
