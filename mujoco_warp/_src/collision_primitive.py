@@ -1718,7 +1718,7 @@ def box_box(
             if (linesu_a[i, 2] + linesu_b[i][2] * c1) * innorm > margin:
               continue
 
-            points[n] = linesu_a[i] * 0.5 + c1 * linesu_b[i]
+            points[n] = linesu_a[i] * 0.5 + c1 * linesu_b[i] * 0.5
             points[n, q] += 0.5 * l
             points[n, 1 - q] += 0.5 * c2
             depth[n] = points[n, 2] * innorm * 2.0
@@ -1809,7 +1809,7 @@ def box_box(
 
     # Set up contact data for all points
     rw = box1.rot @ wp.transpose(rotmore)
-    normal = r @ rnorm
+    normal = rw @ rnorm
     frame = make_frame(wp.where(inv, -1.0, 1.0) * normal)
 
     coff = wp.atomic_add(d.ncon, 0, n)
