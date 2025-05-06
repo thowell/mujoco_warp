@@ -27,7 +27,7 @@ wp.config.enable_backward = False
 
 @wp.func
 def _update_efc_row(
-  # Model in:
+  # Model:
   opt_timestep: float,
   # In:
   refsafe: int,

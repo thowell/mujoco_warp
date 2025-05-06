@@ -18,7 +18,6 @@ import warp as wp
 from packaging import version
 
 from . import math
-
 from . import support
 from .types import MJ_MINVAL
 from .types import CamLightType
@@ -27,18 +26,17 @@ from .types import DisableBit
 from .types import JointType
 from .types import Model
 from .types import ObjType
+from .types import TileSet
 from .types import TrnType
 from .types import WrapType
-from .types import TileSet
 from .types import array2df
 from .types import array3df
+from .types import vec5
 from .types import vec10
 from .types import vec11
-from .types import vec5
 from .warp_util import event_scope
 from .warp_util import kernel
 from .warp_util import kernel as nested_kernel
-
 
 wp.set_module_options({"enable_backward": False})
 
@@ -1276,14 +1274,14 @@ def _cfrc_ext_contact(
 
   # contact force in world frame
   force = support.contact_force_fn(
-    contactid,
     opt_cone,
     ncon_in,
+    contact_frame_in,
+    contact_friction_in,
     contact_dim_in,
     contact_efc_address_in,
-    contact_friction_in,
-    contact_frame_in,
     efc_force_in,
+    contactid,
     to_world_frame=True,
   )
 
@@ -2004,9 +2002,9 @@ def _spatial_site_tendon(
         J = float(0.0)
 
         jacp1, _ = support.jac(
-          dof_bodyid,
           body_parentid,
           body_rootid,
+          dof_bodyid,
           subtree_com_in,
           cdof_in,
           pnt0,
@@ -2015,9 +2013,9 @@ def _spatial_site_tendon(
           worldid,
         )
         jacp2, _ = support.jac(
-          dof_bodyid,
           body_parentid,
           body_rootid,
+          dof_bodyid,
           subtree_com_in,
           cdof_in,
           pnt1,

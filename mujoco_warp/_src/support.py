@@ -21,8 +21,6 @@ from .types import ConeType
 from .types import Data
 from .types import Model
 from .types import TileSet
-from .types import array2df
-from .types import array3df
 from .types import vec5
 from .warp_util import event_scope
 from .warp_util import kernel as nested_kernel
@@ -34,13 +32,13 @@ wp.set_module_options({"enable_backward": False})
 def mul_m_sparse_diag(
   # Model:
   dof_Madr: wp.array(dtype=int),
-  # Data In:
+  # Data in:
   qM_in: wp.array3d(dtype=float),
   # In:
   vec: wp.array2d(dtype=float),
   skip: wp.array(dtype=bool),
   # Out:
-  res: wp.array(ndim=2, dtype=wp.float32),
+  res: wp.array2d(dtype=float),
 ):
   """Diagonal update for sparse matmul."""
   worldid, dofid = wp.tid()
@@ -57,13 +55,13 @@ def mul_m_sparse_ij(
   qM_mulm_i: wp.array(dtype=int),
   qM_mulm_j: wp.array(dtype=int),
   qM_madr_ij: wp.array(dtype=int),
-  # Data In:
+  # Data in:
   qM_in: wp.array3d(dtype=float),
   # In:
   vec: wp.array2d(dtype=float),
   skip: wp.array(dtype=bool),
   # Out:
-  res: wp.array(ndim=2, dtype=wp.float32),
+  res: wp.array2d(dtype=float),
 ):
   """Off-diagonal update for sparse matmul."""
   worldid, elementid = wp.tid()
@@ -167,16 +165,16 @@ def mul_m(
 def xfrc_accumulate_kernel(
   # Model:
   nbody: int,
-  dof_bodyid: wp.array(dtype=int),
   body_parentid: wp.array(dtype=int),
   body_rootid: wp.array(dtype=int),
-  # Data In:
-  cdof_in: wp.array2d(dtype=wp.spatial_vector),
+  dof_bodyid: wp.array(dtype=int),
+  # Data in:
+  xfrc_applied_in: wp.array2d(dtype=wp.spatial_vector),
   xipos_in: wp.array2d(dtype=wp.vec3),
   subtree_com_in: wp.array2d(dtype=wp.vec3),
-  xfrc_applied_in: wp.array2d(dtype=wp.spatial_vector),
+  cdof_in: wp.array2d(dtype=wp.spatial_vector),
   # Out:
-  qfrc: wp.array2d(dtype=float),
+  out: wp.array2d(dtype=float),
 ):
   """Accumulate applied forces on the subtree of a dof."""
   worldid, dofid = wp.tid()
@@ -201,7 +199,7 @@ def xfrc_accumulate_kernel(
       cross_term, wp.spatial_top(xfrc_applied)
     )
 
-  qfrc[worldid, dofid] += accumul
+  out[worldid, dofid] += accumul
 
 
 @event_scope
@@ -211,13 +209,13 @@ def xfrc_accumulate(m: Model, d: Data, qfrc: wp.array2d(dtype=float)):
     dim=(d.nworld, m.nv),
     inputs=[
       m.nbody,
-      m.dof_bodyid,
       m.body_parentid,
       m.body_rootid,
-      d.cdof,
+      m.dof_bodyid,
+      d.xfrc_applied,
       d.xipos,
       d.subtree_com,
-      d.xfrc_applied,
+      d.cdof,
     ],
     outputs=[qfrc],
   )
@@ -271,7 +269,7 @@ def any_different(v0: wp.vec3, v1: wp.vec3) -> wp.bool:
 
 @wp.func
 def _decode_pyramid(
-  pyramid: wp.array(dtype=wp.float32), efc_address: int, mu: vec5, condim: int
+  pyramid: wp.array(dtype=float), efc_address: int, mu: vec5, condim: int
 ) -> wp.spatial_vector:
   """Converts pyramid representation to contact force."""
   force = wp.spatial_vector()
@@ -292,37 +290,40 @@ def _decode_pyramid(
 
 @wp.func
 def contact_force_fn(
-  contact_id: int,
+  # Model:
   opt_cone: int,
-  ncon: wp.array(dtype=int),
-  contact_dim: wp.array(dtype=int),
-  contact_efc_address: wp.array2d(dtype=int),
-  contact_friction: wp.array(dtype=vec5),
-  contact_frame: wp.array(dtype=wp.mat33),
-  efc_force: wp.array(dtype=float),
+  # Data in:
+  ncon_in: wp.array(dtype=int),
+  contact_frame_in: wp.array(dtype=wp.mat33),
+  contact_friction_in: wp.array(dtype=vec5),
+  contact_dim_in: wp.array(dtype=int),
+  contact_efc_address_in: wp.array2d(dtype=int),
+  efc_force_in: wp.array(dtype=float),
+  # In:
+  contact_id: int,
   to_world_frame: bool,
 ) -> wp.spatial_vector:
   """Extract 6D force:torque for one contact, in contact frame by default."""
   force = wp.spatial_vector(0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
-  condim = contact_dim[contact_id]
-  efc_address = contact_efc_address[contact_id, 0]
+  condim = contact_dim_in[contact_id]
+  efc_address = contact_efc_address_in[contact_id, 0]
 
-  if contact_id >= 0 and contact_id <= ncon[0] and efc_address >= 0:
+  if contact_id >= 0 and contact_id <= ncon_in[0] and efc_address >= 0:
     if opt_cone == int(ConeType.PYRAMIDAL.value):
       force = _decode_pyramid(
-        efc_force,
+        efc_force_in,
         efc_address,
-        contact_friction[contact_id],
+        contact_friction_in[contact_id],
         condim,
       )
     else:
       for i in range(condim):
-        force[i] = efc_force[contact_efc_address[contact_id, i]]
+        force[i] = efc_force_in[contact_efc_address_in[contact_id, i]]
 
   if to_world_frame:
     # Transform both top and bottom parts of spatial vector by the full contact frame matrix
-    t = wp.spatial_top(force) @ contact_frame[contact_id]
-    b = wp.spatial_bottom(force) @ contact_frame[contact_id]
+    t = wp.spatial_top(force) @ contact_frame_in[contact_id]
+    b = wp.spatial_bottom(force) @ contact_frame_in[contact_id]
     force = wp.spatial_vector(t, b)
 
   return force
@@ -332,35 +333,35 @@ def contact_force_fn(
 def contact_force_kernel(
   # Model:
   opt_cone: int,
-  # Data In:
-  ncon: wp.array(dtype=int),
-  contact_dim: wp.array(dtype=int),
-  contact_efc_address: wp.array2d(dtype=int),
-  contact_friction: wp.array(dtype=vec5),
-  contact_frame: wp.array(dtype=wp.mat33),
-  efc_force: wp.array(dtype=float),
+  # Data in:
+  ncon_in: wp.array(dtype=int),
+  contact_frame_in: wp.array(dtype=wp.mat33),
+  contact_friction_in: wp.array(dtype=vec5),
+  contact_dim_in: wp.array(dtype=int),
+  contact_efc_address_in: wp.array2d(dtype=int),
+  efc_force_in: wp.array(dtype=float),
   # In:
   contact_ids: wp.array(dtype=int),
   to_world_frame: bool,
   # Out:
-  force: wp.array(dtype=wp.spatial_vector),
+  out: wp.array(dtype=wp.spatial_vector),
 ):
   tid = wp.tid()
 
   contactid = contact_ids[tid]
 
-  if contactid >= ncon[0]:
+  if contactid >= ncon_in[0]:
     return
 
-  force[tid] = contact_force_fn(
-    contactid,
+  out[tid] = contact_force_fn(
     opt_cone,
-    ncon,
-    contact_dim,
-    contact_efc_address,
-    contact_friction,
-    contact_frame,
-    efc_force,
+    ncon_in,
+    contact_frame_in,
+    contact_friction_in,
+    contact_dim_in,
+    contact_efc_address_in,
+    efc_force_in,
+    contactid,
     to_world_frame,
   )
 
@@ -378,10 +379,10 @@ def contact_force(
     inputs=[
       m.opt.cone,
       d.ncon,
+      d.contact.frame,
+      d.contact.friction,
       d.contact.dim,
       d.contact.efc_address,
-      d.contact.friction,
-      d.contact.frame,
       d.efc.force,
       contact_ids,
       to_world_frame,
@@ -394,8 +395,7 @@ def contact_force(
 def transform_force(
   force: wp.vec3, torque: wp.vec3, offset: wp.vec3
 ) -> wp.spatial_vector:
-  torque -= wp.cross(offset, force)
-  return wp.spatial_vector(torque, force)
+  return wp.spatial_vector(torque - wp.cross(offset, force), force)
 
 
 @wp.func
@@ -407,15 +407,18 @@ def transform_force(frc: wp.spatial_vector, offset: wp.vec3) -> wp.spatial_vecto
 
 @wp.func
 def jac(
-  dof_bodyid: wp.array(dtype=int),
+  # Model:
   body_parentid: wp.array(dtype=int),
   body_rootid: wp.array(dtype=int),
+  dof_bodyid: wp.array(dtype=int),
+  # Data in:
   subtree_com_in: wp.array2d(dtype=wp.vec3),
   cdof_in: wp.array2d(dtype=wp.spatial_vector),
+  # In:
   point: wp.vec3,
-  bodyid: wp.int32,
-  dofid: wp.int32,
-  worldid: wp.int32,
+  bodyid: int,
+  dofid: int,
+  worldid: int,
 ) -> Tuple[wp.vec3, wp.vec3]:
   dof_bodyid_ = dof_bodyid[dofid]
   in_tree = int(dof_bodyid_ == 0)
