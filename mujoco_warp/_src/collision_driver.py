@@ -157,13 +157,12 @@ def _sap_broadphase(m: Model, d: Data, nsweep: int, filterparent: bool):
     # get geom indices and swap if necessary
     geom1 = d.sap_sort_index[worldid, i]
     geom2 = d.sap_sort_index[worldid, j]
-    if geom2 < geom1:
-      tmp = geom1
-      geom1 = geom2
-      geom2 = tmp
 
     # find linear index of (geom1, geom2) in upper triangular nxn_pairid
-    idx = _upper_tri_index(m.ngeom, geom1, geom2)
+    if geom2 < geom1:
+      idx = _upper_tri_index(m.ngeom, geom2, geom1)
+    else:
+      idx = _upper_tri_index(m.ngeom, geom1, geom2)
 
     if m.nxn_pairid[idx] < -1:
       worldgeomid += nsweep
