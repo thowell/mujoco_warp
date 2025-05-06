@@ -105,12 +105,7 @@ def _add_geom_pair(
 
 
 @wp.func
-def _binary_search(
-  values: wp.array(dtype=Any, ndim=1),
-  value: Any,
-  lower: int,
-  upper: int,
-) -> int:
+def _binary_search(values: wp.array(dtype=Any), value: Any, lower: int, upper: int) -> int:
   while lower < upper:
     mid = (lower + upper) >> 1
     if values[mid] > value:

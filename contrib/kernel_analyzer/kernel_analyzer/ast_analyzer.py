@@ -244,6 +244,8 @@ def analyze(source: str, filename: str, type_source: str) -> List[Issue]:
     params_multiline = any(a.lineno != args.args[0].lineno for a in args.args)
     param_groups = set()
     param_types = {}
+    param_outs = set()
+    param_reftypes = set()
 
     for param in args.args:
       param_name = param.arg
@@ -259,7 +261,11 @@ def analyze(source: str, filename: str, type_source: str) -> List[Issue]:
       param_types[param_name] = param_type
       has_suffix = param_name.endswith("_in") or param_name.endswith("_out")
       field_name = param_name[: param_name.rfind("_")] if has_suffix else param_name
-      param_out = param_name.endswith("_out")
+      param_out = param_name.endswith("_out") or param_name in ("res", "out")
+      if param_out:
+        param_outs.add(param_name)
+      if "array" in param_type:
+        param_reftypes.add(param_name)
       param_source, expected_type, param_order = field_info.get(
         field_name, (None, None, None)
       )
@@ -276,12 +282,16 @@ def analyze(source: str, filename: str, type_source: str) -> List[Issue]:
 
       # paramater type must match field type (or generic types if no corresponding field)
       if expected_type is None:
+        # TODO(team): it may be that we should not enforce this, too many types
         expected_type = (
+          "Any",
           "int",
           "float",
           "bool",
-          "(wp\\.)?array[1-3]df?",
-          "(wp\\.)?vec[0-9][0-9]?f?",
+          "(wp\\.)?spatial_vector",
+          "(wp\\.)?array([1-3]d)?\(dtype=(wp\\.)?[a-zA-Z_]+\)",
+          "(wp\\.)?vec[0-9][0-9]?f?i?",
+          "(wp\\.)?mat[0-9][0-9]?f?i?",
         )
         if not any(re.fullmatch(t, param_type) for t in expected_type):
           issues.append(TypeMismatch(param, kernel, ", ".join(expected_type), None))
@@ -327,17 +337,17 @@ def analyze(source: str, filename: str, type_source: str) -> List[Issue]:
       if isinstance(sub_node, ast.Assign):
         for target in sub_node.targets:
           assignee = ast.get_source_segment(source, target)
-          if assignee in param_names and not assignee.endswith("_out"):
+          if assignee in param_names and assignee not in param_outs and assignee in param_reftypes:
             issues.append(InvalidWrite(target, kernel))
       # augmented assignments (+=, -=, etc)
       elif isinstance(sub_node, ast.AugAssign):
         assignee = ast.get_source_segment(source, sub_node.target)
-        if assignee in param_names and not assignee.endswith("_out"):
+        if assignee in param_names and assignee not in param_outs and assignee in param_reftypes:
           issues.append(InvalidWrite(sub_node.target, kernel))
       # in-place operations like a[i] = value
       elif isinstance(sub_node, ast.Subscript) and isinstance(sub_node.ctx, ast.Store):
         assignee = ast.get_source_segment(source, sub_node.value)
-        if assignee in param_names and not assignee.endswith("_out"):
+        if assignee in param_names and assignee not in param_outs and assignee in param_reftypes:
           issues.append(InvalidWrite(sub_node.value, kernel))
       # TODO: atomic_add, atomic_sub
 

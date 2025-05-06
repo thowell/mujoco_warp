@@ -13,6 +13,8 @@
 # limitations under the License.
 # ==============================================================================
 
+from typing import Tuple
+
 import warp as wp
 
 from .collision_primitive import Geom
@@ -449,7 +451,7 @@ def gjk_epa_pipeline(
     #    direction of eigenvectors of the variance of points of each polygon. If
     #    they do not intersect, the closest points of both polygons are found.
     if depth < -depth_extension:
-      return
+      return 0, mat3c()
 
     dir = orthonormal(normal)
     dir2 = wp.cross(normal, dir)
@@ -761,8 +763,9 @@ def gjk_epa_pipeline(
       geom_size,
       mesh_vertadr,
       mesh_vertnum,
-      geom_xpos_in[worldid],
-      geom_xmat_in[worldid],
+      geom_xpos_in,
+      geom_xmat_in,
+      worldid,
       g1,
     )
 
@@ -771,8 +774,9 @@ def gjk_epa_pipeline(
       geom_size,
       mesh_vertadr,
       mesh_vertnum,
-      geom_xpos_in[worldid],
-      geom_xmat_in[worldid],
+      geom_xpos_in,
+      geom_xmat_in,
+      worldid,
       g2,
     )
 

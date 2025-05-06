@@ -46,14 +46,15 @@ def _geom(
   mesh_vertadr: wp.array(dtype=int),
   mesh_vertnum: wp.array(dtype=int),
   # Data in:
-  geom_xpos_in: wp.array(dtype=wp.vec3),
-  geom_xmat_in: wp.array(dtype=wp.mat33),
+  geom_xpos_in: wp.array2d(dtype=wp.vec3),
+  geom_xmat_in: wp.array2d(dtype=wp.mat33),
   # In:
+  worldid: int,
   gid: int,
 ) -> Geom:
   geom = Geom()
-  geom.pos = geom_xpos_in[gid]
-  rot = geom_xmat_in[gid]
+  geom.pos = geom_xpos_in[worldid, gid]
+  rot = geom_xmat_in[worldid, gid]
   geom.rot = rot
   geom.size = geom_size[gid]
   geom.normal = wp.vec3(rot[0, 2], rot[1, 2], rot[2, 2])  # plane
@@ -1352,8 +1353,9 @@ def _primitive_narrowphase(
     geom_size,
     mesh_vertadr,
     mesh_vertnum,
-    geom_xpos_in[worldid],
-    geom_xmat_in[worldid],
+    geom_xpos_in,
+    geom_xmat_in,
+    worldid,
     g1,
   )
   geom2 = _geom(
@@ -1361,8 +1363,9 @@ def _primitive_narrowphase(
     geom_size,
     mesh_vertadr,
     mesh_vertnum,
-    geom_xpos_in[worldid],
-    geom_xmat_in[worldid],
+    geom_xpos_in,
+    geom_xmat_in,
+    worldid,
     g2,
   )
 

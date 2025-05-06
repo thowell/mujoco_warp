@@ -98,7 +98,7 @@ def mul_m_dense(tile: TileSet):
 
     if skip[worldid]:
       return
-
+    
     dofid = adr[nodeid]
     qM_tile = wp.tile_load(
       qM_in[worldid], shape=(TILE_SIZE, TILE_SIZE), offset=(dofid, dofid)
