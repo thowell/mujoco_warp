@@ -1600,8 +1600,10 @@ def box_box(
       for q in range(2):
         la = pts_lp[q] + wp.where(i < 2, 0.0, wp.where(i == 2, pts_cn1[q], pts_cn2[q]))
         lb = wp.where(i == 0 or i == 3, pts_cn1[q], pts_cn2[q])
-        lc = pts_lp[1-q] + wp.where(i < 2, 0.0, wp.where(i == 2, pts_cn1[1-q], pts_cn2[1-q]))
-        ld = wp.where(i == 0 or i == 3, pts_cn1[1-q], pts_cn2[1-q])
+        lc = pts_lp[1 - q] + wp.where(
+          i < 2, 0.0, wp.where(i == 2, pts_cn1[1 - q], pts_cn2[1 - q])
+        )
+        ld = wp.where(i == 0 or i == 3, pts_cn1[1 - q], pts_cn2[1 - q])
 
         # linesu_a and linesu_b (lines between corners) computed on the fly
         lua = axi_lp + wp.where(i < 2, wp.vec3(0.0), wp.where(i == 2, axi_cn1, axi_cn2))
@@ -1619,7 +1621,7 @@ def box_box(
             c2 = lc + ld * c1
             if wp.abs(c2) > s[1 - q]:
               continue
-            if (lua[2]+ lub[2] * c1) * innorm > margin:
+            if (lua[2] + lub[2] * c1) * innorm > margin:
               continue
 
             points[n] = lua * 0.5 + c1 * lub * 0.5
