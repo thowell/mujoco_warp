@@ -1265,29 +1265,29 @@ def compute_rotmore(face_idx: wp.int32) -> wp.mat33:
   rotmore = wp.mat33(0.0)
 
   if face_idx == 0:
-    rotmore[0, 2] = -1.0  # rotmore[2]
-    rotmore[1, 1] = +1.0  # rotmore[4]
-    rotmore[2, 0] = +1.0  # rotmore[6]
+    rotmore[0, 2] = -1.0
+    rotmore[1, 1] = +1.0
+    rotmore[2, 0] = +1.0
   elif face_idx == 1:
-    rotmore[0, 0] = +1.0  # rotmore[0]
-    rotmore[1, 2] = -1.0  # rotmore[5]
-    rotmore[2, 1] = +1.0  # rotmore[7]
+    rotmore[0, 0] = +1.0
+    rotmore[1, 2] = -1.0
+    rotmore[2, 1] = +1.0
   elif face_idx == 2:
-    rotmore[0, 0] = +1.0  # rotmore[0]
-    rotmore[1, 1] = +1.0  # rotmore[4]
-    rotmore[2, 2] = +1.0  # rotmore[8]
+    rotmore[0, 0] = +1.0
+    rotmore[1, 1] = +1.0
+    rotmore[2, 2] = +1.0
   elif face_idx == 3:
-    rotmore[0, 2] = +1.0  # rotmore[2]
-    rotmore[1, 1] = +1.0  # rotmore[4]
-    rotmore[2, 0] = -1.0  # rotmore[6]
+    rotmore[0, 2] = +1.0
+    rotmore[1, 1] = +1.0
+    rotmore[2, 0] = -1.0
   elif face_idx == 4:
-    rotmore[0, 0] = +1.0  # rotmore[0]
-    rotmore[1, 2] = +1.0  # rotmore[5]
-    rotmore[2, 1] = -1.0  # rotmore[7]
+    rotmore[0, 0] = +1.0
+    rotmore[1, 2] = +1.0
+    rotmore[2, 1] = -1.0
   elif face_idx == 5:
-    rotmore[0, 0] = -1.0  # rotmore[0]
-    rotmore[1, 1] = +1.0  # rotmore[4]
-    rotmore[2, 2] = -1.0  # rotmore[8]
+    rotmore[0, 0] = -1.0
+    rotmore[1, 1] = +1.0
+    rotmore[2, 2] = -1.0
 
   return rotmore
 
@@ -1315,13 +1315,8 @@ def box_box(
   rot21 = wp.transpose(box1.rot) @ box2.rot
   rot12 = wp.transpose(rot21)
 
-  rot21abs = wp.transpose(
-    wp.mat33(wp.abs(rot21[0]), wp.abs(rot21[1]), wp.abs(rot21[2]))
-  )
-
-  rot12abs = wp.transpose(
-    wp.mat33(wp.abs(rot12[0]), wp.abs(rot12[1]), wp.abs(rot12[2]))
-  )
+  rot21abs = wp.matrix_from_rows(wp.abs(rot21[0]), wp.abs(rot21[1]), wp.abs(rot21[2]))
+  rot12abs = wp.transpose(rot21abs)
 
   plen2 = rot21abs @ box2.size
   plen1 = rot12abs @ box1.size
@@ -1412,11 +1407,13 @@ def box_box(
   if axis_code == -1:
     return
 
+  points = mat83f()
+  max_con_pair = 8
+
   if axis_code < 12:
     # Handle face-vertex collision
     face_idx = axis_code % 6
     box_idx = axis_code / 6
-    # TODO(camevor): consider single rotmore calc, or using i0,i1,i2 and f0,f1,f2 as rotmore substitute
     rotmore = compute_rotmore(face_idx)
 
     r = rotmore @ wp.where(box_idx, rot12, rot21)
@@ -1453,11 +1450,6 @@ def box_box(
 
         dirs += 1
 
-    # Compute additional contact points
-    # compute the other box's corner points
-    # TODO(camevor) potentially unnecessary use of registers
-    # pts are now the corners of the other closest face
-
     k = dirs * dirs
 
     # Find potential contact points
@@ -1477,8 +1469,6 @@ def box_box(
 
       lines_a[3] = lp + cn2
       lines_b[3] = cn1
-
-    points = mat83f()
 
     n = wp.int32(0)
 
@@ -1520,24 +1510,15 @@ def box_box(
         u = (x * by - y * bx) * C
         v = (y * ax - x * ay) * C
 
-        if u <= 0 or v <= 0 or u >= 1 or v >= 1:
-          continue
+        if u > 0 and v > 0 and u < 1 and v < 1:
+          points[n] = wp.vec3(llx, lly, lp[2] + u * cn1[2] + v * cn2[2])
+          n += 1
 
-        points[n] = wp.vec3(llx, lly, lp[2] + u * cn1[2] + v * cn2[2])
-
-        n += 1
-
-    points[n] = lp  # TODO(camevor) consider doing this sooner or later
-    n += 1
-
-    for i in range(1, k):
+    for i in range(k):
       tmpv = lp + wp.float32(i & 1) * cn1 + wp.float32(i & 2) * cn2
-      if tmpv[0] <= -lx or tmpv[0] >= lx:
-        continue
-      if tmpv[1] <= -ly or tmpv[1] >= ly:
-        continue
-      points[n] = tmpv
-      n += 1
+      if tmpv[0] > -lx and tmpv[0] < lx and tmpv[1] > -ly and tmpv[1] < ly:
+        points[n] = tmpv
+        n += 1
 
     m = n
     n = wp.int32(0)
@@ -1556,8 +1537,6 @@ def box_box(
     pw = wp.where(box_idx, box2.pos, box1.pos)
 
     normal = wp.where(box_idx, -1.0, 1.0) * wp.transpose(rw)[2]
-
-    # TODO(camevor): explicit frame
     frame = make_frame(normal)
 
     coff = wp.atomic_add(d.ncon, 0, n)
@@ -1583,8 +1562,6 @@ def box_box(
       d.contact.solreffriction[cid] = solreffriction
       d.contact.solimp[cid] = solimp
 
-    # return
-
   else:
     # Handle edge-edge collision
     edge1 = (axis_code - 12) / 3
@@ -1598,14 +1575,10 @@ def box_box(
     pax2 = wp.int(2 - (edge1 & 2))
 
     if rot21abs[edge1, ax1] < rot21abs[edge1, ax2]:
-      ax_tmp = ax1
-      ax1 = ax2
-      ax2 = ax_tmp
+      ax1, ax2 = ax2, ax1
 
     if rot12abs[edge2, pax1] < rot12abs[edge2, pax2]:
-      pax_tmp = pax1
-      pax1 = pax2
-      pax2 = pax_tmp
+      pax1, pax2 = pax2, pax1
 
     rotmore = compute_rotmore(wp.where(cle1 & (1 << pax2), pax2, pax2 + 3))
 
@@ -1620,7 +1593,6 @@ def box_box(
     p[2] -= hz
 
     # Calculate closest box2 face
-    points = mat83f()
 
     points[0] = (
       p
@@ -1690,13 +1662,10 @@ def box_box(
     linesu_a[3] = axi_lp + axi_cn2
     linesu_b[3] = axi_cn1
 
-    k = 4
     n = wp.int32(0)
 
-    max_con_pair = 8
     depth = vec8f()
-
-    for i in range(k):
+    for i in range(4):
       for q in range(2):
         la = lines_a[i, q]
         lb = lines_b[i, q]
@@ -1809,8 +1778,8 @@ def box_box(
 
     # Set up contact data for all points
     rw = box1.rot @ wp.transpose(rotmore)
-    normal = rw @ rnorm
-    frame = make_frame(wp.where(inv, -1.0, 1.0) * normal)
+    normal = wp.where(inv, -1.0, 1.0) * rw @ rnorm
+    frame = make_frame(normal)
 
     coff = wp.atomic_add(d.ncon, 0, n)
 
