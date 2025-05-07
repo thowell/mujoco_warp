@@ -1451,44 +1451,27 @@ def box_box(
     k = dirs * dirs
 
     # Find potential contact points
-    lines_a = mat43f()
-    lines_b = mat43f()
-
-    if dirs:
-      lines_a[0] = lp
-      lines_b[0] = cn1
-
-    if dirs == 2:
-      lines_a[1] = lp
-      lines_b[1] = cn2
-
-      lines_a[2] = lp + cn1
-      lines_b[2] = cn2
-
-      lines_a[3] = lp + cn2
-      lines_b[3] = cn1
 
     n = wp.int32(0)
 
     for i in range(k):
       for q in range(2):
-        la = lines_a[i, q]
-        lb = lines_b[i, q]
-        lc = lines_a[i, 1 - q]
-        ld = lines_b[i, 1 - q]
+        # lines_a and lines_b (lines between corners) computed on the fly
+        lav = lp + wp.where(i < 2, wp.vec3(0.0), wp.where(i == 2, cn1, cn2))
+        lbv = wp.where(i == 0 or i == 3, cn1, cn2)
 
-        if wp.abs(lb) > MJ_MINVAL:
-          br = 1.0 / lb
+        if wp.abs(lbv[q]) > MJ_MINVAL:
+          br = 1.0 / lbv[q]
           for j in range(-1, 2, 2):
             l = ss[q] * wp.float32(j)
-            c1 = (l - la) * br
+            c1 = (l - lav[q]) * br
             if c1 < 0 or c1 > 1:
               continue
-            c2 = lc + ld * c1
+            c2 = lav[1 - q] + lbv[1 - q] * c1
             if wp.abs(c2) > ss[1 - q]:
               continue
 
-            points[n] = lines_a[i] + c1 * lines_b[i]
+            points[n] = lav + c1 * lbv
             n += 1
 
     if dirs == 2:
@@ -1611,39 +1594,18 @@ def box_box(
     pts_cn1 = points[1] - points[0]
     pts_cn2 = points[2] - points[0]
 
-    lines_a = mat43f()
-    lines_b = mat43f()
-    linesu_a = mat43f()
-    linesu_b = mat43f()
-
-    lines_a[0] = pts_lp
-    lines_b[0] = pts_cn1
-    linesu_a[0] = axi_lp
-    linesu_b[0] = axi_cn1
-
-    lines_a[1] = pts_lp
-    lines_b[1] = pts_cn2
-    linesu_a[1] = axi_lp
-    linesu_b[1] = axi_cn2
-
-    lines_a[2] = pts_lp + pts_cn1
-    lines_b[2] = pts_cn2
-    linesu_a[2] = axi_lp + axi_cn1
-    linesu_b[2] = axi_cn2
-
-    lines_a[3] = pts_lp + pts_cn2
-    lines_b[3] = pts_cn1
-    linesu_a[3] = axi_lp + axi_cn2
-    linesu_b[3] = axi_cn1
-
     n = wp.int32(0)
 
     for i in range(4):
       for q in range(2):
-        la = lines_a[i, q]
-        lb = lines_b[i, q]
-        lc = lines_a[i, 1 - q]
-        ld = lines_b[i, 1 - q]
+        la = pts_lp[q] + wp.where(i < 2, 0.0, wp.where(i == 2, pts_cn1[q], pts_cn2[q]))
+        lb = wp.where(i == 0 or i == 3, pts_cn1[q], pts_cn2[q])
+        lc = pts_lp[1-q] + wp.where(i < 2, 0.0, wp.where(i == 2, pts_cn1[1-q], pts_cn2[1-q]))
+        ld = wp.where(i == 0 or i == 3, pts_cn1[1-q], pts_cn2[1-q])
+
+        # linesu_a and linesu_b (lines between corners) computed on the fly
+        lua = axi_lp + wp.where(i < 2, wp.vec3(0.0), wp.where(i == 2, axi_cn1, axi_cn2))
+        lub = wp.where(i == 0 or i == 3, axi_cn1, axi_cn2)
 
         if wp.abs(lb) > MJ_MINVAL:
           br = 1.0 / lb
@@ -1657,10 +1619,10 @@ def box_box(
             c2 = lc + ld * c1
             if wp.abs(c2) > s[1 - q]:
               continue
-            if (linesu_a[i, 2] + linesu_b[i][2] * c1) * innorm > margin:
+            if (lua[2]+ lub[2] * c1) * innorm > margin:
               continue
 
-            points[n] = linesu_a[i] * 0.5 + c1 * linesu_b[i] * 0.5
+            points[n] = lua * 0.5 + c1 * lub * 0.5
             points[n, q] += 0.5 * l
             points[n, 1 - q] += 0.5 * c2
             depth[n] = points[n, 2] * innorm * 2.0
