@@ -1322,7 +1322,6 @@ def box_box(
   plen1 = rot12abs @ box1.size
 
   # Compute axis of maximum separation
-
   s_sum_3 = 3.0 * (box1.size + box2.size)
   separation = wp.float32(margin + s_sum_3[0] + s_sum_3[1] + s_sum_3[2])
   axis_code = wp.int32(-1)
@@ -1352,7 +1351,6 @@ def box_box(
   for i in range(3):
     for j in range(3):
       # Compute cross product of box edges (potential separating axis)
-
       if i == 0:
         cross_axis = wp.vec3(0.0, -rot12[j, 2], rot12[j, 1])
       elif i == 1:
@@ -1361,7 +1359,6 @@ def box_box(
         cross_axis = wp.vec3(-rot12[j, 1], rot12[j, 0], 0.0)
 
       cross_length = wp.length(cross_axis)
-
       if cross_length < MJ_MINVAL:
         continue
 
@@ -1384,7 +1381,6 @@ def box_box(
         return
 
       # Track minimum separation and which edge-edge pair it occurs on
-
       if c3 < separation * (1.0 - 1e-12):
         separation = c3
         # Determine which corners/edges are closest
@@ -1408,7 +1404,9 @@ def box_box(
     return
 
   points = mat83f()
+  depth = vec8f()
   max_con_pair = 8
+  # 8 contacts should suffice for most configurations
 
   if axis_code < 12:
     # Handle face-vertex collision
@@ -1530,37 +1528,13 @@ def box_box(
         points[n] = points[i]
 
       points[n, 2] *= 0.5
+      depth[n] = points[n, 2]
       n += 1
 
     # Set up contact frame
     rw = wp.where(box_idx, box2.rot, box1.rot) @ wp.transpose(rotmore)
     pw = wp.where(box_idx, box2.pos, box1.pos)
-
     normal = wp.where(box_idx, -1.0, 1.0) * wp.transpose(rw)[2]
-    frame = make_frame(normal)
-
-    coff = wp.atomic_add(d.ncon, 0, n)
-
-    for i in range(min(d.nconmax - coff, n)):
-      dist = points[i, 2]
-
-      # Transform contact point to world frame
-      points[i, 2] += hz
-      pos = rw @ points[i] + pw
-
-      cid = coff + i
-
-      d.contact.dist[cid] = dist
-      d.contact.pos[cid] = pos
-      d.contact.frame[cid] = frame
-      d.contact.geom[cid] = geoms
-      d.contact.worldid[cid] = worldid
-      d.contact.includemargin[cid] = margin - gap
-      d.contact.dim[cid] = condim
-      d.contact.friction[cid] = friction
-      d.contact.solref[cid] = solref
-      d.contact.solreffriction[cid] = solreffriction
-      d.contact.solimp[cid] = solimp
 
   else:
     # Handle edge-edge collision
@@ -1664,7 +1638,6 @@ def box_box(
 
     n = wp.int32(0)
 
-    depth = vec8f()
     for i in range(4):
       for q in range(2):
         la = lines_a[i, q]
@@ -1778,30 +1751,29 @@ def box_box(
 
     # Set up contact data for all points
     rw = box1.rot @ wp.transpose(rotmore)
+    pw = box1.pos
     normal = wp.where(inv, -1.0, 1.0) * rw @ rnorm
-    frame = make_frame(normal)
 
-    coff = wp.atomic_add(d.ncon, 0, n)
+  frame = make_frame(normal)
+  coff = wp.atomic_add(d.ncon, 0, n)
 
-    for i in range(min(d.nconmax - coff, n)):
-      dist = depth[i]
+  for i in range(min(d.nconmax - coff, n)):
+    points[i, 2] += hz
+    pos = rw @ points[i] + pw
 
-      points[i, 2] += hz
-      pos = rw @ points[i] + box1.pos
+    cid = coff + i
 
-      cid = coff + i
-
-      d.contact.dist[cid] = dist
-      d.contact.pos[cid] = pos
-      d.contact.frame[cid] = frame
-      d.contact.geom[cid] = geoms
-      d.contact.worldid[cid] = worldid
-      d.contact.includemargin[cid] = margin - gap
-      d.contact.dim[cid] = condim
-      d.contact.friction[cid] = friction
-      d.contact.solref[cid] = solref
-      d.contact.solreffriction[cid] = solreffriction
-      d.contact.solimp[cid] = solimp
+    d.contact.dist[cid] = depth[i]
+    d.contact.pos[cid] = pos
+    d.contact.frame[cid] = frame
+    d.contact.geom[cid] = geoms
+    d.contact.worldid[cid] = worldid
+    d.contact.includemargin[cid] = margin - gap
+    d.contact.dim[cid] = condim
+    d.contact.friction[cid] = friction
+    d.contact.solref[cid] = solref
+    d.contact.solreffriction[cid] = solreffriction
+    d.contact.solimp[cid] = solimp
 
 
 @wp.kernel
