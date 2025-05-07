@@ -21,8 +21,8 @@ from absl.testing import absltest
 from absl.testing import parameterized
 
 from . import util_misc
-from .types import vec10
 from .types import MJ_MINVAL
+from .types import vec10
 
 
 def _assert_eq(a, b, name):
