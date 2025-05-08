@@ -203,9 +203,9 @@ def _box_fluid(
 
     # torque
     scl = opt_density / 64.0
-    box0_pow4 = box0 * box0 * box0 * box0
-    box1_pow4 = box1 * box1 * box1 * box1
-    box2_pow4 = box2 * box2 * box2 * box2
+    box0_pow4 = wp.pow(box0, 4.0)
+    box1_pow4 = wp.pow(box1, 4.0)
+    box2_pow4 = wp.pow(box2, 4.0)
     lfrc_torque -= wp.vec3(
       box0 * (box1_pow4 + box2_pow4) * wp.abs(lvel_torque[0]) * lvel_torque[0] * scl,
       box1 * (box0_pow4 + box2_pow4) * wp.abs(lvel_torque[1]) * lvel_torque[1] * scl,
