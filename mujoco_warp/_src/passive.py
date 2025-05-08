@@ -126,8 +126,8 @@ def _gravity_force(
     wp.atomic_add(qfrc_gravcomp_out[worldid], dofid, wp.dot(jac, force))
 
 
-@wp.func
-def _inertia_box_fluid_model(
+@wp.kernel
+def _box_fluid(
   # Model:
   opt_wind: wp.vec3,
   opt_density: float,
@@ -140,11 +140,12 @@ def _inertia_box_fluid_model(
   ximat_in: wp.array2d(dtype=wp.mat33),
   subtree_com_in: wp.array2d(dtype=wp.vec3),
   cvel_in: wp.array2d(dtype=wp.spatial_vector),
-  # In:
-  worldid: int,
-  bodyid: int,
-) -> Tuple[wp.vec3f, wp.vec3f]:
+  # Data out:
+  fluid_applied_out: wp.array2d(dtype=wp.spatial_vector),
+):
   """Fluid forces based on inertia-box approximation."""
+
+  worldid, bodyid = wp.tid()
 
   # map from CoM-centered to local body-centered 6D velocity
 
@@ -212,45 +213,9 @@ def _inertia_box_fluid_model(
     )
 
   # rotate to global orientation: lfrc -> bfrc
-  bfrc_torque = rot @ lfrc_torque
-  bfrc_force = rot @ lfrc_force
+  torque = rot @ lfrc_torque
+  force = rot @ lfrc_force
 
-  # apply force and torque to body com
-  return bfrc_force, bfrc_torque
-
-
-@wp.kernel
-def _box_fluid(
-  # Model:
-  opt_wind: wp.vec3,
-  opt_density: float,
-  opt_viscosity: float,
-  body_rootid: wp.array(dtype=int),
-  body_mass: wp.array(dtype=float),
-  body_inertia: wp.array(dtype=wp.vec3),
-  # Data in:
-  xipos_in: wp.array2d(dtype=wp.vec3),
-  ximat_in: wp.array2d(dtype=wp.mat33),
-  subtree_com_in: wp.array2d(dtype=wp.vec3),
-  cvel_in: wp.array2d(dtype=wp.spatial_vector),
-  # Data out:
-  fluid_applied_out: wp.array2d(dtype=wp.spatial_vector),
-):
-  worldid, bodyid = wp.tid()
-  force, torque = _inertia_box_fluid_model(
-    opt_wind,
-    opt_density,
-    opt_viscosity,
-    body_rootid,
-    body_mass,
-    body_inertia,
-    xipos_in,
-    ximat_in,
-    subtree_com_in,
-    cvel_in,
-    worldid,
-    bodyid,
-  )
   fluid_applied_out[worldid, bodyid] = wp.spatial_vector(force, torque)
 
 
