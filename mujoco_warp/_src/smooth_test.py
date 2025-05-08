@@ -25,8 +25,6 @@ import mujoco_warp as mjwarp
 
 from . import test_util
 
-wp.config.verify_cuda = True
-
 # tolerance for difference between MuJoCo and MJWarp smooth calculations - mostly
 # due to float precision
 _TOLERANCE = 5e-5
@@ -43,7 +41,19 @@ class SmoothTest(parameterized.TestCase):
     """Tests kinematics."""
     _, mjd, m, d = test_util.fixture("pendula.xml")
 
-    for arr in (d.xanchor, d.xaxis, d.xquat, d.xpos):
+    for arr in (
+      d.xanchor,
+      d.xaxis,
+      d.xpos,
+      d.xquat,
+      d.xmat,
+      d.xipos,
+      d.ximat,
+      d.geom_xpos,
+      d.geom_xmat,
+      d.site_xpos,
+      d.site_xmat,
+    ):
       arr.zero_()
 
     mjwarp.kinematics(m, d)
@@ -158,12 +168,8 @@ class SmoothTest(parameterized.TestCase):
     """Tests rne_postconstraint."""
     mjm, mjd, m, d = test_util.fixture("pendula.xml", gravity=gravity)
 
-    mjd.xfrc_applied = np.random.uniform(
-      low=-0.01, high=0.01, size=mjd.xfrc_applied.shape
-    )
-    d.xfrc_applied = wp.array(
-      np.expand_dims(mjd.xfrc_applied, axis=0), dtype=wp.spatial_vector
-    )
+    mjd.xfrc_applied = np.random.uniform(low=-0.01, high=0.01, size=mjd.xfrc_applied.shape)
+    d.xfrc_applied = wp.array(np.expand_dims(mjd.xfrc_applied, axis=0), dtype=wp.spatial_vector)
 
     mujoco.mj_rnePostConstraint(mjm, mjd)
 
@@ -313,6 +319,8 @@ class SmoothTest(parameterized.TestCase):
       mjd.moment_colind,
     )
     _assert_eq(d.actuator_moment.numpy()[0], actuator_moment, "actuator_moment")
+
+  # TODO(team): test factor_solve_i
 
 
 if __name__ == "__main__":

@@ -39,6 +39,10 @@ pytest
 
 Should print out something like `XX passed in XX.XXs` at the end!
 
+If you plan to write Warp kernels for MJWarp, please use the `kernel_analyzer` vscode plugin located in `contrib/kernel_analyzer`.
+Please see the `README.md` there for details on how to install it and use it.  The same kernel analyzer will be run on any PR
+you open, so it's important to fix any issues it reports.
+
 # Compatibility
 
 The following features are implemented:
@@ -52,7 +56,7 @@ The following features are implemented:
 | Actuator Bias     | `NONE`, `AFFINE`                                                                                         |
 | Geom              | `PLANE`, `SPHERE`, `CAPSULE`, `ELLIPSOID`, `CYLINDER`, `BOX`, `MESH`                                     |
 | Constraint        | `FRICTION (JOINT)`, `LIMIT_BALL`, `LIMIT_JOINT`, `LIMIT_TENDON`, `CONTACT_PYRAMIDAL`, `CONTACT_ELLIPTIC` |
-| Equality          | `CONNECT`, `WELD`, `JOINT`                                                                               |
+| Equality          | `CONNECT`, `WELD`, `JOINT`, `TENDON`                                                                     |
 | Integrator        | `EULER`, `IMPLICITFAST`, `RK4`                                                                           |
 | Cone              | `PYRAMIDAL`, `ELLIPTIC`                                                                                  |
 | Condim            | 1, 3, 4, 6                                                                                               |
