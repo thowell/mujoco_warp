@@ -758,6 +758,7 @@ def linesearch_iterative_swap(
 
 def _linesearch_iterative(m: types.Model, d: types.Data):
   """Iterative linesearch."""
+  d.efc.ls_done.zero_()
 
   wp.launch(
     linesearch_iterative_gtol,
