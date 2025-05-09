@@ -213,7 +213,7 @@ def _flex_edges(
   # Data in:
   flexvert_xpos_in: wp.array2d(dtype=wp.vec3),
   # Data out:
-  flexedge_length_out: wp.array2d(dtype=wp.Float),
+  flexedge_length_out: wp.array2d(dtype=float),
 ):
   worldid, edgeid = wp.tid()
   f = 0  # TODO(quaglino): get f from edgeid
