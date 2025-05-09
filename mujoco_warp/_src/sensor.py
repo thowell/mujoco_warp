@@ -308,7 +308,6 @@ def _frame_quat(
   refid: int,
   reftype: int,
 ) -> wp.quat:
-  
   if objtype == int(ObjType.BODY.value):
     quat = math.mul_quat(xquat_in[worldid, objid], body_iquat[objid])
   elif objtype == int(ObjType.XBODY.value):
@@ -455,13 +454,29 @@ def _sensor_pos(
       axis = 1
     elif sensortype == int(SensorType.FRAMEZAXIS.value):
       axis = 2
-    vec3 = _frame_axis(ximat_in, xmat_in, geom_xmat_in, site_xmat_in,  cam_xmat_in, worldid, objid, objtype, refid, reftype, axis)
+    vec3 = _frame_axis(
+      ximat_in, xmat_in, geom_xmat_in, site_xmat_in, cam_xmat_in, worldid, objid, objtype, refid, reftype, axis
+    )
     _write_vector(sensor_datatype, sensor_adr, sensor_cutoff, sensorid, 3, vec3, out)
   elif sensortype == int(SensorType.FRAMEQUAT.value):
     objtype = sensor_objtype[sensorid]
     refid = sensor_refid[sensorid]
     reftype = sensor_reftype[sensorid]
-    quat = _frame_quat(body_iquat, geom_bodyid, geom_quat, site_bodyid, site_quat, cam_bodyid, cam_quat, xquat_in, worldid, objid, objtype, refid, reftype)
+    quat = _frame_quat(
+      body_iquat,
+      geom_bodyid,
+      geom_quat,
+      site_bodyid,
+      site_quat,
+      cam_bodyid,
+      cam_quat,
+      xquat_in,
+      worldid,
+      objid,
+      objtype,
+      refid,
+      reftype,
+    )
     _write_vector(sensor_datatype, sensor_adr, sensor_cutoff, sensorid, 4, quat, out)
   elif sensortype == int(SensorType.SUBTREECOM.value):
     vec3 = _subtree_com(subtree_com_in, worldid, objid)
