@@ -219,8 +219,8 @@ def _flex_edges(
   f = 0  # TODO(quaglino): get f from edgeid
   vbase = flex_vertadr[f]
   v = flex_edge[edgeid]
-  pos1 = flexvert_xpos_in[worldid, vbase+v[0]]
-  pos2 = flexvert_xpos_in[worldid, vbase+v[1]]
+  pos1 = flexvert_xpos_in[worldid, vbase + v[0]]
+  pos2 = flexvert_xpos_in[worldid, vbase + v[1]]
   vec = pos2 - pos1
   flexedge_length_out[worldid, edgeid] = wp.length(vec)
 
@@ -316,14 +316,14 @@ def kinematics(m: Model, d: Data):
 
   if m.nflex:
     wp.launch(
-      _flex_vertices, 
-      dim=(d.nworld, m.nflexvert), 
+      _flex_vertices,
+      dim=(d.nworld, m.nflexvert),
       inputs=[m.flex_vertbodyid, d.xpos],
       outputs=[d.flexvert_xpos],
     )
     wp.launch(
-      _flex_edges, 
-      dim=(d.nworld, m.nflexedge), 
+      _flex_edges,
+      dim=(d.nworld, m.nflexedge),
       inputs=[m.flex_vertadr, m.flex_edge, d.flexvert_xpos],
       outputs=[d.flexedge_length],
     )
