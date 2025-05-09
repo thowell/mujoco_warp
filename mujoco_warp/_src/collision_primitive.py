@@ -1875,9 +1875,7 @@ def box_box(
         for k in range(3):
           if k != i and (int(cross_axis[k] > 0) ^ int(box_dist < 0)):
             cle1 += 1 << k
-          if k != j and (
-            int(rot21[i, 3 - k - j] > 0) ^ int(box_dist < 0) ^ int((k - j + 3) % 3 == 1)
-          ):
+          if k != j and (int(rot21[i, 3 - k - j] > 0) ^ int(box_dist < 0) ^ int((k - j + 3) % 3 == 1)):
             cle2 += 1 << k
 
         axis_code = 12 + i * 3 + j
@@ -1980,8 +1978,8 @@ def box_box(
           points[n] = wp.vec3(llx, lly, lp[2] + u * cn1[2] + v * cn2[2])
           n += 1
 
-    for i in range(1<<dirs):
-      tmpv = lp + wp.float32(i & 1) * cn1 + wp.float32((i & 2)!=0) * cn2
+    for i in range(1 << dirs):
+      tmpv = lp + wp.float32(i & 1) * cn1 + wp.float32((i & 2) != 0) * cn2
       if tmpv[0] > -lx and tmpv[0] < lx and tmpv[1] > -ly and tmpv[1] < ly:
         points[n] = tmpv
         n += 1
@@ -2085,9 +2083,7 @@ def box_box(
       for q in range(2):
         la = pts_lp[q] + wp.where(i < 2, 0.0, wp.where(i == 2, pts_cn1[q], pts_cn2[q]))
         lb = wp.where(i == 0 or i == 3, pts_cn1[q], pts_cn2[q])
-        lc = pts_lp[1 - q] + wp.where(
-          i < 2, 0.0, wp.where(i == 2, pts_cn1[1 - q], pts_cn2[1 - q])
-        )
+        lc = pts_lp[1 - q] + wp.where(i < 2, 0.0, wp.where(i == 2, pts_cn1[1 - q], pts_cn2[1 - q]))
         ld = wp.where(i == 0 or i == 3, pts_cn1[1 - q], pts_cn2[1 - q])
 
         # linesu_a and linesu_b (lines between corners) computed on the fly
