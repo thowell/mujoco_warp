@@ -1731,7 +1731,7 @@ def capsule_box(
 
 
 @wp.func
-def compute_rotmore(face_idx: wp.int32) -> wp.mat33:
+def compute_rotmore(face_idx: int) -> wp.mat33:
   rotmore = wp.mat33(0.0)
 
   if face_idx == 0:
@@ -1764,10 +1764,12 @@ def compute_rotmore(face_idx: wp.int32) -> wp.mat33:
 
 @wp.func
 def box_box(
+  # Data in:
+  nconmax_in: int,
+  # In:
   box1: Geom,
   box2: Geom,
   worldid: int,
-  d: Data,
   margin: float,
   gap: float,
   condim: int,
@@ -1776,6 +1778,19 @@ def box_box(
   solreffriction: wp.vec2f,
   solimp: vec5,
   geoms: wp.vec2i,
+  # Data out:
+  ncon_out: wp.array(dtype=int),
+  contact_dist_out: wp.array(dtype=float),
+  contact_pos_out: wp.array(dtype=wp.vec3),
+  contact_frame_out: wp.array(dtype=wp.mat33),
+  contact_includemargin_out: wp.array(dtype=float),
+  contact_friction_out: wp.array(dtype=vec5),
+  contact_solref_out: wp.array(dtype=wp.vec2),
+  contact_solreffriction_out: wp.array(dtype=wp.vec2),
+  contact_solimp_out: wp.array(dtype=vec5),
+  contact_dim_out: wp.array(dtype=int),
+  contact_geom_out: wp.array(dtype=wp.vec2i),
+  contact_worldid_out: wp.array(dtype=int),
 ):
   # Compute transforms between box's frames
 
@@ -2189,25 +2204,25 @@ def box_box(
     normal = wp.where(inv, -1.0, 1.0) * rw @ rnorm
 
   frame = make_frame(normal)
-  coff = wp.atomic_add(d.ncon, 0, n)
+  coff = wp.atomic_add(ncon_out, 0, n)
 
-  for i in range(min(d.nconmax - coff, n)):
+  for i in range(min(nconmax_in - coff, n)):
     points[i, 2] += hz
     pos = rw @ points[i] + pw
 
     cid = coff + i
 
-    d.contact.dist[cid] = depth[i]
-    d.contact.pos[cid] = pos
-    d.contact.frame[cid] = frame
-    d.contact.geom[cid] = geoms
-    d.contact.worldid[cid] = worldid
-    d.contact.includemargin[cid] = margin - gap
-    d.contact.dim[cid] = condim
-    d.contact.friction[cid] = friction
-    d.contact.solref[cid] = solref
-    d.contact.solreffriction[cid] = solreffriction
-    d.contact.solimp[cid] = solimp
+    contact_dist_out[cid] = depth[i]
+    contact_pos_out[cid] = pos
+    contact_frame_out[cid] = frame
+    contact_geom_out[cid] = geoms
+    contact_worldid_out[cid] = worldid
+    contact_includemargin_out[cid] = margin - gap
+    contact_dim_out[cid] = condim
+    contact_friction_out[cid] = friction
+    contact_solref_out[cid] = solref
+    contact_solreffriction_out[cid] = solreffriction
+    contact_solimp_out[cid] = solimp
 
 
 @wp.kernel
@@ -2555,10 +2570,10 @@ def _primitive_narrowphase(
     )
   elif type1 == int(GeomType.BOX.value) and type2 == int(GeomType.BOX.value):
     box_box(
+      nconmax_in,
       geom1,
       geom2,
       worldid,
-      d,
       margin,
       gap,
       condim,
@@ -2567,6 +2582,18 @@ def _primitive_narrowphase(
       solreffriction,
       solimp,
       geoms,
+      ncon_out,
+      contact_dist_out,
+      contact_pos_out,
+      contact_frame_out,
+      contact_includemargin_out,
+      contact_friction_out,
+      contact_solref_out,
+      contact_solreffriction_out,
+      contact_solimp_out,
+      contact_dim_out,
+      contact_geom_out,
+      contact_worldid_out,
     )
   elif type1 == int(GeomType.CAPSULE.value) and type2 == int(GeomType.BOX.value):
     capsule_box(
