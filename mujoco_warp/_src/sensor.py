@@ -15,7 +15,6 @@
 
 from typing import Any, Tuple
 
-import numpy as np
 import warp as wp
 
 from . import math
