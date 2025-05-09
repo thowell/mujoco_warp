@@ -788,6 +788,11 @@ class Model:
   nsite: int
   ncam: int
   nlight: int
+  nflex: int
+  nflexvert: int
+  nflexedge: int
+  nflexelem: int
+  nflexelemdata: int
   nexclude: int
   neq: int
   nmocap: int
@@ -905,6 +910,18 @@ class Model:
   light_dir: wp.array(dtype=wp.vec3)
   light_poscom0: wp.array(dtype=wp.vec3)
   light_pos0: wp.array(dtype=wp.vec3)
+  flex_dim: wp.array(dtype=wp.int32, ndim=1)
+  flex_vertadr: wp.array(dtype=wp.int32, ndim=1)
+  flex_vertnum: wp.array(dtype=wp.int32, ndim=1)
+  flex_edgeadr: wp.array(dtype=wp.int32, ndim=1)
+  flex_elemedgeadr: wp.array(dtype=wp.int32, ndim=1)
+  flex_vertbodyid: wp.array(dtype=wp.int32, ndim=1)
+  flex_edge: wp.array(dtype=wp.vec2i, ndim=1)
+  flex_elem: wp.array(dtype=wp.int32, ndim=1)
+  flex_elemedge: wp.array(dtype=wp.int32, ndim=1)
+  flexedge_length0: wp.array(dtype=wp.float32, ndim=1)
+  flex_stiffness: wp.array(dtype=wp.float32, ndim=1)
+  flex_damping: wp.array(dtype=wp.float32, ndim=1)
   mesh_vertadr: wp.array(dtype=int)
   mesh_vertnum: wp.array(dtype=int)
   mesh_vert: wp.array(dtype=wp.vec3)
@@ -1178,6 +1195,9 @@ class Data:
   subtree_com: wp.array2d(dtype=wp.vec3)
   cdof: wp.array2d(dtype=wp.spatial_vector)
   cinert: wp.array2d(dtype=vec10)
+  flexvert_xpos: wp.array(dtype=wp.vec3, ndim=2)
+  flexedge_length: wp.array(dtype=wp.float32, ndim=2)
+  flexedge_velocity: wp.array(dtype=wp.float32, ndim=2)
   actuator_length: wp.array2d(dtype=float)
   actuator_moment: wp.array3d(dtype=float)
   crb: wp.array2d(dtype=vec10)
