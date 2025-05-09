@@ -163,17 +163,15 @@ def _qfrc_passive_gravcomp(
 
 @wp.kernel
 def _flex_elasticity(
-  # In:
-  timestep: float,
   # Model:
   body_dofadr: wp.array(dtype=int),
   flex_dim: wp.array(dtype=int),
   flex_vertadr: wp.array(dtype=int),
+  flex_edgeadr: wp.array(dtype=int),
+  flex_elemedgeadr: wp.array(dtype=int),
+  flex_vertbodyid: wp.array(dtype=int),
   flex_elem: wp.array(dtype=int),
   flex_elemedge: wp.array(dtype=int),
-  flex_elemedgeadr: wp.array(dtype=int),
-  flex_edgeadr: wp.array(dtype=int),
-  flex_vertbodyid: wp.array(dtype=int),
   flexedge_length0: wp.array(dtype=float),
   flex_stiffness: wp.array(dtype=float),
   flex_damping: wp.array(dtype=float),
@@ -181,6 +179,8 @@ def _flex_elasticity(
   flexvert_xpos_in: wp.array2d(dtype=wp.vec3),
   flexedge_length_in: wp.array2d(dtype=float),
   flexedge_velocity_in: wp.array2d(dtype=float),
+  # In:
+  timestep: float,
   # Data out:
   qfrc_spring_out: wp.array2d(dtype=float),
 ):
@@ -278,21 +278,22 @@ def passive(m: Model, d: Data):
     _flex_elasticity, 
     dim=(d.nworld, m.nflexelem), 
     inputs=[
-      m.opt.timestep,
-      m.body_dofadr,
-      m.flex_dim,
-      m.flex_vertadr,
-      m.flex_elem,
-      m.flex_elemedge,
-      m.flex_elemedgeadr,
-      m.flex_edgeadr,
-      m.flex_vertbodyid,
-      m.flexedge_length0,
-      m.flex_stiffness,
-      m.flex_damping,
-      d.flexvert_xpos,
-      d.flexedge_length,
-      d.flexedge_velocity],
+      m.body_dofadr, 
+      m.flex_dim, 
+      m.flex_vertadr, 
+      m.flex_edgeadr, 
+      m.flex_elemedgeadr, 
+      m.flex_vertbodyid, 
+      m.flex_elem, 
+      m.flex_elemedge, 
+      m.flexedge_length0, 
+      m.flex_stiffness, 
+      m.flex_damping, 
+      d.flexvert_xpos, 
+      d.flexedge_length, 
+      d.flexedge_velocity, 
+      m.opt.timestep
+    ],
     outputs=[d.qfrc_spring],
   )
   wp.launch(

@@ -207,12 +207,12 @@ def _flex_vertices(
 
 @wp.kernel
 def _flex_edges(
-  # Model
+  # Model:
   flex_vertadr: wp.array(dtype=int),
   flex_edge: wp.array(dtype=wp.vec2i),
-  # Data in
+  # Data in:
   flexvert_xpos_in: wp.array2d(dtype=wp.vec3),
-  # Data out
+  # Data out:
   flexedge_length_out: wp.array2d(dtype=wp.Float),
 ):
   worldid, edgeid = wp.tid()
