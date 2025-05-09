@@ -163,8 +163,9 @@ def _qfrc_passive_gravcomp(
 
 @wp.kernel
 def _flex_elasticity(
-  # Model:
+  # In:
   timestep: float,
+  # Model:
   body_dofadr: wp.array(dtype=int),
   flex_dim: wp.array(dtype=int),
   flex_vertadr: wp.array(dtype=int),
@@ -177,11 +178,11 @@ def _flex_elasticity(
   flex_stiffness: wp.array(dtype=float),
   flex_damping: wp.array(dtype=float),
   # Data in:
-  flexvert_xpos: wp.array2d(dtype=wp.vec3),
-  flexedge_length: wp.array2d(dtype=float),
-  flexedge_velocity: wp.array2d(dtype=float),
+  flexvert_xpos_in: wp.array2d(dtype=wp.vec3),
+  flexedge_length_in: wp.array2d(dtype=float),
+  flexedge_velocity_in: wp.array2d(dtype=float),
   # Data out:
-  qfrc_spring: wp.array2d(dtype=float),
+  qfrc_spring_out: wp.array2d(dtype=float),
 ):
   worldid, t = wp.tid()
   f = 0  # TODO(quaglino): this should become a function of t
@@ -199,8 +200,8 @@ def _flex_elasticity(
   for e in range(nedge):
     vert0 = flex_elem[(dim+1)*t + edges[e, 0]]
     vert1 = flex_elem[(dim+1)*t + edges[e, 1]]
-    xpos0 = flexvert_xpos[worldid, vert0]
-    xpos1 = flexvert_xpos[worldid, vert1]
+    xpos0 = flexvert_xpos_in[worldid, vert0]
+    xpos1 = flexvert_xpos_in[worldid, vert1]
     for i in range(3):
       gradient[e, 0 + i] = xpos0[i] - xpos1[i]
       gradient[e, 3 + i] = xpos1[i] - xpos0[i]
@@ -209,8 +210,8 @@ def _flex_elasticity(
   for e in range(nedge):
     idx = flex_elemedge[flex_elemedgeadr[f] + t*nedge + e]
     # TODO(quaglino): vel is zero since it is not updated by the forward kinematics
-    vel = flexedge_velocity[worldid, flex_edgeadr[f] + idx]
-    deformed = flexedge_length[worldid, flex_edgeadr[f] + idx]
+    vel = flexedge_velocity_in[worldid, flex_edgeadr[f] + idx]
+    deformed = flexedge_length_in[worldid, flex_edgeadr[f] + idx]
     reference = flexedge_length0[flex_edgeadr[f] + idx]
     previous = deformed - vel * timestep
     elongation[e] = deformed*deformed - reference*reference + (deformed*deformed - previous*previous) * kD
@@ -234,19 +235,19 @@ def _flex_elasticity(
     vert = flex_elem[(dim+1)*t + v]
     bodyid = flex_vertbodyid[flex_vertadr[f] + vert]
     for x in range(3):
-      qfrc_spring[worldid, body_dofadr[bodyid]+x] += force[v, x]
+      qfrc_spring_out[worldid, body_dofadr[bodyid]+x] += force[v, x]
 
 
 @wp.kernel
 def _combine_qfrc(
   # Data in
-  qfrc_spring: wp.array2d(dtype=float),
-  qfrc_damper: wp.array2d(dtype=float),
+  qfrc_spring_in: wp.array2d(dtype=float),
+  qfrc_damper_in: wp.array2d(dtype=float),
   # Data out
-  qfrc_passive: wp.array2d(dtype=float),
+  qfrc_passive_out: wp.array2d(dtype=float),
 ):
   worldid, dofid = wp.tid()
-  qfrc_passive[worldid, dofid] = qfrc_spring[worldid, dofid] + qfrc_damper[worldid, dofid]
+  qfrc_passive_out[worldid, dofid] = qfrc_spring_in[worldid, dofid] + qfrc_damper_in[worldid, dofid]
 
 
 @event_scope

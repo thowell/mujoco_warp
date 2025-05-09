@@ -197,12 +197,12 @@ def _flex_vertices(
   # Model:
   flex_vertbodyid: wp.array(dtype=int),
   # Data in:
-  xpos: wp.array2d(dtype=wp.vec3),
+  xpos_in: wp.array2d(dtype=wp.vec3),
   # Data out:
-  flexvert_xpos: wp.array2d(dtype=wp.vec3),
+  flexvert_xpos_out: wp.array2d(dtype=wp.vec3),
 ):
   worldid, vertid = wp.tid()
-  flexvert_xpos[worldid, vertid] = xpos[worldid, flex_vertbodyid[vertid]]
+  flexvert_xpos_out[worldid, vertid] = xpos_in[worldid, flex_vertbodyid[vertid]]
 
 
 @wp.kernel
@@ -211,18 +211,18 @@ def _flex_edges(
   flex_vertadr: wp.array(dtype=int),
   flex_edge: wp.array(dtype=wp.vec2i),
   # Data in
-  flexvert_xpos: wp.array2d(dtype=wp.vec3),
+  flexvert_xpos_in: wp.array2d(dtype=wp.vec3),
   # Data out
-  flexedge_length: wp.array2d(dtype=wp.Float),
+  flexedge_length_out: wp.array2d(dtype=wp.Float),
 ):
   worldid, edgeid = wp.tid()
   f = 0  # TODO(quaglino): get f from edgeid
   vbase = flex_vertadr[f]
   v = flex_edge[edgeid]
-  pos1 = flexvert_xpos[worldid, vbase+v[0]]
-  pos2 = flexvert_xpos[worldid, vbase+v[1]]
+  pos1 = flexvert_xpos_in[worldid, vbase+v[0]]
+  pos2 = flexvert_xpos_in[worldid, vbase+v[1]]
   vec = pos2 - pos1
-  flexedge_length[worldid, edgeid] = wp.length(vec)
+  flexedge_length_out[worldid, edgeid] = wp.length(vec)
 
 
 @wp.kernel
