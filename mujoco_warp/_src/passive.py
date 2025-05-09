@@ -240,10 +240,10 @@ def _flex_elasticity(
 
 @wp.kernel
 def _combine_qfrc(
-  # Data in
+  # Data in:
   qfrc_spring_in: wp.array2d(dtype=float),
   qfrc_damper_in: wp.array2d(dtype=float),
-  # Data out
+  # Data out:
   qfrc_passive_out: wp.array2d(dtype=float),
 ):
   worldid, dofid = wp.tid()
