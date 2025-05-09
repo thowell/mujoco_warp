@@ -193,6 +193,39 @@ def _site_local_to_global(
 
 
 @wp.kernel
+def _flex_vertices(
+  # Model:
+  flex_vertbodyid: wp.array(dtype=int),
+  # Data in:
+  xpos: wp.array2d(dtype=wp.vec3),
+  # Data out:
+  flexvert_xpos: wp.array2d(dtype=wp.vec3),
+):
+  worldid, vertid = wp.tid()
+  flexvert_xpos[worldid, vertid] = xpos[worldid, flex_vertbodyid[vertid]]
+
+
+@wp.kernel
+def _flex_edges(
+  # Model
+  flex_vertadr: wp.array(dtype=int),
+  flex_edge: wp.array(dtype=wp.vec2i),
+  # Data in
+  flexvert_xpos: wp.array2d(dtype=wp.vec3),
+  # Data out
+  flexedge_length: wp.array2d(dtype=wp.Float),
+):
+  worldid, edgeid = wp.tid()
+  f = 0  # TODO(quaglino): get f from edgeid
+  vbase = flex_vertadr[f]
+  v = flex_edge[edgeid]
+  pos1 = flexvert_xpos[worldid, vbase+v[0]]
+  pos2 = flexvert_xpos[worldid, vbase+v[1]]
+  vec = pos2 - pos1
+  flexedge_length[worldid, edgeid] = wp.length(vec)
+
+
+@wp.kernel
 def _mocap(
   # Model:
   body_ipos: wp.array(dtype=wp.vec3),
@@ -279,6 +312,20 @@ def kinematics(m: Model, d: Data):
       dim=(d.nworld, m.nsite),
       inputs=[m.site_bodyid, m.site_pos, m.site_quat, d.xpos, d.xquat],
       outputs=[d.site_xpos, d.site_xmat],
+    )
+
+  if m.nflex:
+    wp.launch(
+      _flex_vertices, 
+      dim=(d.nworld, m.nflexvert), 
+      inputs=[m.flex_vertbodyid, d.xpos],
+      outputs=[d.flexvert_xpos],
+    )
+    wp.launch(
+      _flex_edges, 
+      dim=(d.nworld, m.nflexedge), 
+      inputs=[m.flex_vertadr, m.flex_edge, d.flexvert_xpos],
+      outputs=[d.flexedge_length],
     )
 
 
