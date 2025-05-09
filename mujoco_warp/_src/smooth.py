@@ -208,12 +208,16 @@ def _flex_vertices(
 @wp.kernel
 def _flex_edges(
   # Model:
+  body_dofadr: wp.array(dtype=int),
   flex_vertadr: wp.array(dtype=int),
+  flex_vertbodyid: wp.array(dtype=int),
   flex_edge: wp.array(dtype=wp.vec2i),
   # Data in:
+  qvel_in: wp.array2d(dtype=float),
   flexvert_xpos_in: wp.array2d(dtype=wp.vec3),
   # Data out:
   flexedge_length_out: wp.array2d(dtype=float),
+  flexedge_velocity_out: wp.array2d(dtype=float),
 ):
   worldid, edgeid = wp.tid()
   f = 0  # TODO(quaglino): get f from edgeid
@@ -222,7 +226,14 @@ def _flex_edges(
   pos1 = flexvert_xpos_in[worldid, vbase + v[0]]
   pos2 = flexvert_xpos_in[worldid, vbase + v[1]]
   vec = pos2 - pos1
-  flexedge_length_out[worldid, edgeid] = wp.length(vec)
+  vecnorm = wp.length(vec)
+  flexedge_length_out[worldid, edgeid] = vecnorm
+  # TODO(quaglino): use Jacobian
+  i = body_dofadr[flex_vertbodyid[vbase + v[0]]]
+  j = body_dofadr[flex_vertbodyid[vbase + v[1]]]
+  vel1 = wp.vec3(qvel_in[worldid, i], qvel_in[worldid, i+1], qvel_in[worldid, i+2])
+  vel2 = wp.vec3(qvel_in[worldid, j], qvel_in[worldid, j+1], qvel_in[worldid, j+2])
+  flexedge_velocity_out[worldid, edgeid] = wp.dot(vel2 - vel1, vec) / vecnorm
 
 
 @wp.kernel
@@ -324,8 +335,8 @@ def kinematics(m: Model, d: Data):
     wp.launch(
       _flex_edges,
       dim=(d.nworld, m.nflexedge),
-      inputs=[m.flex_vertadr, m.flex_edge, d.flexvert_xpos],
-      outputs=[d.flexedge_length],
+      inputs=[m.body_dofadr, m.flex_vertadr, m.flex_vertbodyid, m.flex_edge, d.qvel, d.flexvert_xpos],
+      outputs=[d.flexedge_length, d.flexedge_velocity],
     )
 
 

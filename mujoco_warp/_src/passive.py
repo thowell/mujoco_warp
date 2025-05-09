@@ -207,7 +207,6 @@ def _flex_elasticity(
   elongation = wp.vec3(0.0, 0.0, 0.0)
   for e in range(nedge):
     idx = flex_elemedge[flex_elemedgeadr[f] + t * nedge + e]
-    # TODO(quaglino): vel is zero since it is not updated by the forward kinematics
     vel = flexedge_velocity_in[worldid, flex_edgeadr[f] + idx]
     deformed = flexedge_length_in[worldid, flex_edgeadr[f] + idx]
     reference = flexedge_length0[flex_edgeadr[f] + idx]
