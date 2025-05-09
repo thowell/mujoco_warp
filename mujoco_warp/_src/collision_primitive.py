@@ -1495,8 +1495,8 @@ def box_box(
           points[n] = wp.vec3(llx, lly, lp[2] + u * cn1[2] + v * cn2[2])
           n += 1
 
-    for i in range(k):
-      tmpv = lp + wp.float32(i & 1) * cn1 + wp.float32(i & 2) * cn2
+    for i in range(1<<dirs):
+      tmpv = lp + wp.float32(i & 1) * cn1 + wp.float32((i & 2)!=0) * cn2
       if tmpv[0] > -lx and tmpv[0] < lx and tmpv[1] > -ly and tmpv[1] < ly:
         points[n] = tmpv
         n += 1
