@@ -231,8 +231,8 @@ def _flex_edges(
   # TODO(quaglino): use Jacobian
   i = body_dofadr[flex_vertbodyid[vbase + v[0]]]
   j = body_dofadr[flex_vertbodyid[vbase + v[1]]]
-  vel1 = wp.vec3(qvel_in[worldid, i], qvel_in[worldid, i+1], qvel_in[worldid, i+2])
-  vel2 = wp.vec3(qvel_in[worldid, j], qvel_in[worldid, j+1], qvel_in[worldid, j+2])
+  vel1 = wp.vec3(qvel_in[worldid, i], qvel_in[worldid, i + 1], qvel_in[worldid, i + 2])
+  vel2 = wp.vec3(qvel_in[worldid, j], qvel_in[worldid, j + 1], qvel_in[worldid, j + 2])
   flexedge_velocity_out[worldid, edgeid] = wp.dot(vel2 - vel1, vec) / vecnorm
 
 
