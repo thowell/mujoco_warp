@@ -236,6 +236,18 @@ def _flex_elasticity(
       qfrc_spring[worldid, body_dofadr[bodyid]+x] += force[v, x]
 
 
+@wp.kernel
+def _combine_qfrc(
+  # Data in
+  qfrc_spring: wp.array2d(dtype=float),
+  qfrc_damper: wp.array2d(dtype=float),
+  # Data out
+  qfrc_passive: wp.array2d(dtype=float),
+):
+  worldid, dofid = wp.tid()
+  qfrc_passive[worldid, dofid] = qfrc_spring[worldid, dofid] + qfrc_damper[worldid, dofid]
+
+
 @event_scope
 def passive(m: Model, d: Data):
   """Adds all passive forces."""
@@ -280,6 +292,12 @@ def passive(m: Model, d: Data):
       d.flexedge_length,
       d.flexedge_velocity],
     outputs=[d.qfrc_spring],
+  )
+  wp.launch(
+    _combine_qfrc, 
+    dim=(d.nworld, m.nv), 
+    inputs=[d.qfrc_spring, d.qfrc_damper],
+    outputs=[d.qfrc_passive],
   )
   if m.ngravcomp and not (m.opt.disableflags & DisableBit.GRAVITY):
     d.qfrc_gravcomp.zero_()
