@@ -1731,7 +1731,7 @@ def capsule_box(
 
 
 @wp.func
-def compute_rotmore(face_idx: int) -> wp.mat33:
+def _compute_rotmore(face_idx: int) -> wp.mat33:
   rotmore = wp.mat33(0.0)
 
   if face_idx == 0:
@@ -1895,7 +1895,7 @@ def box_box(
     # Handle face-vertex collision
     face_idx = axis_code % 6
     box_idx = axis_code / 6
-    rotmore = compute_rotmore(face_idx)
+    rotmore = _compute_rotmore(face_idx)
 
     r = rotmore @ wp.where(box_idx, rot12, rot21)
     p = rotmore @ wp.where(box_idx, pos12, pos21)
@@ -2020,7 +2020,7 @@ def box_box(
     if rot12abs[edge2, pax1] < rot12abs[edge2, pax2]:
       pax1, pax2 = pax2, pax1
 
-    rotmore = compute_rotmore(wp.where(cle1 & (1 << pax2), pax2, pax2 + 3))
+    rotmore = _compute_rotmore(wp.where(cle1 & (1 << pax2), pax2, pax2 + 3))
 
     # Transform coordinates for edge-edge contact calculation
     p = rotmore @ pos21
