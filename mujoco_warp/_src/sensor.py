@@ -1301,18 +1301,10 @@ def _energy_pos_passive_joint(
   jnttype = jnt_type[jntid]
 
   if jnttype == int(JointType.FREE.value):
-    quat0 = wp.quat(
-      qpos_in[worldid, padr + 0],
-      qpos_in[worldid, padr + 1],
-      qpos_in[worldid, padr + 2],
-      qpos_in[worldid, padr + 3],
-    )
-    quat0 = wp.normalize(quat0)
-
     dif0 = wp.vec3(
-      quat0[0] - qpos_spring[padr + 0],
-      quat0[1] - qpos_spring[padr + 1],
-      quat0[2] - qpos_spring[padr + 2],
+      qpos_in[worldid, padr + 0] - qpos_spring[padr + 0],
+      qpos_in[worldid, padr + 1] - qpos_spring[padr + 1],
+      qpos_in[worldid, padr + 2] - qpos_spring[padr + 2],
     )
 
     # convert quaternion difference into angular "velocity"
