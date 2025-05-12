@@ -26,7 +26,6 @@ from .types import JointType
 from .types import Model
 from .types import Option
 from .warp_util import event_scope
-from .warp_util import kernel as nested_kernel
 
 
 @wp.kernel
@@ -133,7 +132,7 @@ def _box_fluid(opt: Option):
   opt_viscosity = opt.viscosity
   opt_density = opt.density
 
-  @nested_kernel
+  @wp.kernel
   def box_fluid(
     # Model:
     body_rootid: wp.array(dtype=int),
