@@ -128,17 +128,6 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
     tile_end = mjm.nv if i == len(tile_corners) - 1 else tile_corners[i + 1]
     tiles.setdefault(tile_end - tile_beg, []).append(tile_beg)
 
-  # Handle empty tiles case
-  if tiles:
-    qLD_tile = np.concatenate([tiles[sz] for sz in sorted(tiles.keys())])
-    tile_off = [0] + [len(tiles[sz]) for sz in sorted(tiles.keys())]
-    qLD_tileadr = np.cumsum(tile_off)[:-1]
-    qLD_tilesize = np.array(sorted(tiles.keys()))
-  else:
-    qLD_tile = np.array([], dtype=int)
-    qLD_tileadr = np.array([], dtype=int)
-    qLD_tilesize = np.array([], dtype=int)
-
   qM_tiles = tuple(types.TileSet(adr=wp.array(tiles[sz], dtype=int), size=sz) for sz in sorted(tiles.keys()))
 
   # subtree_mass is a precalculated array used in smooth
