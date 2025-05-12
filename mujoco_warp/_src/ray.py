@@ -355,7 +355,72 @@ def _ray_mesh(
 
 
 @wp.func
+def _ray_map(
+  # In:
+  pos: wp.vec3,
+  mat: wp.mat33,
+  pnt: wp.vec3,
+  vec: wp.vec3,
+) -> any:
+  """Maps ray to local geom frame coordinates.
+
+  Args:
+      pos: Position of geom frame
+      mat: Orientation of geom frame
+      pnt: Starting point of ray in world coordinates
+      vec: Direction of ray in world coordinates
+
+  Returns:
+      Tuple of (local_pnt, local_vec) mapped to geom frame
+  """
+  # Calculate difference vector
+  dif = pnt - pos
+
+  # Transform point and vector to local coordinates using transpose(mat)
+  local_pnt = wp.transpose(mat) @ dif
+  local_vec = wp.transpose(mat) @ vec
+
+  return local_pnt, local_vec
+
+
+@wp.func
 def _ray_geom(
+  # In:
+  pos: wp.vec3,  # Position of geom frame
+  mat: wp.mat33,  # Orientation of geom frame
+  size: wp.vec3,  # Size parameters of geom
+  pnt: wp.vec3,  # Starting point of ray in world coordinates
+  vec: wp.vec3,  # Direction of ray in world coordinates
+  geomtype: int,  # Type of geometry
+) -> float:
+  """Returns distance along ray to intersection with geom, or infinity if no intersection.
+
+  Matches MuJoCo's mju_rayGeom API for use with touch sensors.
+  Maps inputs to local coordinates before intersection testing.
+  """
+  # Map ray to local coordinates
+  local_pnt, local_vec = _ray_map(pos, mat, pnt, vec)
+
+  # Create DistanceWithId struct to reuse existing ray intersection functions
+  result = DistanceWithId(wp.inf, -1)
+
+  # Call appropriate intersection function based on geom type
+  if geomtype == int(GeomType.PLANE.value):
+    result = _ray_plane(size, local_pnt, local_vec, 0)
+  elif geomtype == int(GeomType.SPHERE.value):
+    result = _ray_sphere(size, local_pnt, local_vec, 0)
+  elif geomtype == int(GeomType.CAPSULE.value):
+    result = _ray_capsule(size, local_pnt, local_vec, 0)
+  elif geomtype == int(GeomType.ELLIPSOID.value):
+    result = _ray_ellipsoid(size, local_pnt, local_vec, 0)
+  elif geomtype == int(GeomType.BOX.value):
+    result = _ray_box(size, local_pnt, local_vec, 0)
+
+  return result.dist
+
+
+@wp.func
+def _ray_geom_with_mesh(
   # Model:
   nmeshface: int,
   geom_type: wp.array(dtype=int),
@@ -503,7 +568,7 @@ def _ray_all_geom(
         local_vec = wp.transpose(rot) @ vec
 
         # Calculate intersection distance
-        result = _ray_geom(
+        result = _ray_geom_with_mesh(
           nmeshface,
           geom_type,
           geom_dataid,
