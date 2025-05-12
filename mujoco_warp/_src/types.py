@@ -355,6 +355,10 @@ class vec5f(wp.types.vector(length=5, dtype=float)):
   pass
 
 
+class vec6f(wp.types.vector(length=6, dtype=float)):
+  pass
+
+
 class vec10f(wp.types.vector(length=10, dtype=float)):
   pass
 
@@ -364,6 +368,7 @@ class vec11f(wp.types.vector(length=11, dtype=float)):
 
 
 vec5 = vec5f
+vec6 = vec6f
 vec10 = vec10f
 vec11 = vec11f
 array2df = wp.array2d(dtype=float)
@@ -583,8 +588,10 @@ class Model:
     nwrap: number of wrap objects in all tendon paths        ()
     nsensor: number of sensors                               ()
     nsensordata: number of elements in sensor data vector    ()
-    npair: number of predefined geom pairs                   ()
+    nmeshvert: number of vertices for all meshes             ()
+    nmeshface: number of faces for all meshes                ()
     nlsp: number of step sizes for parallel linsearch        ()
+    npair: number of predefined geom pairs                   ()
     opt: physics options
     stat: model statistics
     qpos0: qpos values at default pose                       (nq,)
@@ -659,6 +666,8 @@ class Model:
     geom_condim: contact dimensionality (1, 3, 4, 6)         (ngeom,)
     geom_bodyid: id of geom's body                           (ngeom,)
     geom_dataid: id of geom's mesh/hfield; -1: none          (ngeom,)
+    geom_group: geom group inclusion/exclusion mask          (ngeom,)
+    geom_matid: material id for rendering                    (ngeom,)
     geom_priority: geom contact priority                     (ngeom,)
     geom_solmix: mixing coef for solref/imp in geom pair     (ngeom,)
     geom_solref: constraint solver reference: contact        (ngeom, mjNREF)
@@ -671,6 +680,7 @@ class Model:
     geom_friction: friction for (slide, spin, roll)          (ngeom, 3)
     geom_margin: detect contact if dist<margin               (ngeom,)
     geom_gap: include in solver if dist<margin-gap           (ngeom,)
+    geom_rgba: rgba when material is omitted                  (ngeom, 4)
     site_bodyid: id of site's body                           (nsite,)
     site_pos: local position offset rel. to body             (nsite, 3)
     site_quat: local orientation offset rel. to body         (nsite, 4)
@@ -695,6 +705,8 @@ class Model:
     mesh_vertadr: first vertex address                       (nmesh,)
     mesh_vertnum: number of vertices                         (nmesh,)
     mesh_vert: vertex positions for all meshes               (nmeshvert, 3)
+    mesh_faceadr: first face address                         (nmesh,)
+    mesh_face: face indices for all meshes                   (nface, 3)
     eq_type: constraint type (mjtEq)                         (neq,)
     eq_obj1id: id of object 1                                (neq,)
     eq_obj2id: id of object 2                                (neq,)
@@ -776,6 +788,7 @@ class Model:
     sensor_subtree_vel: evaluate subtree_vel
     sensor_rne_postconstraint: evaluate rne_postconstraint
     mocap_bodyid: id of body for mocap                       (nmocap,)
+    mat_rgba: rgba                                           (nmat, 4)
   """
 
   nq: int
@@ -797,8 +810,10 @@ class Model:
   nwrap: int
   nsensor: int
   nsensordata: int
-  npair: int
+  nmeshvert: int
+  nmeshface: int
   nlsp: int  # warp only
+  npair: int
   opt: Option
   stat: Statistic
   qpos0: wp.array(dtype=float)
@@ -872,6 +887,8 @@ class Model:
   geom_condim: wp.array(dtype=int)
   geom_bodyid: wp.array(dtype=int)
   geom_dataid: wp.array(dtype=int)
+  geom_group: wp.array(dtype=int)
+  geom_matid: wp.array(dtype=int)
   geom_priority: wp.array(dtype=int)
   geom_solmix: wp.array(dtype=float)
   geom_solref: wp.array(dtype=wp.vec2)
@@ -884,6 +901,7 @@ class Model:
   geom_friction: wp.array(dtype=wp.vec3)
   geom_margin: wp.array(dtype=float)
   geom_gap: wp.array(dtype=float)
+  geom_rgba: wp.array(dtype=wp.vec4)
   site_bodyid: wp.array(dtype=int)
   site_pos: wp.array(dtype=wp.vec3)
   site_quat: wp.array(dtype=wp.quat)
@@ -908,6 +926,8 @@ class Model:
   mesh_vertadr: wp.array(dtype=int)
   mesh_vertnum: wp.array(dtype=int)
   mesh_vert: wp.array(dtype=wp.vec3)
+  mesh_faceadr: wp.array(dtype=int)
+  mesh_face: wp.array(dtype=wp.vec3i)
   eq_type: wp.array(dtype=int)
   eq_obj1id: wp.array(dtype=int)
   eq_obj2id: wp.array(dtype=int)
@@ -989,6 +1009,7 @@ class Model:
   sensor_subtree_vel: bool  # warp only
   sensor_rne_postconstraint: bool  # warp only
   mocap_bodyid: wp.array(dtype=int)  # warp only
+  mat_rgba: wp.array(dtype=wp.vec4)
 
 
 @dataclasses.dataclass
