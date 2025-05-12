@@ -355,10 +355,6 @@ class vec5f(wp.types.vector(length=5, dtype=float)):
   pass
 
 
-class vec6f(wp.types.vector(length=6, dtype=float)):
-  pass
-
-
 class vec10f(wp.types.vector(length=10, dtype=float)):
   pass
 
@@ -368,7 +364,6 @@ class vec11f(wp.types.vector(length=11, dtype=float)):
 
 
 vec5 = vec5f
-vec6 = vec6f
 vec10 = vec10f
 vec11 = vec11f
 array2df = wp.array2d(dtype=float)
@@ -588,8 +583,6 @@ class Model:
     nwrap: number of wrap objects in all tendon paths        ()
     nsensor: number of sensors                               ()
     nsensordata: number of elements in sensor data vector    ()
-    nmeshvert: number of vertices for all meshes             ()
-    nmeshface: number of faces for all meshes                ()
     npair: number of predefined geom pairs                   ()
     nlsp: number of step sizes for parallel linsearch        ()
     opt: physics options
@@ -666,8 +659,6 @@ class Model:
     geom_condim: contact dimensionality (1, 3, 4, 6)         (ngeom,)
     geom_bodyid: id of geom's body                           (ngeom,)
     geom_dataid: id of geom's mesh/hfield; -1: none          (ngeom,)
-    geom_group: geom group inclusion/exclusion mask          (ngeom,)
-    geom_matid: material id for rendering                    (ngeom,)
     geom_priority: geom contact priority                     (ngeom,)
     geom_solmix: mixing coef for solref/imp in geom pair     (ngeom,)
     geom_solref: constraint solver reference: contact        (ngeom, mjNREF)
@@ -680,7 +671,6 @@ class Model:
     geom_friction: friction for (slide, spin, roll)          (ngeom, 3)
     geom_margin: detect contact if dist<margin               (ngeom,)
     geom_gap: include in solver if dist<margin-gap           (ngeom,)
-    geom_rgba: rgba when material is omitted                  (ngeom, 4)
     site_bodyid: id of site's body                           (nsite,)
     site_pos: local position offset rel. to body             (nsite, 3)
     site_quat: local orientation offset rel. to body         (nsite, 4)
@@ -705,8 +695,6 @@ class Model:
     mesh_vertadr: first vertex address                       (nmesh,)
     mesh_vertnum: number of vertices                         (nmesh,)
     mesh_vert: vertex positions for all meshes               (nmeshvert, 3)
-    mesh_faceadr: first face address                         (nmesh,)
-    mesh_face: face indices for all meshes                   (nface, 3)
     eq_type: constraint type (mjtEq)                         (neq,)
     eq_obj1id: id of object 1                                (neq,)
     eq_obj2id: id of object 2                                (neq,)
@@ -752,7 +740,6 @@ class Model:
     pair_friction: tangent1, 2, spin, roll1, 2               (npair, 5)
     exclude_signature: body1 << 16 + body2                   (nexclude,)
     condim_max: maximum condim for geoms
-    mat_rgba: rgba                                           (nmat, 4)
     tendon_adr: address of first object in tendon's path     (ntendon,)
     tendon_num: number of objects in tendon's path           (ntendon,)
     tendon_limited: does tendon have length limits           (ntendon,)
@@ -810,38 +797,24 @@ class Model:
   nwrap: int
   nsensor: int
   nsensordata: int
-  nmeshvert: int
-  nmeshface: int
   npair: int
   nlsp: int  # warp only
   opt: Option
   stat: Statistic
-  qpos0: wp.array(dtype=wp.float32, ndim=1)
-  qpos_spring: wp.array(dtype=wp.float32, ndim=1)
-  body_tree: wp.array(dtype=wp.int32, ndim=1)  # warp only
-  body_treeadr: wp.array(dtype=wp.int32, ndim=1)  # warp only
-  actuator_moment_offset_nv: wp.array(dtype=wp.int32, ndim=1)  # warp only
-  actuator_moment_offset_nu: wp.array(dtype=wp.int32, ndim=1)  # warp only
-  actuator_moment_tileadr: wp.array(dtype=wp.int32, ndim=1)  # warp only
-  actuator_moment_tilesize_nv: wp.array(dtype=wp.int32, ndim=1)  # warp only
-  actuator_moment_tilesize_nu: wp.array(dtype=wp.int32, ndim=1)  # warp only
-  alpha_candidate: wp.array(dtype=wp.float32, ndim=1)  # warp only
+  qpos0: wp.array(dtype=float)
+  qpos_spring: wp.array(dtype=float)
   qM_fullm_i: wp.array(dtype=int)  # warp only
   qM_fullm_j: wp.array(dtype=int)  # warp only
   qM_mulm_i: wp.array(dtype=int)  # warp only
   qM_mulm_j: wp.array(dtype=int)  # warp only
   qM_madr_ij: wp.array(dtype=int)  # warp only
-  qLD_update_tree: wp.array(dtype=wp.vec3i, ndim=1)  # warp only
-  qLD_update_treeadr: wp.array(dtype=wp.int32, ndim=1)  # warp only
   qLD_updates: tuple[wp.array(dtype=wp.vec3i), ...]  # warp only
   M_rownnz: wp.array(dtype=int)
   M_rowadr: wp.array(dtype=int)
   M_colind: wp.array(dtype=int)
   mapM2M: wp.array(dtype=int)
-  qLD_tile: wp.array(dtype=wp.int32, ndim=1)  # warp only
-  qLD_tileadr: wp.array(dtype=wp.int32, ndim=1)  # warp only
-  qLD_tilesize: wp.array(dtype=wp.int32, ndim=1)  # warp only
   qM_tiles: tuple[TileSet, ...]
+  body_tree: tuple[wp.array(dtype=int), ...]
   body_parentid: wp.array(dtype=int)
   body_rootid: wp.array(dtype=int)
   body_weldid: wp.array(dtype=int)
@@ -860,7 +833,7 @@ class Model:
   body_subtreemass: wp.array(dtype=float)
   subtree_mass: wp.array(dtype=float)
   body_inertia: wp.array(dtype=wp.vec3)
-  body_invweight0: wp.array(dtype=wp.float32, ndim=2)
+  body_invweight0: wp.array2d(dtype=float)
   body_contype: wp.array(dtype=int)
   body_conaffinity: wp.array(dtype=int)
   body_gravcomp: wp.array(dtype=float)
@@ -875,7 +848,7 @@ class Model:
   jnt_pos: wp.array(dtype=wp.vec3)
   jnt_axis: wp.array(dtype=wp.vec3)
   jnt_stiffness: wp.array(dtype=float)
-  jnt_range: wp.array(dtype=wp.float32, ndim=2)
+  jnt_range: wp.array2d(dtype=float)
   jnt_actfrcrange: wp.array(dtype=wp.vec2)
   jnt_margin: wp.array(dtype=float)
   jnt_limited_slide_hinge_adr: wp.array(dtype=int)  # warp only
@@ -899,21 +872,18 @@ class Model:
   geom_condim: wp.array(dtype=int)
   geom_bodyid: wp.array(dtype=int)
   geom_dataid: wp.array(dtype=int)
-  geom_group: wp.array(dtype=wp.int32, ndim=1)
-  geom_matid: wp.array(dtype=wp.int32, ndim=1)
   geom_priority: wp.array(dtype=int)
   geom_solmix: wp.array(dtype=float)
   geom_solref: wp.array(dtype=wp.vec2)
   geom_solimp: wp.array(dtype=vec5)
   geom_size: wp.array(dtype=wp.vec3)
-  geom_aabb: wp.array(dtype=wp.vec3, ndim=2)
+  geom_aabb: wp.array2d(dtype=wp.vec3)
   geom_rbound: wp.array(dtype=float)
   geom_pos: wp.array(dtype=wp.vec3)
   geom_quat: wp.array(dtype=wp.quat)
   geom_friction: wp.array(dtype=wp.vec3)
   geom_margin: wp.array(dtype=float)
   geom_gap: wp.array(dtype=float)
-  geom_rgba: wp.array(dtype=wp.vec4, ndim=1)
   site_bodyid: wp.array(dtype=int)
   site_pos: wp.array(dtype=wp.vec3)
   site_quat: wp.array(dtype=wp.quat)
@@ -938,8 +908,6 @@ class Model:
   mesh_vertadr: wp.array(dtype=int)
   mesh_vertnum: wp.array(dtype=int)
   mesh_vert: wp.array(dtype=wp.vec3)
-  mesh_faceadr: wp.array(dtype=wp.int32, ndim=1)
-  mesh_face: wp.array(dtype=wp.vec3i, ndim=1)
   eq_type: wp.array(dtype=int)
   eq_obj1id: wp.array(dtype=int)
   eq_obj2id: wp.array(dtype=int)
@@ -954,7 +922,6 @@ class Model:
   eq_ten_adr: wp.array(dtype=int)
   actuator_moment_tiles_nv: tuple[TileSet, ...]
   actuator_moment_tiles_nu: tuple[TileSet, ...]
-  exclude_signature: wp.array(dtype=int)
   actuator_affine_bias_gain: bool  # warp only
   actuator_trntype: wp.array(dtype=int)
   actuator_dyntype: wp.array(dtype=int)
@@ -986,7 +953,6 @@ class Model:
   pair_friction: wp.array(dtype=vec5)
   exclude_signature: wp.array(dtype=int)
   condim_max: int  # warp only
-  mat_rgba: wp.array(dtype=wp.vec4)
   tendon_adr: wp.array(dtype=int)
   tendon_num: wp.array(dtype=int)
   tendon_limited: wp.array(dtype=int)
