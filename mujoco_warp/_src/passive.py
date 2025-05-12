@@ -125,108 +125,107 @@ def _gravity_force(
     wp.atomic_add(qfrc_gravcomp_out[worldid], dofid, wp.dot(jac, force))
 
 
-def _box_fluid(opt: Option):
-  opt_wind = opt.wind
-  opt_viscosity = opt.viscosity
-  opt_density = opt.density
+@wp.kernel
+def _box_fluid(
+  # Model:
+  opt_wind: wp.vec3,
+  opt_density: float,
+  opt_viscosity: float,
+  body_rootid: wp.array(dtype=int),
+  body_mass: wp.array(dtype=float),
+  body_inertia: wp.array(dtype=wp.vec3),
+  # Data in:
+  xipos_in: wp.array2d(dtype=wp.vec3),
+  ximat_in: wp.array2d(dtype=wp.mat33),
+  subtree_com_in: wp.array2d(dtype=wp.vec3),
+  cvel_in: wp.array2d(dtype=wp.spatial_vector),
+  # Data out:
+  fluid_applied_out: wp.array2d(dtype=wp.spatial_vector),
+):
+  """Fluid forces based on inertia-box approximation."""
 
-  @wp.kernel
-  def box_fluid(
-    # Model:
-    body_rootid: wp.array(dtype=int),
-    body_mass: wp.array(dtype=float),
-    body_inertia: wp.array(dtype=wp.vec3),
-    # Data in:
-    xipos_in: wp.array2d(dtype=wp.vec3),
-    ximat_in: wp.array2d(dtype=wp.mat33),
-    subtree_com_in: wp.array2d(dtype=wp.vec3),
-    cvel_in: wp.array2d(dtype=wp.spatial_vector),
-    # Data out:
-    fluid_applied_out: wp.array2d(dtype=wp.spatial_vector),
-  ):
-    """Fluid forces based on inertia-box approximation."""
+  worldid, bodyid = wp.tid()
 
-    worldid, bodyid = wp.tid()
+  # map from CoM-centered to local body-centered 6D velocity
 
-    # map from CoM-centered to local body-centered 6D velocity
+  # body-inertial
+  pos = xipos_in[worldid, bodyid]
+  rot = ximat_in[worldid, bodyid]
+  rotT = wp.transpose(rot)
 
-    # body-inertial
-    pos = xipos_in[worldid, bodyid]
-    rot = ximat_in[worldid, bodyid]
-    rotT = wp.transpose(rot)
+  # transform velocity
+  cvel = cvel_in[worldid, bodyid]
+  torque = wp.spatial_top(cvel)
+  force = wp.spatial_bottom(cvel)
+  subtree_com = subtree_com_in[worldid, body_rootid[bodyid]]
+  dif = pos - subtree_com
+  force -= wp.cross(dif, torque)
 
-    # transform velocity
-    cvel = cvel_in[worldid, bodyid]
-    torque = wp.spatial_top(cvel)
-    force = wp.spatial_bottom(cvel)
-    subtree_com = subtree_com_in[worldid, body_rootid[bodyid]]
-    dif = pos - subtree_com
-    force -= wp.cross(dif, torque)
+  lvel_torque = rotT @ torque
+  lvel_force = rotT @ force
 
-    lvel_torque = rotT @ torque
-    lvel_force = rotT @ force
+  if opt_wind[0] or opt_wind[1] or opt_wind[2]:
+    # subtract translational component from body velocity
+    lvel_force -= rotT @ opt_wind
 
-    if wp.static(opt_wind[0] or opt_wind[1] or opt_wind[2]):
-      # subtract translational component from body velocity
-      lvel_force -= rotT @ opt_wind
+  lfrc_torque = wp.vec3(0.0)
+  lfrc_force = wp.vec3(0.0)
 
-    lfrc_torque = wp.vec3(0.0)
-    lfrc_force = wp.vec3(0.0)
+  viscosity = opt_viscosity > 0.0
+  density = opt_density > 0.0
 
-    viscosity = wp.static(opt_viscosity > 0.0)
-    density = wp.static(opt_density > 0.0)
+  if viscosity or density:
+    inertia = body_inertia[bodyid]
+    mass = body_mass[bodyid]
+    scl = 6.0 / mass
+    box0 = wp.sqrt(wp.max(MJ_MINVAL, inertia[1] + inertia[2] - inertia[0]) * scl)
+    box1 = wp.sqrt(wp.max(MJ_MINVAL, inertia[0] + inertia[2] - inertia[1]) * scl)
+    box2 = wp.sqrt(wp.max(MJ_MINVAL, inertia[0] + inertia[1] - inertia[2]) * scl)
 
-    if wp.static(viscosity or density):
-      inertia = body_inertia[bodyid]
-      mass = body_mass[bodyid]
-      scl = 6.0 / mass
-      box0 = wp.sqrt(wp.max(MJ_MINVAL, inertia[1] + inertia[2] - inertia[0]) * scl)
-      box1 = wp.sqrt(wp.max(MJ_MINVAL, inertia[0] + inertia[2] - inertia[1]) * scl)
-      box2 = wp.sqrt(wp.max(MJ_MINVAL, inertia[0] + inertia[1] - inertia[2]) * scl)
+  if viscosity:
+    # diameter of sphere approximation
+    diam = (box0 + box1 + box2) / 3.0
 
-    if viscosity:
-      # diameter of sphere approximation
-      diam = (box0 + box1 + box2) * wp.static(1.0 / 3.0)
+    # angular viscosity
+    lfrc_torque = -lvel_torque * wp.pow(diam, 3.0) * wp.pi * opt_viscosity
 
-      # angular viscosity
-      lfrc_torque = -lvel_torque * wp.pow(diam, 3.0) * wp.static(wp.pi * opt_viscosity)
+    # linear viscosity
+    lfrc_force = -3.0 * lvel_force * diam * wp.pi * opt_viscosity
 
-      # linear viscosity
-      lfrc_force = -lvel_force * diam * wp.static(3.0 * wp.pi * opt_viscosity)
+  if density:
+    # force
+    lfrc_force -= wp.vec3(
+      0.5 * opt_density * box1 * box2 * wp.abs(lvel_force[0]) * lvel_force[0],
+      0.5 * opt_density * box0 * box2 * wp.abs(lvel_force[1]) * lvel_force[1],
+      0.5 * opt_density * box0 * box1 * wp.abs(lvel_force[2]) * lvel_force[2],
+    )
 
-    if density:
-      # force
-      lfrc_force -= wp.vec3(
-        wp.static(0.5 * opt_density) * box1 * box2 * wp.abs(lvel_force[0]) * lvel_force[0],
-        wp.static(0.5 * opt_density) * box0 * box2 * wp.abs(lvel_force[1]) * lvel_force[1],
-        wp.static(0.5 * opt_density) * box0 * box1 * wp.abs(lvel_force[2]) * lvel_force[2],
-      )
+    # torque
+    scl = opt_density / 64.0
+    box0_pow4 = wp.pow(box0, 4.0)
+    box1_pow4 = wp.pow(box1, 4.0)
+    box2_pow4 = wp.pow(box2, 4.0)
+    lfrc_torque -= wp.vec3(
+      box0 * (box1_pow4 + box2_pow4) * wp.abs(lvel_torque[0]) * lvel_torque[0] * scl,
+      box1 * (box0_pow4 + box2_pow4) * wp.abs(lvel_torque[1]) * lvel_torque[1] * scl,
+      box2 * (box0_pow4 + box1_pow4) * wp.abs(lvel_torque[2]) * lvel_torque[2] * scl,
+    )
 
-      # torque
-      scl = wp.static(opt_density / 64.0)
-      box0_pow4 = wp.pow(box0, 4.0)
-      box1_pow4 = wp.pow(box1, 4.0)
-      box2_pow4 = wp.pow(box2, 4.0)
-      lfrc_torque -= wp.vec3(
-        box0 * (box1_pow4 + box2_pow4) * wp.abs(lvel_torque[0]) * lvel_torque[0] * scl,
-        box1 * (box0_pow4 + box2_pow4) * wp.abs(lvel_torque[1]) * lvel_torque[1] * scl,
-        box2 * (box0_pow4 + box1_pow4) * wp.abs(lvel_torque[2]) * lvel_torque[2] * scl,
-      )
+  # rotate to global orientation: lfrc -> bfrc
+  torque = rot @ lfrc_torque
+  force = rot @ lfrc_force
 
-    # rotate to global orientation: lfrc -> bfrc
-    torque = rot @ lfrc_torque
-    force = rot @ lfrc_force
-
-    fluid_applied_out[worldid, bodyid] = wp.spatial_vector(force, torque)
-
-  return box_fluid
+  fluid_applied_out[worldid, bodyid] = wp.spatial_vector(force, torque)
 
 
 def _fluid(m: Model, d: Data):
   wp.launch(
-    _box_fluid(m.opt),
+    _box_fluid,
     dim=(d.nworld, m.nbody),
     inputs=[
+      m.opt.wind,
+      m.opt.density,
+      m.opt.viscosity,
       m.body_rootid,
       m.body_mass,
       m.body_inertia,
