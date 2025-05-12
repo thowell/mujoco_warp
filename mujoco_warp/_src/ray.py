@@ -114,9 +114,7 @@ def _ray_capsule(
 
   # top cap
   dif = pnt - wp.vec3(0.0, 0.0, size[1])
-  solutions = _ray_quad(
-    wp.dot(vec, vec), wp.dot(vec, dif), wp.dot(dif, dif) - size[0] * size[0]
-  )
+  solutions = _ray_quad(wp.dot(vec, vec), wp.dot(vec, dif), wp.dot(dif, dif) - size[0] * size[0])
   x0 = solutions[0]
   x1 = solutions[1]
   # accept only top half of sphere
@@ -125,9 +123,7 @@ def _ray_capsule(
 
   # bottom cap
   dif = pnt + wp.vec3(0.0, 0.0, size[1])
-  solutions = _ray_quad(
-    wp.dot(vec, vec), wp.dot(vec, dif), wp.dot(dif, dif) - size[0] * size[0]
-  )
+  solutions = _ray_quad(wp.dot(vec, vec), wp.dot(vec, dif), wp.dot(dif, dif) - size[0] * size[0])
   x0 = solutions[0]
   x1 = solutions[1]
   # accept only bottom half of sphere
@@ -148,9 +144,7 @@ def _ray_ellipsoid(
   """Returns the distance at which a ray intersects with an ellipsoid."""
 
   # invert size^2
-  s = wp.vec3(
-    1.0 / (size[0] * size[0]), 1.0 / (size[1] * size[1]), 1.0 / (size[2] * size[2])
-  )
+  s = wp.vec3(1.0 / (size[0] * size[0]), 1.0 / (size[1] * size[1]), 1.0 / (size[2] * size[2]))
 
   # (x*lvec+lpnt)' * diag(1/size^2) * (x*lvec+lpnt) = 1
   svec = wp.vec3(s[0] * vec[0], s[1] * vec[1], s[2] * vec[2])
@@ -288,6 +282,7 @@ def _ray_mesh(
   mesh_vertnum: wp.array(dtype=int),
   mesh_vert: wp.array(dtype=wp.vec3),
   mesh_face: wp.array(dtype=wp.vec3i),
+  mesh_faceadr: wp.array(dtype=int),
   nmeshface: int,
   # Function inputs
   geom_id: int,
@@ -328,9 +323,7 @@ def _ray_mesh(
 
   # Get mesh face and vertex data
   face_start = mesh_faceadr[data_id]
-  face_end = wp.where(
-    data_id + 1 < mesh_faceadr.shape[0], mesh_faceadr[data_id + 1], nmeshface
-  )
+  face_end = wp.where(data_id + 1 < mesh_faceadr.shape[0], mesh_faceadr[data_id + 1], nmeshface)
 
   # Iterate through all faces
   for i in range(face_start, face_end):
@@ -393,6 +386,7 @@ def _ray_geom(
       mesh_vertnum,
       mesh_vert,
       mesh_face,
+      mesh_faceadr,
       nmeshface,
       geom_id,
       data_id,
@@ -429,6 +423,12 @@ def _ray_all_geom(
   geom_type: wp.array(dtype=int),
   geom_size: wp.array(dtype=wp.vec3),
   geom_dataid: wp.array(dtype=int),
+  geom_bodyid: wp.array(dtype=int),
+  body_weldid: wp.array(dtype=int),
+  geom_group: wp.array(dtype=int),
+  geom_matid: wp.array(dtype=int),
+  geom_rgba: wp.array(dtype=wp.vec4),
+  mat_rgba: wp.array(dtype=wp.vec4),
   mesh_vertadr: wp.array(dtype=int),
   mesh_vertnum: wp.array(dtype=int),
   mesh_vert: wp.array(dtype=wp.vec3),
@@ -457,7 +457,7 @@ def _ray_all_geom(
   for geom_id in range(tid, upper, num_threads):
     if geom_id < ngeom:
       # Apply all filters combined into a single boolean
-      body_id = m.geom_bodyid[geom_id]
+      body_id = geom_bodyid[geom_id]
 
       # Start with True and apply each filter condition
       geom_filter = True
@@ -465,28 +465,26 @@ def _ray_all_geom(
       geom_filter = geom_filter and (body_id != bodyexclude)
 
       # Static geom filter
-      geom_filter = geom_filter and (flg_static or m.body_weldid[body_id] != 0)
+      geom_filter = geom_filter and (flg_static or body_weldid[body_id] != 0)
 
       # Geom group filter
       if has_geomgroup:
-        group = m.geom_group[geom_id]
+        group = geom_group[geom_id]
         # Clip group index to [0, 5] (mjNGROUP-1)
         group = wp.max(0, wp.min(5, group))
         geom_filter = geom_filter and (geomgroup[group] != 0)
 
       # RGBA filter
-      matid = m.geom_matid[geom_id]
-      geom_alpha = m.geom_rgba[geom_id][3]
+      matid = geom_matid[geom_id]
+      geom_alpha = geom_rgba[geom_id][3]
       mat_alpha = wp.float32(0.0)
       if matid != -1:
-        mat_alpha = m.mat_rgba[matid][3]
+        mat_alpha = mat_rgba[matid][3]
 
       # Geom is visible if either:
       # 1. No material and non-zero geom alpha, or
       # 2. Has material and non-zero material alpha
-      geom_visible = (matid == -1 and geom_alpha != 0.0) or (
-        matid != -1 and mat_alpha != 0.0
-      )
+      geom_visible = (matid == -1 and geom_alpha != 0.0) or (matid != -1 and mat_alpha != 0.0)
       geom_filter = geom_filter and geom_visible
 
       if not geom_filter:
@@ -539,6 +537,12 @@ def _ray_all_geom_kernel(
   geom_type: wp.array(dtype=int),
   geom_size: wp.array(dtype=wp.vec3),
   geom_dataid: wp.array(dtype=int),
+  geom_bodyid: wp.array(dtype=int),
+  body_weldid: wp.array(dtype=int),
+  geom_group: wp.array(dtype=int),
+  geom_matid: wp.array(dtype=int),
+  geom_rgba: wp.array(dtype=wp.vec4),
+  mat_rgba: wp.array(dtype=wp.vec4),
   mesh_vertadr: wp.array(dtype=int),
   mesh_vertnum: wp.array(dtype=int),
   mesh_vert: wp.array(dtype=wp.vec3),
@@ -566,6 +570,12 @@ def _ray_all_geom_kernel(
     geom_type,
     geom_size,
     geom_dataid,
+    geom_bodyid,
+    body_weldid,
+    geom_group,
+    geom_matid,
+    geom_rgba,
+    mat_rgba,
     mesh_vertadr,
     mesh_vertnum,
     mesh_vert,
@@ -630,6 +640,12 @@ def ray(
       m.geom_type,
       m.geom_size,
       m.geom_dataid,
+      m.geom_bodyid,
+      m.body_weldid,
+      m.geom_group,
+      m.geom_matid,
+      m.geom_rgba,
+      m.mat_rgba,
       m.mesh_vertadr,
       m.mesh_vertnum,
       m.mesh_vert,

@@ -127,17 +127,29 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
     tile_beg = tile_corners[i]
     tile_end = mjm.nv if i == len(tile_corners) - 1 else tile_corners[i + 1]
     tiles.setdefault(tile_end - tile_beg, []).append(tile_beg)
+
+  # Handle empty tiles case
+  if tiles:
+    qLD_tile = np.concatenate([tiles[sz] for sz in sorted(tiles.keys())])
+    tile_off = [0] + [len(tiles[sz]) for sz in sorted(tiles.keys())]
+    qLD_tileadr = np.cumsum(tile_off)[:-1]
+    qLD_tilesize = np.array(sorted(tiles.keys()))
+  else:
+    qLD_tile = np.array([], dtype=int)
+    qLD_tileadr = np.array([], dtype=int)
+    qLD_tilesize = np.array([], dtype=int)
+
   qM_tiles = tuple(types.TileSet(adr=wp.array(tiles[sz], dtype=int), size=sz) for sz in sorted(tiles.keys()))
 
-  # subtree_mass is a precalculated arrya used in smooth
+  # subtree_mass is a precalculated array used in smooth
   subtree_mass = np.copy(mjm.body_mass)
   # TODO(team): should this be [mjm.nbody - 1, 0) ?
   for i in range(mjm.nbody - 1, -1, -1):
     subtree_mass[mjm.body_parentid[i]] += subtree_mass[i]
 
   # actuator_moment tiles are grouped by dof size and number of actuators
-  tree_id = mjm.dof_treeid[tile_corners]
-  num_trees = int(np.max(tree_id))
+  tree_id = np.arange(len(tile_corners), dtype=np.int32)
+  num_trees = int(np.max(tree_id)) if len(tree_id) > 0 else 0
   bodyid = []
   for i in range(mjm.nu):
     trntype = mjm.actuator_trntype[i]
@@ -250,7 +262,7 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
     nxn_geom_pair.append((geom1, geom2))
     nxn_pairid.append(pairid)
 
-  return types.Model(
+  m = types.Model(
     nq=mjm.nq,
     nv=mjm.nv,
     nu=mjm.nu,
@@ -270,6 +282,8 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
     nwrap=mjm.nwrap,
     nsensor=mjm.nsensor,
     nsensordata=mjm.nsensordata,
+    nmeshvert=mjm.nmeshvert,
+    nmeshface=mjm.nmeshface,
     nlsp=nlsp,
     npair=mjm.npair,
     opt=types.Option(
@@ -375,6 +389,8 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
     geom_condim=wp.array(mjm.geom_condim, dtype=int),
     geom_bodyid=wp.array(mjm.geom_bodyid, dtype=int),
     geom_dataid=wp.array(mjm.geom_dataid, dtype=int),
+    geom_group=wp.array(mjm.geom_group, dtype=int),
+    geom_matid=wp.array(mjm.geom_matid, dtype=int),
     geom_priority=wp.array(mjm.geom_priority, dtype=int),
     geom_solmix=wp.array(mjm.geom_solmix, dtype=float),
     geom_solref=wp.array(mjm.geom_solref, dtype=wp.vec2),
@@ -387,6 +403,7 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
     geom_friction=wp.array(mjm.geom_friction, dtype=wp.vec3),
     geom_margin=wp.array(mjm.geom_margin, dtype=float),
     geom_gap=wp.array(mjm.geom_gap, dtype=float),
+    geom_rgba=wp.array(mjm.geom_rgba, dtype=wp.vec4),
     site_bodyid=wp.array(mjm.site_bodyid, dtype=int),
     site_pos=wp.array(mjm.site_pos, dtype=wp.vec3),
     site_quat=wp.array(mjm.site_quat, dtype=wp.quat),
@@ -411,6 +428,8 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
     mesh_vertadr=wp.array(mjm.mesh_vertadr, dtype=int),
     mesh_vertnum=wp.array(mjm.mesh_vertnum, dtype=int),
     mesh_vert=wp.array(mjm.mesh_vert, dtype=wp.vec3),
+    mesh_faceadr=wp.array(mjm.mesh_faceadr, dtype=int),
+    mesh_face=wp.array(mjm.mesh_face, dtype=wp.vec3i),
     eq_type=wp.array(mjm.eq_type, dtype=int),
     eq_obj1id=wp.array(mjm.eq_obj1id, dtype=int),
     eq_obj2id=wp.array(mjm.eq_obj2id, dtype=int),
@@ -517,7 +536,10 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
         mujoco.mjtSensor.mjSENS_FRAMEANGACC,
       ],
     ).any(),
+    mat_rgba=wp.array(mjm.mat_rgba, dtype=wp.vec4),
   )
+
+  return m
 
 
 def make_data(mjm: mujoco.MjModel, nworld: int = 1, nconmax: int = -1, njmax: int = -1) -> types.Data:
