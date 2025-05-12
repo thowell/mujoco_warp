@@ -283,14 +283,20 @@ def _ray_triangle(
 
 @wp.func
 def _ray_mesh(
-  m: Model,
+  # Model arrays
+  mesh_vertadr: wp.array(dtype=int),
+  mesh_vertnum: wp.array(dtype=int),
+  mesh_vert: wp.array(dtype=wp.vec3),
+  mesh_face: wp.array(dtype=wp.vec3i),
+  nmeshface: int,
+  # Function inputs
   geom_id: int,
+  data_id: int,
   unused_size: wp.vec3,
   pnt: wp.vec3,
   vec: wp.vec3,
 ) -> DistanceWithId:
   """Returns the distance and geom_id for ray mesh intersections."""
-  data_id = m.geom_dataid[geom_id]
 
   # Create basis vectors for the ray
   basis = Basis()
@@ -318,24 +324,24 @@ def _ray_mesh(
   hit_found = int(0)
 
   # Get mesh vertex data range
-  vert_start = m.mesh_vertadr[data_id]
+  vert_start = mesh_vertadr[data_id]
 
   # Get mesh face and vertex data
-  face_start = m.mesh_faceadr[data_id]
+  face_start = mesh_faceadr[data_id]
   face_end = wp.where(
-    data_id + 1 < m.mesh_faceadr.shape[0], m.mesh_faceadr[data_id + 1], m.nmeshface
+    data_id + 1 < mesh_faceadr.shape[0], mesh_faceadr[data_id + 1], nmeshface
   )
 
   # Iterate through all faces
   for i in range(face_start, face_end):
     # Get vertices for this face
-    v_idx = m.mesh_face[i]
+    v_idx = mesh_face[i]
 
     # Create triangle struct
     triangle = Triangle()
-    triangle.v0 = m.mesh_vert[vert_start + v_idx.x]
-    triangle.v1 = m.mesh_vert[vert_start + v_idx.y]
-    triangle.v2 = m.mesh_vert[vert_start + v_idx.z]
+    triangle.v0 = mesh_vert[vert_start + v_idx.x]
+    triangle.v1 = mesh_vert[vert_start + v_idx.y]
+    triangle.v2 = mesh_vert[vert_start + v_idx.z]
 
     # Calculate intersection
     dist = _ray_triangle(triangle, pnt, vec, basis)
@@ -351,14 +357,23 @@ def _ray_mesh(
 
 @wp.func
 def _ray_geom(
-  m: Model,
-  d: Data,
+  # Model arrays
+  geom_type: wp.array(dtype=int),
+  geom_size: wp.array(dtype=wp.vec3),
+  geom_dataid: wp.array(dtype=int),
+  mesh_vertadr: wp.array(dtype=int),
+  mesh_vertnum: wp.array(dtype=int),
+  mesh_vert: wp.array(dtype=wp.vec3),
+  mesh_face: wp.array(dtype=wp.vec3i),
+  mesh_faceadr: wp.array(dtype=int),
+  nmeshface: int,
+  # Function inputs
   geom_id: int,
   pnt: wp.vec3,
   vec: wp.vec3,
 ) -> DistanceWithId:
-  type = m.geom_type[geom_id]
-  size = m.geom_size[geom_id]
+  type = geom_type[geom_id]
+  size = geom_size[geom_id]
 
   # TODO(team): static loop unrolling to remove unnecessary branching
   if type == int(GeomType.PLANE.value):
@@ -372,7 +387,19 @@ def _ray_geom(
   elif type == int(GeomType.BOX.value):
     return _ray_box(size, pnt, vec, geom_id)
   elif type == int(GeomType.MESH.value):
-    return _ray_mesh(m, geom_id, size, pnt, vec)
+    data_id = geom_dataid[geom_id]
+    return _ray_mesh(
+      mesh_vertadr,
+      mesh_vertnum,
+      mesh_vert,
+      mesh_face,
+      nmeshface,
+      geom_id,
+      data_id,
+      size,
+      pnt,
+      vec,
+    )
   return DistanceWithId(wp.inf, -1)
 
 
@@ -398,8 +425,21 @@ def get_block_dim_x() -> int: ...
 @wp.func
 def _ray_all_geom(
   worldid: int,
-  m: Model,
-  d: Data,
+  # Model arrays
+  geom_type: wp.array(dtype=int),
+  geom_size: wp.array(dtype=wp.vec3),
+  geom_dataid: wp.array(dtype=int),
+  mesh_vertadr: wp.array(dtype=int),
+  mesh_vertnum: wp.array(dtype=int),
+  mesh_vert: wp.array(dtype=wp.vec3),
+  mesh_face: wp.array(dtype=wp.vec3i),
+  mesh_faceadr: wp.array(dtype=int),
+  nmeshface: int,
+  ngeom: int,
+  # Data arrays
+  geom_xpos: wp.array2d(dtype=wp.vec3),
+  geom_xmat: wp.array2d(dtype=wp.mat33),
+  # Function inputs
   pnt: wp.vec3,
   vec: wp.vec3,
   geomgroup: vec6,
@@ -408,8 +448,6 @@ def _ray_all_geom(
   bodyexclude: int,
   tid: int,
 ) -> RayIntersection:
-  ngeom = m.ngeom
-
   num_threads = get_block_dim_x()
 
   min_val = wp.float32(wp.inf)
@@ -455,13 +493,26 @@ def _ray_all_geom(
         cur_dist = wp.float32(wp.inf)
       else:
         # Get ray in local coordinates
-        pos = d.geom_xpos[worldid, geom_id]
-        rot = d.geom_xmat[worldid, geom_id]
+        pos = geom_xpos[worldid, geom_id]
+        rot = geom_xmat[worldid, geom_id]
         local_pnt = wp.transpose(rot) @ (pnt - pos)
         local_vec = wp.transpose(rot) @ vec
 
         # Calculate intersection distance
-        result = _ray_geom(m, d, geom_id, local_pnt, local_vec)
+        result = _ray_geom(
+          geom_type,
+          geom_size,
+          geom_dataid,
+          mesh_vertadr,
+          mesh_vertnum,
+          mesh_vert,
+          mesh_face,
+          mesh_faceadr,
+          nmeshface,
+          geom_id,
+          local_pnt,
+          local_vec,
+        )
         cur_dist = result.dist
     else:
       cur_dist = wp.float32(wp.inf)
@@ -484,22 +535,46 @@ def _ray_all_geom(
 # One thread block/tile per ray query
 @wp.kernel
 def _ray_all_geom_kernel(
-  m: Model,
-  d: Data,
+  # Model arrays
+  geom_type: wp.array(dtype=int),
+  geom_size: wp.array(dtype=wp.vec3),
+  geom_dataid: wp.array(dtype=int),
+  mesh_vertadr: wp.array(dtype=int),
+  mesh_vertnum: wp.array(dtype=int),
+  mesh_vert: wp.array(dtype=wp.vec3),
+  mesh_face: wp.array(dtype=wp.vec3i),
+  mesh_faceadr: wp.array(dtype=int),
+  nmeshface: int,
+  ngeom: int,
+  # Data arrays
+  geom_xpos: wp.array2d(dtype=wp.vec3),
+  geom_xmat: wp.array2d(dtype=wp.mat33),
+  # Function inputs
   pnt: wp.array(dtype=wp.vec3),
   vec: wp.array(dtype=wp.vec3),
   geomgroup: vec6,
   has_geomgroup: bool,
   flg_static: bool,
   bodyexclude: int,
+  # Output arrays
   dist: wp.array(dtype=float, ndim=2),
   closest_hit_geom_id: wp.array(dtype=int, ndim=2),
 ):
   worldid, rayid, tid = wp.tid()
   intersection = _ray_all_geom(
     worldid,
-    m,
-    d,
+    geom_type,
+    geom_size,
+    geom_dataid,
+    mesh_vertadr,
+    mesh_vertnum,
+    mesh_vert,
+    mesh_face,
+    mesh_faceadr,
+    nmeshface,
+    ngeom,
+    geom_xpos,
+    geom_xmat,
     pnt[rayid],
     vec[rayid],
     geomgroup,
@@ -552,8 +627,18 @@ def ray(
     _ray_all_geom_kernel,
     dim=(d.nworld, nrays),
     inputs=[
-      m,
-      d,
+      m.geom_type,
+      m.geom_size,
+      m.geom_dataid,
+      m.mesh_vertadr,
+      m.mesh_vertnum,
+      m.mesh_vert,
+      m.mesh_face,
+      m.mesh_faceadr,
+      m.nmeshface,
+      m.ngeom,
+      d.geom_xpos,
+      d.geom_xmat,
       pnt,
       vec,
       geomgroup,
