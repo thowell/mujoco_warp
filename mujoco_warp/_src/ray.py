@@ -44,6 +44,7 @@ def _ray_quad(a: float, b: float, c: float) -> wp.vec2:
 
 @wp.func
 def _ray_plane(
+  # In:
   size: wp.vec3,
   pnt: wp.vec3,
   vec: wp.vec3,
@@ -66,6 +67,7 @@ def _ray_plane(
 
 @wp.func
 def _ray_sphere(
+  # In:
   size: wp.vec3,
   pnt: wp.vec3,
   vec: wp.vec3,
@@ -87,6 +89,7 @@ def _ray_sphere(
 
 @wp.func
 def _ray_capsule(
+  # In:
   size: wp.vec3,
   pnt: wp.vec3,
   vec: wp.vec3,
@@ -136,6 +139,7 @@ def _ray_capsule(
 
 @wp.func
 def _ray_ellipsoid(
+  # In:
   size: wp.vec3,
   pnt: wp.vec3,
   vec: wp.vec3,
@@ -164,6 +168,7 @@ def _ray_ellipsoid(
 
 @wp.func
 def _ray_box(
+  # In:
   size: wp.vec3,
   pnt: wp.vec3,
   vec: wp.vec3,
@@ -213,6 +218,7 @@ class Basis:
 
 @wp.func
 def _ray_triangle(
+  # In:
   triangle: Triangle,
   pnt: wp.vec3,
   vec: wp.vec3,
@@ -277,14 +283,14 @@ def _ray_triangle(
 
 @wp.func
 def _ray_mesh(
-  # Model arrays
+  # Model:
+  nmeshface: int,
   mesh_vertadr: wp.array(dtype=int),
   mesh_vertnum: wp.array(dtype=int),
   mesh_vert: wp.array(dtype=wp.vec3),
-  mesh_face: wp.array(dtype=wp.vec3i),
   mesh_faceadr: wp.array(dtype=int),
-  nmeshface: int,
-  # Function inputs
+  mesh_face: wp.array(dtype=wp.vec3i),
+  # In:
   geom_id: int,
   data_id: int,
   unused_size: wp.vec3,
@@ -350,17 +356,17 @@ def _ray_mesh(
 
 @wp.func
 def _ray_geom(
-  # Model arrays
+  # Model:
+  nmeshface: int,
   geom_type: wp.array(dtype=int),
-  geom_size: wp.array(dtype=wp.vec3),
   geom_dataid: wp.array(dtype=int),
+  geom_size: wp.array(dtype=wp.vec3),
   mesh_vertadr: wp.array(dtype=int),
   mesh_vertnum: wp.array(dtype=int),
   mesh_vert: wp.array(dtype=wp.vec3),
-  mesh_face: wp.array(dtype=wp.vec3i),
   mesh_faceadr: wp.array(dtype=int),
-  nmeshface: int,
-  # Function inputs
+  mesh_face: wp.array(dtype=wp.vec3i),
+  # In:
   geom_id: int,
   pnt: wp.vec3,
   vec: wp.vec3,
@@ -382,12 +388,12 @@ def _ray_geom(
   elif type == int(GeomType.MESH.value):
     data_id = geom_dataid[geom_id]
     return _ray_mesh(
+      nmeshface,
       mesh_vertadr,
       mesh_vertnum,
       mesh_vert,
-      mesh_face,
       mesh_faceadr,
-      nmeshface,
+      mesh_face,
       geom_id,
       data_id,
       size,
@@ -418,28 +424,28 @@ def get_block_dim_x() -> int: ...
 
 @wp.func
 def _ray_all_geom(
-  worldid: int,
-  # Model arrays
-  geom_type: wp.array(dtype=int),
-  geom_size: wp.array(dtype=wp.vec3),
-  geom_dataid: wp.array(dtype=int),
-  geom_bodyid: wp.array(dtype=int),
+  # Model:
+  ngeom: int,
+  nmeshface: int,
   body_weldid: wp.array(dtype=int),
+  geom_type: wp.array(dtype=int),
+  geom_bodyid: wp.array(dtype=int),
+  geom_dataid: wp.array(dtype=int),
   geom_group: wp.array(dtype=int),
   geom_matid: wp.array(dtype=int),
+  geom_size: wp.array(dtype=wp.vec3),
   geom_rgba: wp.array(dtype=wp.vec4),
-  mat_rgba: wp.array(dtype=wp.vec4),
   mesh_vertadr: wp.array(dtype=int),
   mesh_vertnum: wp.array(dtype=int),
   mesh_vert: wp.array(dtype=wp.vec3),
-  mesh_face: wp.array(dtype=wp.vec3i),
   mesh_faceadr: wp.array(dtype=int),
-  nmeshface: int,
-  ngeom: int,
-  # Data arrays
-  geom_xpos: wp.array2d(dtype=wp.vec3),
-  geom_xmat: wp.array2d(dtype=wp.mat33),
-  # Function inputs
+  mesh_face: wp.array(dtype=wp.vec3i),
+  mat_rgba: wp.array(dtype=wp.vec4),
+  # Data in:
+  geom_xpos_in: wp.array2d(dtype=wp.vec3),
+  geom_xmat_in: wp.array2d(dtype=wp.mat33),
+  # In:
+  worldid: int,
   pnt: wp.vec3,
   vec: wp.vec3,
   geomgroup: vec6,
@@ -491,22 +497,22 @@ def _ray_all_geom(
         cur_dist = wp.float32(wp.inf)
       else:
         # Get ray in local coordinates
-        pos = geom_xpos[worldid, geom_id]
-        rot = geom_xmat[worldid, geom_id]
+        pos = geom_xpos_in[worldid, geom_id]
+        rot = geom_xmat_in[worldid, geom_id]
         local_pnt = wp.transpose(rot) @ (pnt - pos)
         local_vec = wp.transpose(rot) @ vec
 
         # Calculate intersection distance
         result = _ray_geom(
+          nmeshface,
           geom_type,
-          geom_size,
           geom_dataid,
+          geom_size,
           mesh_vertadr,
           mesh_vertnum,
           mesh_vert,
-          mesh_face,
           mesh_faceadr,
-          nmeshface,
+          mesh_face,
           geom_id,
           local_pnt,
           local_vec,
@@ -533,58 +539,58 @@ def _ray_all_geom(
 # One thread block/tile per ray query
 @wp.kernel
 def _ray_all_geom_kernel(
-  # Model arrays
-  geom_type: wp.array(dtype=int),
-  geom_size: wp.array(dtype=wp.vec3),
-  geom_dataid: wp.array(dtype=int),
-  geom_bodyid: wp.array(dtype=int),
+  # Model:
+  ngeom: int,
+  nmeshface: int,
   body_weldid: wp.array(dtype=int),
+  geom_type: wp.array(dtype=int),
+  geom_bodyid: wp.array(dtype=int),
+  geom_dataid: wp.array(dtype=int),
   geom_group: wp.array(dtype=int),
   geom_matid: wp.array(dtype=int),
+  geom_size: wp.array(dtype=wp.vec3),
   geom_rgba: wp.array(dtype=wp.vec4),
-  mat_rgba: wp.array(dtype=wp.vec4),
   mesh_vertadr: wp.array(dtype=int),
   mesh_vertnum: wp.array(dtype=int),
   mesh_vert: wp.array(dtype=wp.vec3),
-  mesh_face: wp.array(dtype=wp.vec3i),
   mesh_faceadr: wp.array(dtype=int),
-  nmeshface: int,
-  ngeom: int,
-  # Data arrays
-  geom_xpos: wp.array2d(dtype=wp.vec3),
-  geom_xmat: wp.array2d(dtype=wp.mat33),
-  # Function inputs
+  mesh_face: wp.array(dtype=wp.vec3i),
+  mat_rgba: wp.array(dtype=wp.vec4),
+  # Data in:
+  geom_xpos_in: wp.array2d(dtype=wp.vec3),
+  geom_xmat_in: wp.array2d(dtype=wp.mat33),
+  # In:
   pnt: wp.array(dtype=wp.vec3),
   vec: wp.array(dtype=wp.vec3),
   geomgroup: vec6,
   has_geomgroup: bool,
   flg_static: bool,
   bodyexclude: int,
-  # Output arrays
-  dist: wp.array(dtype=float, ndim=2),
-  closest_hit_geom_id: wp.array(dtype=int, ndim=2),
+  # Out:
+  dist_out: wp.array(dtype=float, ndim=2),
+  closest_hit_geom_id_out: wp.array(dtype=int, ndim=2),
 ):
   worldid, rayid, tid = wp.tid()
   intersection = _ray_all_geom(
-    worldid,
-    geom_type,
-    geom_size,
-    geom_dataid,
-    geom_bodyid,
+    ngeom,
+    nmeshface,
     body_weldid,
+    geom_type,
+    geom_bodyid,
+    geom_dataid,
     geom_group,
     geom_matid,
+    geom_size,
     geom_rgba,
-    mat_rgba,
     mesh_vertadr,
     mesh_vertnum,
     mesh_vert,
-    mesh_face,
     mesh_faceadr,
-    nmeshface,
-    ngeom,
-    geom_xpos,
-    geom_xmat,
+    mesh_face,
+    mat_rgba,
+    geom_xpos_in,
+    geom_xmat_in,
+    worldid,
     pnt[rayid],
     vec[rayid],
     geomgroup,
@@ -595,8 +601,8 @@ def _ray_all_geom_kernel(
   )
 
   # Write intersection results to output arrays
-  dist[worldid, rayid] = intersection.dist
-  closest_hit_geom_id[worldid, rayid] = intersection.geom_id
+  dist_out[worldid, rayid] = intersection.dist
+  closest_hit_geom_id_out[worldid, rayid] = intersection.geom_id
 
 
 def ray(
@@ -637,22 +643,22 @@ def ray(
     _ray_all_geom_kernel,
     dim=(d.nworld, nrays),
     inputs=[
-      m.geom_type,
-      m.geom_size,
-      m.geom_dataid,
-      m.geom_bodyid,
+      m.ngeom,
+      m.nmeshface,
       m.body_weldid,
+      m.geom_type,
+      m.geom_bodyid,
+      m.geom_dataid,
       m.geom_group,
       m.geom_matid,
+      m.geom_size,
       m.geom_rgba,
-      m.mat_rgba,
       m.mesh_vertadr,
       m.mesh_vertnum,
       m.mesh_vert,
-      m.mesh_face,
       m.mesh_faceadr,
-      m.nmeshface,
-      m.ngeom,
+      m.mesh_face,
+      m.mat_rgba,
       d.geom_xpos,
       d.geom_xmat,
       pnt,
