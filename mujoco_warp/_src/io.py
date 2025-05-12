@@ -47,6 +47,9 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
   if mjm.tendon_frictionloss.any():
     raise NotImplementedError("Tendon frictionloss is unsupported.")
 
+  if mjm.geom_fluid.any():
+    raise NotImplementedError("Ellipsoid fluid model not implemented.")
+
   # check options
   for opt, opt_types, msg in (
     (mjm.opt.integrator, types.IntegratorType, "Integrator"),

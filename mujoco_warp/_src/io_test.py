@@ -227,6 +227,23 @@ class IOTest(absltest.TestCase):
     np.testing.assert_allclose(mjd.qLD, mjd_ref.qLD)
     np.testing.assert_allclose(mjd.qM, mjd_ref.qM)
 
+  def test_ellipsoid_fluid_model(self):
+    with self.assertRaises(NotImplementedError):
+      mjm = mujoco.MjModel.from_xml_string(
+        """
+      <mujoco>
+        <option density="1"/>
+        <worldbody>
+          <body>
+            <geom type="sphere" size=".1" fluidshape="ellipsoid"/>
+            <freejoint/>
+          </body>
+        </worldbody>
+      </mujoco>
+      """
+      )
+      mjwarp.put_model(mjm)
+
 
 if __name__ == "__main__":
   wp.init()
