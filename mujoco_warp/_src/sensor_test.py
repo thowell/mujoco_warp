@@ -243,18 +243,21 @@ class SensorTest(parameterized.TestCase):
           <worldbody>
             <geom type="sphere" size=".1" pos="0 0 1"/>
             <body>
-              <joint type="hinge" axis="1 0 0"/>
+              <joint name="joint0" type="hinge" axis="1 0 0"/>
               <joint type="hinge" axis="0 1 0"/>
               <joint type="hinge" axis="0 0 1"/>
               <geom type="sphere" size="0.1"/>
               <site name="site0" size=".1"/>
+              <site name="site1" size=".1" pos="0 0 -.2"/>
             </body>
           </worldbody>
           <sensor>
             <rangefinder site="site0"/>
+            <jointpos joint="joint0"/>
+            <rangefinder site="site1"/>
           </sensor>
           <keyframe>
-            <key qpos="0 90 0"/>
+            <key qpos="0 0 0"/>
             <key qpos="0 90 0"/>
           </keyframe>
         </mujoco>

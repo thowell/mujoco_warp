@@ -791,12 +791,13 @@ class Model:
     sensor_adr: address in sensor array                      (nsensor,)
     sensor_cutoff: cutoff for real and positive; 0: ignore   (nsensor,)
     sensor_pos_adr: addresses for position sensors           (<=nsensor,)
-                    (excluding rangefinder sensors)
     sensor_vel_adr: addresses for velocity sensors           (<=nsensor,)
     sensor_acc_adr: addresses for acceleration sensors       (<=nsensor,)
     sensor_rangefinder_adr: addresses for rangefinder sensors(<=nsensor,)
+    rangefinder_sensor_adr: map sensor id to rangefinder id  (<=nsensor,)
     sensor_subtree_vel: evaluate subtree_vel
     sensor_rne_postconstraint: evaluate rne_postconstraint
+    sensor_rangefinder_bodyid: bodyid for rangefinder        (nrangefinder,)
     mocap_bodyid: id of body for mocap                       (nmocap,)
     mat_rgba: rgba                                           (nmat, 4)
   """
@@ -1017,8 +1018,10 @@ class Model:
   sensor_vel_adr: wp.array(dtype=int)  # warp only
   sensor_acc_adr: wp.array(dtype=int)  # warp only
   sensor_rangefinder_adr: wp.array(dtype=int)  # warp only
+  rangefinder_sensor_adr: wp.array(dtype=int)  # warp only
   sensor_subtree_vel: bool  # warp only
   sensor_rne_postconstraint: bool  # warp only
+  sensor_rangefinder_bodyid: wp.array(dtype=int)  # warp only
   mocap_bodyid: wp.array(dtype=int)  # warp only
   mat_rgba: wp.array(dtype=wp.vec4)
 
@@ -1166,7 +1169,10 @@ class Data:
     wrap_obj: geomid; -1: site; -2: pulley                      (nworld, nwrap, 2)
     wrap_xpos: Cartesian 3D points in all paths                 (nworld, nwrap, 6)
     sensordata: sensor data array                               (nsensordata,)
-    sensor_rangefinder_dist: distance to geom                   (nworld, <=nsensor, ngeom)
+    sensor_rangefinder_pnt: points for rangefinder              (nworld, nrangefinder, 3)
+    sensor_rangefinder_vec: directions for rangefinder          (nworld, nrangefinder, 3)
+    sensor_rangefinder_dist: distances for rangefinder          (nworld, nrangefinder)
+    sensor_rangefinder_geomid: geomids for rangefinder          (nworld, nrangefinder)
   """
 
   nworld: int  # warp only
@@ -1286,4 +1292,7 @@ class Data:
 
   # sensors
   sensordata: wp.array2d(dtype=float)
-  sensor_rangefinder_dist: wp.array3d(dtype=float)
+  sensor_rangefinder_pnt: wp.array2d(dtype=wp.vec3)  # warp only
+  sensor_rangefinder_vec: wp.array2d(dtype=wp.vec3)  # warp only
+  sensor_rangefinder_dist: wp.array2d(dtype=float)  # warp only
+  sensor_rangefinder_geomid: wp.array2d(dtype=int)  # warp only
