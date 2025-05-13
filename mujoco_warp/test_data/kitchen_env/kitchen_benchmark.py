@@ -15,19 +15,19 @@
 
 """Run kitchen benchmarks with various robots."""
 
-import subprocess
 import inspect
+import os
+import subprocess
 from typing import Sequence
 
 import mujoco
-from dm_control import mjcf
 import numpy as np
+import tqdm
 import warp as wp
 from absl import app
 from absl import flags
+from dm_control import mjcf
 from etils import epath
-import tqdm
-import os
 
 import mujoco_warp as mjwarp
 
@@ -46,15 +46,40 @@ _FUNCTION = flags.DEFINE_enum(
   "the function to run",
 )
 _ROBOT = flags.DEFINE_enum(
-  "robot", "mujoco_humanoid",
+  "robot",
+  "mujoco_humanoid",
   [
     # Robotic arms
-    "panda", "fr3", "google_robot", "gen3", "iiwa_14", "tiago", "sawyer",
-    "vx300", "arm100", "lite6", "xarm7", "z1", "ur10e", "ur5e",
+    "panda",
+    "fr3",
+    "google_robot",
+    "gen3",
+    "iiwa_14",
+    "tiago",
+    "sawyer",
+    "vx300",
+    "arm100",
+    "lite6",
+    "xarm7",
+    "z1",
+    "ur10e",
+    "ur5e",
     # Humanoids
-    "mujoco_humanoid", "berkeley_humanoid", "t1", "h1", "g1", "talos", "op3",
+    "mujoco_humanoid",
+    "berkeley_humanoid",
+    "t1",
+    "h1",
+    "g1",
+    "talos",
+    "op3",
     # Quadrupedal
-    "spot", "anymal_b", "anymal_c", "barkour_v0", "a1", "go1", "go2",
+    "spot",
+    "anymal_b",
+    "anymal_c",
+    "barkour_v0",
+    "a1",
+    "go1",
+    "go2",
     # Bipedal
     "cassie",
   ],
@@ -62,20 +87,12 @@ _ROBOT = flags.DEFINE_enum(
 )
 _NSTEP = flags.DEFINE_integer("nstep", 1000, "number of steps per rollout")
 _BATCH_SIZE = flags.DEFINE_integer("batch_size", 8192, "number of parallel rollouts")
-_SOLVER = flags.DEFINE_enum(
-  "solver", None, ["cg", "newton"], "Override model constraint solver"
-)
-_ITERATIONS = flags.DEFINE_integer(
-  "iterations", None, "Override model solver iterations"
-)
-_LS_ITERATIONS = flags.DEFINE_integer(
-  "ls_iterations", None, "Override model linesearch iterations"
-)
+_SOLVER = flags.DEFINE_enum("solver", None, ["cg", "newton"], "Override model constraint solver")
+_ITERATIONS = flags.DEFINE_integer("iterations", None, "Override model solver iterations")
+_LS_ITERATIONS = flags.DEFINE_integer("ls_iterations", None, "Override model linesearch iterations")
 _LS_PARALLEL = flags.DEFINE_bool("ls_parallel", False, "solve with parallel linesearch")
 _IS_SPARSE = flags.DEFINE_bool("is_sparse", None, "Override model sparse config")
-_CONE = flags.DEFINE_enum(
-  "cone", "pyramidal", ["pyramidal", "elliptic"], "Friction cone type"
-)
+_CONE = flags.DEFINE_enum("cone", "pyramidal", ["pyramidal", "elliptic"], "Friction cone type")
 _NCONMAX = flags.DEFINE_integer(
   "nconmax",
   None,
@@ -86,16 +103,11 @@ _NJMAX = flags.DEFINE_integer(
   None,
   "Override default maximum number of constraints in a batch physics step.",
 )
-_OUTPUT = flags.DEFINE_enum(
-  "output", "text", ["text", "tsv"], "format to print results"
-)
-_CLEAR_KERNEL_CACHE = flags.DEFINE_bool(
-  "clear_kernel_cache", False, "Clear kernel cache (to calculate full JIT time)"
-)
+_OUTPUT = flags.DEFINE_enum("output", "text", ["text", "tsv"], "format to print results")
+_CLEAR_KERNEL_CACHE = flags.DEFINE_bool("clear_kernel_cache", False, "Clear kernel cache (to calculate full JIT time)")
 _EVENT_TRACE = flags.DEFINE_bool("event_trace", False, "Provide a full event trace")
-_MEASURE_ALLOC = flags.DEFINE_bool(
-  "measure_alloc", False, "Measure how much of nconmax, njmax is used."
-)
+_MEASURE_ALLOC = flags.DEFINE_bool("measure_alloc", False, "Measure how much of nconmax, njmax is used.")
+
 
 def _main(argv: Sequence[str]):
   """Runs testpeed function."""
@@ -105,47 +117,47 @@ def _main(argv: Sequence[str]):
   match _ROBOT.value:
     case "panda":
       robot_path = _load_from_menagerie("franka_emika_panda/mjx_panda.xml")
-    case "fr3": # Do not run on mujoco_warp, sparse not supported with implicit integrator
+    case "fr3":  # Do not run on mujoco_warp, sparse not supported with implicit integrator
       robot_path = _load_from_menagerie("franka_fr3/fr3.xml")
-    case "google_robot": # Do not run on mujoco_warp, sparse not supported with implicit integrator
+    case "google_robot":  # Do not run on mujoco_warp, sparse not supported with implicit integrator
       robot_path = _load_from_menagerie("google_robot/robot.xml")
-    case "gen3": # Do not run on mujoco_warp, sparse not supported with implicit integrator
+    case "gen3":  # Do not run on mujoco_warp, sparse not supported with implicit integrator
       robot_path = _load_from_menagerie("kinova_gen3/gen3.xml")
-    case "iiwa_14": # Do not run on mujoco_warp, sparse not supported with implicit integrator
+    case "iiwa_14":  # Do not run on mujoco_warp, sparse not supported with implicit integrator
       robot_path = _load_from_menagerie("kuka_iiwa_14/iiwa14.xml")
-    case "tiago": # Do not run on mujoco_warp, sparse not supported with implicit integrator
+    case "tiago":  # Do not run on mujoco_warp, sparse not supported with implicit integrator
       robot_path = _load_from_menagerie("pal_tiago/tiago.xml")
-    case "sawyer": # Do not run on mujoco_warp, sparse not supported with implicit integrator
+    case "sawyer":  # Do not run on mujoco_warp, sparse not supported with implicit integrator
       robot_path = _load_from_menagerie("rethink_robotics_sawyer/sawyer.xml")
     case "vx300":
       robot_path = _load_from_menagerie("trossen_vx300s/vx300s.xml")
     case "arm100":
       robot_path = _load_from_menagerie("trs_so_arm100/so_arm100.xml")
-    case "lite6": # Do not run on mujoco_warp, sparse not supported with implicit integrator
+    case "lite6":  # Do not run on mujoco_warp, sparse not supported with implicit integrator
       robot_path = _load_from_menagerie("ufactory_lite6/lite6.xml")
-    case "xarm7": # Do not run on mujoco_warp, sparse not supported with implicit integrator
+    case "xarm7":  # Do not run on mujoco_warp, sparse not supported with implicit integrator
       robot_path = _load_from_menagerie("ufactory_xarm7/xarm7.xml")
-    case "z1": # Do not run on mujoco_warp, sparse not supported with implicit integrator
+    case "z1":  # Do not run on mujoco_warp, sparse not supported with implicit integrator
       robot_path = _load_from_menagerie("unitree_z1/z1.xml")
-    case "ur10e": # Do not run on mujoco_warp, sparse not supported with implicit integrator
+    case "ur10e":  # Do not run on mujoco_warp, sparse not supported with implicit integrator
       robot_path = _load_from_menagerie("universal_robots_ur10e/ur10e.xml")
-    case "ur5e": # Do not run on mujoco_warp, sparse not supported with implicit integrator
+    case "ur5e":  # Do not run on mujoco_warp, sparse not supported with implicit integrator
       robot_path = _load_from_menagerie("universal_robots_ur5e/ur5e.xml")
     case "mujoco_humanoid":
       robot_path = epath.Path(_SCRIPT_DIR + "/../humanoid/humanoid.xml")
     case "berkeley_humanoid":
       robot_path = _load_from_menagerie("berkeley_humanoid/berkeley_humanoid.xml")
-    case "t1": # Do not run on mujoco_warp, sparse not supported with implicit integrator
+    case "t1":  # Do not run on mujoco_warp, sparse not supported with implicit integrator
       robot_path = _load_from_menagerie("booster_t1/t1.xml")
     case "h1":
       robot_path = _load_from_menagerie("unitree_h1/h1.xml")
-    case "g1": # Do not run on mujoco_warp, sparse not supported with implicit integrator
+    case "g1":  # Do not run on mujoco_warp, sparse not supported with implicit integrator
       robot_path = _load_from_menagerie("unitree_g1/g1.xml")
-    case "talos": # Do not run on mujoco_warp, not enough shared memory?
+    case "talos":  # Do not run on mujoco_warp, not enough shared memory?
       robot_path = _load_from_menagerie("pal_talos/talos.xml")
     case "op3":
       robot_path = _load_from_menagerie("robotis_op3/op3.xml")
-    case "spot": # Do not run on mujoco_warp, sparse not supported with implicit integrator
+    case "spot":  # Do not run on mujoco_warp, sparse not supported with implicit integrator
       robot_path = _load_from_menagerie("boston_dynamics_spot/spot.xml")
     case "anymal_b":
       robot_path = _load_from_menagerie("anybotics_anymal_b/anymal_b.xml")
@@ -159,7 +171,7 @@ def _main(argv: Sequence[str]):
       robot_path = _load_from_menagerie("unitree_go1/go1.xml")
     case "go2":
       robot_path = _load_from_menagerie("unitree_go2/go2.xml")
-    case "cassie": # Do not run on mujoco_warp, magnetometer sensor not available
+    case "cassie":  # Do not run on mujoco_warp, magnetometer sensor not available
       robot_path = _load_from_menagerie("agility_cassie/cassie.xml")
     case _:
       raise FileNotFoundError(f"Robot provided is unknown.")
@@ -210,7 +222,7 @@ def _main(argv: Sequence[str]):
   # Same process for textures
   for i in range(len(original_model.textures)):
     if original_model.textures[i].file == "":
-        continue
+      continue
     updated_path = str(robot_path.parent) + "/assets/" + original_model.textures[i].file
     start_texture_section = xml_string.find("<texture")
     search_string = original_model.textures[i].file.split("/")[-1]
@@ -255,9 +267,7 @@ def _main(argv: Sequence[str]):
 
   m = mjwarp.put_model(mjm)
   m.opt.ls_parallel = _LS_PARALLEL.value
-  d = mjwarp.put_data(
-    mjm, mjd, nworld=_BATCH_SIZE.value, nconmax=_NCONMAX.value, njmax=_NJMAX.value
-  )
+  d = mjwarp.put_data(mjm, mjd, nworld=_BATCH_SIZE.value, nconmax=_NCONMAX.value, njmax=_NJMAX.value)
 
   if _CLEAR_KERNEL_CACHE.value:
     wp.clear_kernel_cache()
@@ -317,19 +327,13 @@ Summary for {_BATCH_SIZE.value} parallel rollouts
         size = _NSTEP.value // num_buckets + (i < (_NSTEP.value % num_buckets))
         ncon_arr = np.array(ncon[idx : idx + size])
         nefc_arr = np.array(nefc[idx : idx + size])
-        ncon_matrix.append(
-          [np.mean(ncon_arr), np.std(ncon_arr), np.min(ncon_arr), np.max(ncon_arr)]
-        )
-        nefc_matrix.append(
-          [np.mean(nefc_arr), np.std(nefc_arr), np.min(nefc_arr), np.max(nefc_arr)]
-        )
+        ncon_matrix.append([np.mean(ncon_arr), np.std(ncon_arr), np.min(ncon_arr), np.max(ncon_arr)])
+        nefc_matrix.append([np.mean(nefc_arr), np.std(nefc_arr), np.min(nefc_arr), np.max(nefc_arr)])
         idx += size
 
       def _print_table(matrix, headers):
         num_cols = len(headers)
-        col_widths = [
-          max(len(f"{row[i]:g}") for row in matrix) for i in range(num_cols)
-        ]
+        col_widths = [max(len(f"{row[i]:g}") for row in matrix) for i in range(num_cols)]
         col_widths = [max(col_widths[i], len(headers[i])) for i in range(num_cols)]
 
         print("  ".join(f"{headers[i]:<{col_widths[i]}}" for i in range(num_cols)))
@@ -361,9 +365,9 @@ def _ensure_menagerie_exists() -> None:
 
     try:
       _clone_with_progress(
-          "https://github.com/deepmind/mujoco_menagerie.git",
-          str(_MENAGERIE_PATH),
-          _MENAGERIE_COMMIT_SHA,
+        "https://github.com/deepmind/mujoco_menagerie.git",
+        str(_MENAGERIE_PATH),
+        _MENAGERIE_COMMIT_SHA,
       )
       print("Successfully downloaded mujoco_menagerie")
     except subprocess.CalledProcessError as e:
@@ -371,20 +375,18 @@ def _ensure_menagerie_exists() -> None:
       raise
 
 
-def _clone_with_progress(
-    repo_url: str, target_path: str, commit_sha: str
-) -> None:
+def _clone_with_progress(repo_url: str, target_path: str, commit_sha: str) -> None:
   """Clone a git repo with progress bar."""
   process = subprocess.Popen(
-      ["git", "clone", "--progress", repo_url, target_path],
-      stdout=subprocess.PIPE,
-      stderr=subprocess.PIPE,
-      universal_newlines=True,
+    ["git", "clone", "--progress", repo_url, target_path],
+    stdout=subprocess.PIPE,
+    stderr=subprocess.PIPE,
+    universal_newlines=True,
   )
 
   with tqdm.tqdm(
-      desc="Cloning mujoco_menagerie",
-      bar_format="{desc}: {bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}]",
+    desc="Cloning mujoco_menagerie",
+    bar_format="{desc}: {bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}]",
   ) as pbar:
     pbar.total = 100  # Set to 100 for percentage-based progress.
     current = 0
@@ -413,10 +415,10 @@ def _clone_with_progress(
   # Checkout specific commit.
   print(f"Checking out commit {commit_sha}")
   subprocess.run(
-      ["git", "-C", target_path, "checkout", commit_sha],
-      check=True,
-      stdout=subprocess.PIPE,
-      stderr=subprocess.PIPE,
+    ["git", "-C", target_path, "checkout", commit_sha],
+    check=True,
+    stdout=subprocess.PIPE,
+    stderr=subprocess.PIPE,
   )
 
 
