@@ -143,7 +143,7 @@ def _efc_equality_connect(
   necid = wp.atomic_add(ne_connect_out, 0, 3)
   efcid = nefc_in[0] + necid
 
-  if efcid >= njmax_in:
+  if efcid + 3 >= njmax_in:
     return
 
   data = eq_data[i_eq]
@@ -552,7 +552,7 @@ def _efc_equality_weld(
   newid = wp.atomic_add(ne_weld_out, 0, 6)
   efcid = nefc_in[0] + ne_connect_in[0] + newid
 
-  if efcid >= njmax_in:
+  if efcid + 6 >= njmax_in:
     return
 
   for i in range(wp.static(6)):
