@@ -784,7 +784,10 @@ def put_data(
   else:
     qM = np.zeros((mjm.nv, mjm.nv))
     mujoco.mj_fullM(mjm, qM, mjd.qM)
-    qLD = np.linalg.cholesky(qM)
+    if (mjd.qM == 0.0).all() or (mjd.qLD == 0.0).all():
+      qLD = np.zeros((mjm.nv, mjm.nv))
+    else:
+      qLD = np.linalg.cholesky(qM)
     qM_integration = np.zeros((mjm.nv, mjm.nv), dtype=float)
     qLD_integration = np.zeros((mjm.nv, mjm.nv), dtype=float)
     efc_J = mjd.efc_J.reshape((mjd.nefc, mjm.nv))
