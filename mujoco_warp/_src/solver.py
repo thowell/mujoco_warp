@@ -2055,7 +2055,6 @@ def update_gradient_JTDAJ(
       wp.atomic_add(efc_h_out[worldid, dofi], dofj, value)
 
 
-# TODO(team): combine with _JTDAJ
 @wp.kernel
 def update_gradient_JTCJ(
   # Model:
@@ -2079,11 +2078,13 @@ def update_gradient_JTCJ(
   # Data out:
   efc_h_out: wp.array3d(dtype=float),
 ):
-  conid_tmp, elementid, dim1id, dim2id = wp.tid()
+  conid_start, elementid = wp.tid()
 
-  # TODO(team): cone hessian upper/lower triangle
+  dof1id = dof_tri_row[elementid]
+  dof2id = dof_tri_col[elementid]
+
   for i in range(nblocks_perblock):
-    conid = conid_tmp + i * dim_y
+    conid = conid_start + i * dim_y
 
     if conid >= ncon_in[0]:
       return
@@ -2096,10 +2097,8 @@ def update_gradient_JTCJ(
     if condim == 1:
       continue
 
-    if (dim1id >= condim) or (dim2id >= condim):
-      continue
-
-    mu = contact_friction_in[conid][0] / opt_impratio
+    fri = contact_friction_in[conid]
+    mu = fri[0] / opt_impratio
     n = efc_u_in[conid, 0]
     tt = efc_uu_in[conid]
     if tt <= 0.0:
@@ -2112,57 +2111,61 @@ def update_gradient_JTCJ(
     if not middle_zone:
       continue
 
-    worldid = contact_worldid_in[conid]
-
-    dof1id = dof_tri_row[elementid]
-    dof2id = dof_tri_col[elementid]
-
-    efc1id = contact_efc_address_in[conid, dim1id]
-    efc2id = contact_efc_address_in[conid, dim2id]
-
     t = wp.max(t, types.MJ_MINVAL)
     ttt = wp.max(t * t * t, types.MJ_MINVAL)
-
-    ui = efc_u_in[conid, dim1id]
-    uj = efc_u_in[conid, dim2id]
-
-    # set first row/column: (1, -mu/t * u)
-    if dim1id == 0 and dim2id == 0:
-      hcone = 1.0
-    elif dim1id == 0:
-      hcone = -mu / t * uj
-    elif dim2id == 0:
-      hcone = -mu / t * ui
-    else:
-      hcone = mu * n / ttt * ui * uj
-
-      # add to diagonal: mu^2 - mu * n / t
-      if dim1id == dim2id:
-        hcone += mu * mu - mu * n / t
-
-    # pre and post multiply by diag(mu, friction) scale by dm
-    if dim1id == 0:
-      fri1 = mu
-    else:
-      fri1 = contact_friction_in[conid][dim1id - 1]
-
-    if dim2id == 0:
-      fri2 = mu
-    else:
-      fri2 = contact_friction_in[conid][dim2id - 1]
 
     mu2 = mu * mu
     efc0 = contact_efc_address_in[conid, 0]
     dm = efc_D_in[efc0] / wp.max(mu2 * (1.0 + mu2), types.MJ_MINVAL)
 
-    hcone *= dm * fri1 * fri2
+    if dm == 0.0:
+      continue
 
-    if hcone:
-      wp.atomic_add(
-        efc_h_out[worldid, dof1id],
-        dof2id,
-        efc_J_in[efc1id, dof1id] * efc_J_in[efc2id, dof2id] * hcone,
-      )
+    h = float(0.0)
+
+    for dim1id in range(condim):
+      for dim2id in range(dim1id, condim):
+        ui = efc_u_in[conid, dim1id]
+        uj = efc_u_in[conid, dim2id]
+
+        # set first row/column: (1, -mu/t * u)
+        if dim1id == 0 and dim2id == 0:
+          hcone = 1.0
+        elif dim1id == 0:
+          hcone = -mu / t * uj
+        elif dim2id == 0:
+          hcone = -mu / t * ui
+        else:
+          hcone = mu * n / ttt * ui * uj
+
+          # add to diagonal: mu^2 - mu * n / t
+          if dim1id == dim2id:
+            hcone += mu2 - mu * n / t
+
+        # pre and post multiply by diag(mu, friction) scale by dm
+        if dim1id == 0:
+          fri1 = mu
+        else:
+          fri1 = fri[dim1id - 1]
+
+        if dim2id == 0:
+          fri2 = mu
+        else:
+          fri2 = fri[dim2id - 1]
+
+        hcone *= dm * fri1 * fri2
+
+        if hcone != 0.0:
+          efc1id = contact_efc_address_in[conid, dim1id]
+          efc2id = contact_efc_address_in[conid, dim2id]
+
+          h += efc_J_in[efc1id, dof1id] * efc_J_in[efc2id, dof2id] * hcone
+
+          if dim1id != dim2id:
+            h += efc_J_in[efc1id, dof2id] * efc_J_in[efc2id, dof1id] * hcone
+
+    worldid = contact_worldid_in[conid]
+    wp.atomic_add(efc_h_out[worldid, dof1id], dof2id, h)
 
 
 def update_gradient_cholesky(tile_size: int):
@@ -2270,10 +2273,9 @@ def _update_gradient(m: types.Model, d: types.Data):
 
     if m.opt.cone == types.ConeType.ELLIPTIC:
       nblocks_perblock = int((d.nconmax + dim_y - 1) / dim_y)
-      # TODO(team): optimize launch
       wp.launch(
         update_gradient_JTCJ,
-        dim=(dim_y, m.dof_tri_row.size, m.condim_max, m.condim_max),
+        dim=(dim_y, m.dof_tri_row.size),
         inputs=[
           m.opt.impratio,
           m.dof_tri_row,
