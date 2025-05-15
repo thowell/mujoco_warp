@@ -235,18 +235,6 @@ def _flex_elasticity(
       qfrc_spring_out[worldid, body_dofadr[bodyid] + x] += force[v, x]
 
 
-@wp.kernel
-def _combine_qfrc(
-  # Data in:
-  qfrc_spring_in: wp.array2d(dtype=float),
-  qfrc_damper_in: wp.array2d(dtype=float),
-  # Data out:
-  qfrc_passive_out: wp.array2d(dtype=float),
-):
-  worldid, dofid = wp.tid()
-  qfrc_passive_out[worldid, dofid] = qfrc_spring_in[worldid, dofid] + qfrc_damper_in[worldid, dofid]
-
-
 @event_scope
 def passive(m: Model, d: Data):
   """Adds all passive forces."""
@@ -264,12 +252,6 @@ def passive(m: Model, d: Data):
     dim=(d.nworld, m.njnt),
     inputs=[m.qpos_spring, m.jnt_type, m.jnt_qposadr, m.jnt_dofadr, m.jnt_stiffness, d.qpos],
     outputs=[d.qfrc_spring],
-  )
-  wp.launch(
-    _damper_passive,
-    dim=(d.nworld, m.nv),
-    inputs=[m.dof_damping, d.qvel, d.qfrc_spring],
-    outputs=[d.qfrc_damper, d.qfrc_passive],
   )
   wp.launch(
     _flex_elasticity,
@@ -294,10 +276,10 @@ def passive(m: Model, d: Data):
     outputs=[d.qfrc_spring],
   )
   wp.launch(
-    _combine_qfrc,
+    _damper_passive,
     dim=(d.nworld, m.nv),
-    inputs=[d.qfrc_spring, d.qfrc_damper],
-    outputs=[d.qfrc_passive],
+    inputs=[m.dof_damping, d.qvel, d.qfrc_spring],
+    outputs=[d.qfrc_damper, d.qfrc_passive],
   )
   if m.ngravcomp and not (m.opt.disableflags & DisableBit.GRAVITY):
     d.qfrc_gravcomp.zero_()
