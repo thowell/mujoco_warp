@@ -22,25 +22,26 @@ from .types import vec10
 @wp.func
 def muscle_gain_length(length: float, lmin: float, lmax: float) -> float:
   """Normalized muscle length-gain curve."""
-  if (lmin <= length) and (length <= lmax):
-    # mid-ranges (maximum is at 1.0)
-    a = 0.5 * (lmin + 1.0)
-    b = 0.5 * (1.0 + lmax)
 
-    if length <= a:
-      x = (length - lmin) / wp.max(MJ_MINVAL, a - lmin)
-      return 0.5 * x * x
-    elif length <= 1.0:
-      x = (1.0 - length) / wp.max(MJ_MINVAL, 1.0 - a)
-      return 1.0 - 0.5 * x * x
-    elif length <= b:
-      x = (length - 1.0) / wp.max(MJ_MINVAL, b - 1.0)
-      return 1.0 - 0.5 * x * x
-    else:
-      x = (lmax - length) / wp.max(MJ_MINVAL, lmax - b)
-      return 0.5 * x * x
-  else:
+  if (lmin > length) or (length > lmax):
     return 0.0
+
+  # mid-ranges (maximum is at 1.0)
+  a = 0.5 * (lmin + 1.0)
+  b = 0.5 * (1.0 + lmax)
+
+  if length <= a:
+    x = (length - lmin) / wp.max(MJ_MINVAL, a - lmin)
+    return 0.5 * x * x
+  elif length <= 1.0:
+    x = (1.0 - length) / wp.max(MJ_MINVAL, 1.0 - a)
+    return 1.0 - 0.5 * x * x
+  elif length <= b:
+    x = (length - 1.0) / wp.max(MJ_MINVAL, b - 1.0)
+    return 1.0 - 0.5 * x * x
+  else:
+    x = (lmax - length) / wp.max(MJ_MINVAL, lmax - b)
+    return 0.5 * x * x
 
 
 @wp.func
