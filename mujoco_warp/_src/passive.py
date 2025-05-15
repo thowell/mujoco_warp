@@ -289,6 +289,7 @@ def _qfrc_passive(
 @wp.kernel
 def _flex_elasticity(
   # Model:
+  opt_timestep: float,
   body_dofadr: wp.array(dtype=int),
   flex_dim: wp.array(dtype=int),
   flex_vertadr: wp.array(dtype=int),
@@ -300,7 +301,6 @@ def _flex_elasticity(
   flexedge_length0: wp.array(dtype=float),
   flex_stiffness: wp.array(dtype=float),
   flex_damping: wp.array(dtype=float),
-  opt_timestep: float,
   # Data in:
   flexvert_xpos_in: wp.array2d(dtype=wp.vec3),
   flexedge_length_in: wp.array2d(dtype=float),
@@ -381,6 +381,7 @@ def passive(m: Model, d: Data):
     _flex_elasticity,
     dim=(d.nworld, m.nflexelem),
     inputs=[
+      m.opt.timestep,
       m.body_dofadr,
       m.flex_dim,
       m.flex_vertadr,
@@ -392,7 +393,6 @@ def passive(m: Model, d: Data):
       m.flexedge_length0,
       m.flex_stiffness,
       m.flex_damping,
-      m.opt.timestep,
       d.flexvert_xpos,
       d.flexedge_length,
       d.flexedge_velocity,
