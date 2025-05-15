@@ -26,6 +26,17 @@ from .types import WrapType
 
 @wp.func
 def is_intersect(p1: wp.vec2, p2: wp.vec2, p3: wp.vec2, p4: wp.vec2) -> bool:
+  """Check for intersection of two 2D line segments.
+
+  Args:
+    p1: 2D point from segment 1
+    p2: 2D point from segment 1
+    p3: 2D point from segment 2
+    p4: 2D point from segment 2
+
+  Returns:
+    intersection status of line segments
+  """
   # compute determinant, check
   det = (p4[1] - p3[1]) * (p2[0] - p1[0]) - (p4[0] - p3[0]) * (p2[1] - p1[1])
 
@@ -44,6 +55,17 @@ def is_intersect(p1: wp.vec2, p2: wp.vec2, p3: wp.vec2, p4: wp.vec2) -> bool:
 
 @wp.func
 def length_circle(p0: wp.vec2, p1: wp.vec2, ind: int, radius: float) -> float:
+  """Curve length along circle.
+
+  Args:
+    p0: 2D point
+    p1: 2D point
+    ind: input for flip
+    radius: circle radius
+
+  Returns:
+    curve length
+  """
   # compute angle between 0 and pi
   p0n, _ = math.normalize_with_norm(p0)
   p1n, _ = math.normalize_with_norm(p1)
@@ -60,6 +82,16 @@ def length_circle(p0: wp.vec2, p1: wp.vec2, ind: int, radius: float) -> float:
 
 @wp.func
 def wrap_circle(end: wp.vec4, side: wp.vec2, radius: float):
+  """2D circle wrap.
+
+  Args:
+    end: two 2D points
+    side: optional 2D side point, no side point: wp.vec2(wp.inf)
+    radius: circle radius
+
+  Returns:
+    length of circular wrap or -1.0 if no wrap, pair of 2D wrap points
+  """
   # TODO(team): return type
   valid_side = wp.norm_l2(side) < wp.inf
 
@@ -155,6 +187,18 @@ def wrap_inside(
   zinit: float = 1.0 - 1.0e-7,
   tolerance: float = 1.0e-6,
 ):
+  """2D inside wrap.
+
+  Args:
+    end: two 2D points
+    radius: circle radius
+    maxiter: maximum number of solver iterations
+    zinit: initialization for solver
+    tolerance: solver convergence tolerance
+
+  Returns:
+    0.0 if wrap else -1.0, pair of 2D wrap points
+  """
   # TODO(team): return type
   end0 = wp.vec2(end[0], end[1])
   end1 = wp.vec2(end[2], end[3])
@@ -275,6 +319,20 @@ def wrap(
   geomtype: int,
   side: wp.vec3,
 ) -> Tuple[float, wp.vec3, wp.vec3]:
+  """Wrap tendons around spheres and cylinders.
+
+  Args:
+    x0: 3D endpoint
+    x1: 3D endpoint
+    xpos: position of geom
+    xmat: orientation of geom
+    radius: geom radius
+    type: wrap type (mjtWrap)
+    side: 3D position for sidesite, no side point: wp.vec3(wp.inf)
+
+  Returns:
+    length of circuler wrap else -1.0 if no wrap, pair of 3D wrap points
+  """
   # TODO(team): check object type; SHOULD NOT OCCUR
 
   # map sites to wrap object's local frame
