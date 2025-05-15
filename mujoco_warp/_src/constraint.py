@@ -527,7 +527,8 @@ def _efc_friction_tendon(
 ):
   worldid, tenid = wp.tid()
 
-  if tendon_frictionloss[worldid, tenid] <= 0.0:
+  frictionloss = tendon_frictionloss[worldid, tenid]
+  if frictionloss <= 0.0:
     return
 
   efcid = wp.atomic_add(nefc_out, 0, 1)
@@ -553,7 +554,7 @@ def _efc_friction_tendon(
     tendon_solimp_fri[worldid, tenid],
     0.0,
     Jqvel,
-    tendon_frictionloss[worldid, tenid],
+    frictionloss,
     tenid,
     efc_id_out,
     efc_pos_out,
