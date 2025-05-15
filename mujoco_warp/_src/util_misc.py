@@ -125,7 +125,6 @@ def muscle_bias(len: float, lengthrange: wp.vec2, acc0: float, prm: vec10) -> fl
 def _sigmoid(x: float) -> float:
   """Sigmoid function over 0 <= x <= 1 using quintic polynomial."""
 
-  # fast return
   if x <= 0.0:
     return 0.0
 
