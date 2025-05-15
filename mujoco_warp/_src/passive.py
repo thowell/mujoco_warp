@@ -300,12 +300,11 @@ def _flex_elasticity(
   flexedge_length0: wp.array(dtype=float),
   flex_stiffness: wp.array(dtype=float),
   flex_damping: wp.array(dtype=float),
+  opt_timestep: float,
   # Data in:
   flexvert_xpos_in: wp.array2d(dtype=wp.vec3),
   flexedge_length_in: wp.array2d(dtype=float),
   flexedge_velocity_in: wp.array2d(dtype=float),
-  # In:
-  timestep: float,
   # Data out:
   qfrc_spring_out: wp.array2d(dtype=float),
 ):
@@ -316,7 +315,7 @@ def _flex_elasticity(
   dim = flex_dim[f]
   nedge = 3
   nvert = 3
-  kD = flex_damping[f] / timestep
+  kD = flex_damping[f] / opt_timestep
 
   edges = wp.mat(1, 2, 2, 0, 0, 1, shape=(3, 2), dtype=int)
   gradient = wp.mat(0.0, shape=(3, 6))
@@ -335,7 +334,7 @@ def _flex_elasticity(
     vel = flexedge_velocity_in[worldid, flex_edgeadr[f] + idx]
     deformed = flexedge_length_in[worldid, flex_edgeadr[f] + idx]
     reference = flexedge_length0[flex_edgeadr[f] + idx]
-    previous = deformed - vel * timestep
+    previous = deformed - vel * opt_timestep
     elongation[e] = deformed * deformed - reference * reference + (deformed * deformed - previous * previous) * kD
 
   metric = wp.mat33(0.0)
@@ -393,10 +392,10 @@ def passive(m: Model, d: Data):
       m.flexedge_length0,
       m.flex_stiffness,
       m.flex_damping,
+      m.opt.timestep,
       d.flexvert_xpos,
       d.flexedge_length,
       d.flexedge_velocity,
-      m.opt.timestep,
     ],
     outputs=[d.qfrc_spring],
   )
