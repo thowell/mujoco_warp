@@ -39,6 +39,58 @@ class CollisionTest(parameterized.TestCase):
           </worldbody>
         </mujoco>
       """,
+    "box_box_vf": """
+        <mujoco>
+          <worldbody>
+            <body pos="0 -0.2 1.2" euler="44 46 0">
+              <freejoint/>
+              <geom size="0.6 0.4 0.7" type="box"/>
+            </body>
+            <body pos="0 0 0" euler="0 0 0">
+              <geom size="0.5 0.5 0.5" type="box"/>
+            </body>
+          </worldbody>
+        </mujoco>
+      """,
+    "box_box_vf_flat": """
+        <mujoco>
+          <worldbody>
+            <body pos="0 0 0" >
+              <geom size="0.6 0.6 0.5" type="box"/>
+            </body>
+            <body pos="-.28 0.4 1.199" >
+              <freejoint/>
+              <geom size="0.6 0.4 0.7" type="box"/>
+            </body>
+          </worldbody>
+        </mujoco>
+      """,
+    "box_box_ee": """
+        <mujoco>
+          <worldbody>
+            <body pos="0 0 0" euler="0 45 0">
+              <geom size="0.5 0.5 0.5" type="box"/>
+            </body>
+            <body pos="0 0 1.6" euler="44 0 90">
+              <freejoint/>
+              <geom size="0.6 0.4 0.7" type="box"/>
+            </body>
+          </worldbody>
+        </mujoco>
+      """,
+    "box_box_ee_deep": """
+        <mujoco>
+          <worldbody>
+            <body pos="0 0 0" euler="0 74 0">
+              <geom size="0.4 0.45 0.4" type="box"/>
+            </body>
+            <body pos="0 0 1.2" euler="24 0 90">
+              <freejoint/>
+              <geom size="0.6 0.4 0.7" type="box"/>
+            </body>
+          </worldbody>
+        </mujoco>
+      """,
     "plane_sphere": """
         <mujoco>
           <worldbody>
@@ -202,6 +254,20 @@ class CollisionTest(parameterized.TestCase):
           </worldbody>
         </mujoco>
         """,
+    "mesh_plane": """
+        <mujoco>
+          <asset>
+            <mesh name="cube" vertex="1 1 1  1 1 -1  1 -1 1  1 -1 -1  -1 1 1  -1 1 -1  -1 -1 1  -1 -1 -1"/>
+          </asset>
+          <worldbody>
+            <geom size="40 40 40" type="plane"/>
+            <body pos="0 0 1" euler="45 0 0">
+              <freejoint/>
+              <geom type="mesh" mesh="cube"/>
+            </body>
+          </worldbody>
+        </mujoco>
+        """,
     "sphere_box_shallow": """
         <mujoco>
           <worldbody>
@@ -291,7 +357,7 @@ class CollisionTest(parameterized.TestCase):
   @parameterized.parameters(_FIXTURES.keys())
   def test_collision(self, fixture):
     """Tests collisions with different geometries."""
-    mjm, mjd, m, d = test_util.fixture(xml=self._FIXTURES[fixture])
+    mjm, mjd, m, d = test_util.fixture(xml=self._FIXTURES[fixture], qpos0=True)
 
     # Exempt GJK collisions from exact contact count check
     # because GJK generates more contacts
@@ -383,7 +449,8 @@ class CollisionTest(parameterized.TestCase):
           <pair geom1="geom1" geom2="geom2" margin="2" gap="3" condim="6" friction="5 4 3 2 1" solref="-.25 -.5" solreffriction="2 4" solimp=".1 .2 .3 .4 .5"/>
         </contact>
       </mujoco>
-    """
+    """,
+      qpos0=True,
     )
     self.assertTrue((m.nxn_pairid.numpy() == 0).all())
 
@@ -426,7 +493,8 @@ class CollisionTest(parameterized.TestCase):
           <pair geom1="geom1" geom2="geom2" margin="2" gap="3" condim="6" friction="5 4 3 2 1" solref="-.25 -.5" solreffriction="2 4" solimp=".1 .2 .3 .4 .5"/>
         </contact>
       </mujoco>
-    """
+    """,
+      qpos0=True,
     )
     self.assertTrue((m.nxn_pairid.numpy() == 0).all())
 
@@ -470,7 +538,8 @@ class CollisionTest(parameterized.TestCase):
           <pair geom1="geom1" geom2="geom2" margin="2" gap="3" condim="6" friction="5 4 3 2 1" solref="-.25 -.5" solreffriction="2 4" solimp=".1 .2 .3 .4 .5"/>
         </contact>
       </mujoco>
-    """
+    """,
+      qpos0=True,
     )
     self.assertTrue((m.nxn_pairid.numpy() == 0).all())
 
@@ -518,7 +587,8 @@ class CollisionTest(parameterized.TestCase):
           <pair geom1="geom2" geom2="geom3" margin="2" gap="3" condim="6" friction="5 4 3 2 1" solref="-.25 -.5" solreffriction="2 4" solimp=".1 .2 .3 .4 .5"/>
         </contact>
       </mujoco>
-    """
+    """,
+      qpos0=True,
     )
     np.testing.assert_equal(m.nxn_pairid.numpy(), np.array([-2, -1, 0]))
 
