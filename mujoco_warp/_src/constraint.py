@@ -516,6 +516,8 @@ def _efc_friction_tendon(
   efc_worldid_out[efcid] = worldid
 
   Jqvel = float(0.0)
+
+  # TODO(team): parallelize
   for i in range(nv):
     J = ten_J_in[worldid, tenid, i]
     efc_J_out[efcid, i] = J
