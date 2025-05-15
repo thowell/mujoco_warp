@@ -18,8 +18,10 @@ from typing import Any, Tuple
 import warp as wp
 
 from . import math
+from . import ray
 from . import smooth
 from .types import MJ_MINVAL
+from .types import ConeType
 from .types import Data
 from .types import DataType
 from .types import DisableBit
@@ -1273,44 +1275,179 @@ def _sensor_acc(
     _write_vector(sensor_datatype, sensor_adr, sensor_cutoff, sensorid, 3, vec3, out)
 
 
+@wp.kernel
+def _sensor_touch_zero(
+  # Model:
+  sensor_adr: wp.array(dtype=int),
+  sensor_touch_adr: wp.array(dtype=int),
+  # Data out:
+  sensordata_out: wp.array2d(dtype=float),
+):
+  worldid, sensortouchadrid = wp.tid()
+  sensorid = sensor_touch_adr[sensortouchadrid]
+  adr = sensor_adr[sensorid]
+  sensordata_out[worldid, adr] = 0.0
+
+
+@wp.kernel
+def _sensor_touch(
+  # Model:
+  opt_cone: int,
+  geom_bodyid: wp.array(dtype=int),
+  site_type: wp.array(dtype=int),
+  site_bodyid: wp.array(dtype=int),
+  site_size: wp.array(dtype=wp.vec3),
+  sensor_objid: wp.array(dtype=int),
+  sensor_adr: wp.array(dtype=int),
+  sensor_touch_adr: wp.array(dtype=int),
+  # Data in:
+  ncon_in: wp.array(dtype=int),
+  site_xpos_in: wp.array2d(dtype=wp.vec3),
+  site_xmat_in: wp.array2d(dtype=wp.mat33),
+  contact_pos_in: wp.array(dtype=wp.vec3),
+  contact_frame_in: wp.array(dtype=wp.mat33),
+  contact_dim_in: wp.array(dtype=int),
+  contact_geom_in: wp.array(dtype=wp.vec2i),
+  contact_efc_address_in: wp.array2d(dtype=int),
+  contact_worldid_in: wp.array(dtype=int),
+  efc_force_in: wp.array(dtype=float),
+  # Data out:
+  sensordata_out: wp.array2d(dtype=float),
+):
+  conid, sensortouchadrid = wp.tid()
+
+  if conid > ncon_in[0]:
+    return
+
+  sensorid = sensor_touch_adr[sensortouchadrid]
+
+  objid = sensor_objid[sensorid]
+  bodyid = site_bodyid[objid]
+
+  # find contact in sensor zone, add normal force
+
+  # contacting bodies
+  geom = contact_geom_in[conid]
+  conbody = wp.vec2i(geom_bodyid[geom[0]], geom_bodyid[geom[1]])
+
+  # select contacts involving sensorized body
+  efc_address0 = contact_efc_address_in[conid, 0]
+  if efc_address0 >= 0 and (bodyid == conbody[0] or bodyid == conbody[1]):
+    # get contact normal force
+    normalforce = efc_force_in[efc_address0]
+
+    if opt_cone == int(ConeType.PYRAMIDAL.value):
+      dim = contact_dim_in[conid]
+      for i in range(1, 2 * (dim - 1)):
+        normalforce += efc_force_in[contact_efc_address_in[conid, i]]
+
+    if normalforce <= 0.0:
+      return
+
+    # convert contact normal force to global frame, normalize
+    frame = contact_frame_in[conid]
+    conray = wp.vec3(frame[0, 0], frame[0, 1], frame[0, 2]) * normalforce
+    conray, _ = math.normalize_with_norm(conray)
+
+    # flip ray direction if sensor is on body2
+    if bodyid == conbody[1]:
+      conray = -conray
+
+    # add if ray-zone intersection (always true when contact.pos inside zone)
+    worldid = contact_worldid_in[conid]
+    if (
+      ray.ray_geom(
+        site_xpos_in[worldid, objid],
+        site_xmat_in[worldid, objid],
+        site_size[objid],
+        contact_pos_in[conid],
+        conray,
+        site_type[objid],
+      )
+      >= 0.0
+    ):
+      adr = sensor_adr[sensorid]
+      wp.atomic_add(sensordata_out[worldid], adr, normalforce)
+
+
 @event_scope
 def sensor_acc(m: Model, d: Data):
   """Compute acceleration-dependent sensor values."""
-
-  if (m.sensor_acc_adr.size == 0) or (m.opt.disableflags & DisableBit.SENSOR):
+  if m.opt.disableflags & DisableBit.SENSOR:
     return
 
-  if m.sensor_rne_postconstraint:
-    smooth.rne_postconstraint(m, d)
+  if m.sensor_touch_adr.size > 0:
+    wp.launch(
+      _sensor_touch_zero,
+      dim=(d.nworld, m.sensor_touch_adr.size),
+      inputs=[
+        m.sensor_adr,
+        m.sensor_touch_adr,
+      ],
+      outputs=[
+        d.sensordata,
+      ],
+    )
+    wp.launch(
+      _sensor_touch,
+      dim=(d.nconmax, m.sensor_touch_adr.size),
+      inputs=[
+        m.opt.cone,
+        m.geom_bodyid,
+        m.site_type,
+        m.site_bodyid,
+        m.site_size,
+        m.sensor_objid,
+        m.sensor_adr,
+        m.sensor_touch_adr,
+        d.ncon,
+        d.site_xpos,
+        d.site_xmat,
+        d.contact.pos,
+        d.contact.frame,
+        d.contact.dim,
+        d.contact.geom,
+        d.contact.efc_address,
+        d.contact.worldid,
+        d.efc.force,
+      ],
+      outputs=[
+        d.sensordata,
+      ],
+    )
 
-  wp.launch(
-    _sensor_acc,
-    dim=(d.nworld, m.sensor_acc_adr.size),
-    inputs=[
-      m.body_rootid,
-      m.jnt_dofadr,
-      m.geom_bodyid,
-      m.site_bodyid,
-      m.cam_bodyid,
-      m.sensor_type,
-      m.sensor_datatype,
-      m.sensor_objtype,
-      m.sensor_objid,
-      m.sensor_adr,
-      m.sensor_cutoff,
-      m.sensor_acc_adr,
-      d.xpos,
-      d.xipos,
-      d.geom_xpos,
-      d.site_xpos,
-      d.site_xmat,
-      d.cam_xpos,
-      d.subtree_com,
-      d.cvel,
-      d.actuator_force,
-      d.qfrc_actuator,
-      d.cacc,
-      d.cfrc_int,
-    ],
-    outputs=[d.sensordata],
-  )
+  if m.sensor_acc_adr.size > 0:
+    if m.sensor_rne_postconstraint:
+      smooth.rne_postconstraint(m, d)
+
+    wp.launch(
+      _sensor_acc,
+      dim=(d.nworld, m.sensor_acc_adr.size),
+      inputs=[
+        m.body_rootid,
+        m.jnt_dofadr,
+        m.geom_bodyid,
+        m.site_bodyid,
+        m.cam_bodyid,
+        m.sensor_type,
+        m.sensor_datatype,
+        m.sensor_objtype,
+        m.sensor_objid,
+        m.sensor_adr,
+        m.sensor_cutoff,
+        m.sensor_acc_adr,
+        d.xpos,
+        d.xipos,
+        d.geom_xpos,
+        d.site_xpos,
+        d.site_xmat,
+        d.cam_xpos,
+        d.subtree_com,
+        d.cvel,
+        d.actuator_force,
+        d.qfrc_actuator,
+        d.cacc,
+        d.cfrc_int,
+      ],
+      outputs=[d.sensordata],
+    )

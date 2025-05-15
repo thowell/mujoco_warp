@@ -262,6 +262,7 @@ class SensorType(enum.IntEnum):
     FRAMEANGVEL: 3D angular velocity
     SUBTREELINVEL: subtree linear velocity
     SUBTREEANGMOM: subtree angular momentum
+    TOUCH: scalar contact normal forces summed over sensor zone
     ACCELEROMETER: accelerometer
     FORCE: force
     TORQUE: torque
@@ -293,6 +294,7 @@ class SensorType(enum.IntEnum):
   FRAMEANGVEL = mujoco.mjtSensor.mjSENS_FRAMEANGVEL
   SUBTREELINVEL = mujoco.mjtSensor.mjSENS_SUBTREELINVEL
   SUBTREEANGMOM = mujoco.mjtSensor.mjSENS_SUBTREEANGMOM
+  TOUCH = mujoco.mjtSensor.mjSENS_TOUCH
   ACCELEROMETER = mujoco.mjtSensor.mjSENS_ACCELEROMETER
   FORCE = mujoco.mjtSensor.mjSENS_FORCE
   TORQUE = mujoco.mjtSensor.mjSENS_TORQUE
@@ -687,6 +689,7 @@ class Model:
     geom_margin: detect contact if dist<margin               (nworld, ngeom,)
     geom_gap: include in solver if dist<margin-gap           (nworld, ngeom,)
     geom_rgba: rgba when material is omitted                 (nworld, ngeom, 4)
+    site_type: geom type for rendering (mjtGeom)             (nsite,)
     site_bodyid: id of site's body                           (nsite,)
     site_pos: local position offset rel. to body             (nworld, nsite, 3)
     site_quat: local orientation offset rel. to body         (nworld, nsite, 4)
@@ -793,6 +796,8 @@ class Model:
     sensor_pos_adr: addresses for position sensors           (<=nsensor,)
     sensor_vel_adr: addresses for velocity sensors           (<=nsensor,)
     sensor_acc_adr: addresses for acceleration sensors       (<=nsensor,)
+                    (excluding touch sensors)
+    sensor_touch_adr: addresses for touch sensors            (<=nsensor,)
     sensor_subtree_vel: evaluate subtree_vel
     sensor_rne_postconstraint: evaluate rne_postconstraint
     mocap_bodyid: id of body for mocap                       (nmocap,)
@@ -915,7 +920,9 @@ class Model:
   geom_margin: wp.array2d(dtype=float)
   geom_gap: wp.array2d(dtype=float)
   geom_rgba: wp.array2d(dtype=wp.vec4)
+  site_type: wp.array(dtype=int)
   site_bodyid: wp.array(dtype=int)
+  site_size: wp.array(dtype=wp.vec3)
   site_pos: wp.array2d(dtype=wp.vec3)
   site_quat: wp.array2d(dtype=wp.quat)
   cam_mode: wp.array(dtype=int)
@@ -1033,6 +1040,7 @@ class Model:
   sensor_pos_adr: wp.array(dtype=int)  # warp only
   sensor_vel_adr: wp.array(dtype=int)  # warp only
   sensor_acc_adr: wp.array(dtype=int)  # warp only
+  sensor_touch_adr: wp.array(dtype=int)  # warp only
   sensor_subtree_vel: bool  # warp only
   sensor_rne_postconstraint: bool  # warp only
   mocap_bodyid: wp.array(dtype=int)  # warp only

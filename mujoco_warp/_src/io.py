@@ -405,7 +405,9 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
     geom_margin=create_nmodel_batched_array(mjm.geom_margin, dtype=float),
     geom_gap=create_nmodel_batched_array(mjm.geom_gap, dtype=float),
     geom_rgba=create_nmodel_batched_array(mjm.geom_rgba, dtype=wp.vec4),
+    site_type=wp.array(mjm.site_type, dtype=int),
     site_bodyid=wp.array(mjm.site_bodyid, dtype=int),
+    site_size=wp.array(mjm.site_size, dtype=wp.vec3),
     site_pos=create_nmodel_batched_array(mjm.site_pos, dtype=wp.vec3),
     site_quat=create_nmodel_batched_array(mjm.site_quat, dtype=wp.quat),
     cam_mode=wp.array(mjm.cam_mode, dtype=int),
@@ -534,7 +536,11 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
       dtype=int,
     ),
     sensor_acc_adr=wp.array(
-      np.nonzero(mjm.sensor_needstage == mujoco.mjtStage.mjSTAGE_ACC)[0],
+      np.nonzero((mjm.sensor_needstage == mujoco.mjtStage.mjSTAGE_ACC) & (mjm.sensor_type != mujoco.mjtSensor.mjSENS_TOUCH))[0],
+      dtype=int,
+    ),
+    sensor_touch_adr=wp.array(
+      np.nonzero(mjm.sensor_type == mujoco.mjtSensor.mjSENS_TOUCH)[0],
       dtype=int,
     ),
     sensor_subtree_vel=np.isin(
