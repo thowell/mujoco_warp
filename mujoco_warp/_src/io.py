@@ -251,12 +251,8 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
   # rangefinder
   is_rangefinder = mjm.sensor_type == mujoco.mjtSensor.mjSENS_RANGEFINDER
   sensor_rangefinder_adr = np.nonzero(is_rangefinder)[0]
-  rangefinder_sensor_adr = -1 * np.ones(mjm.nsensor)
-  rangefinder_count = 0
-  for i, rf in enumerate(is_rangefinder):
-    if rf:
-      rangefinder_sensor_adr[i] = rangefinder_count
-      rangefinder_count += 1
+  rangefinder_sensor_adr = np.full(mjm.nsensor, -1)
+  rangefinder_sensor_adr[sensor_rangefinder_adr] = np.arange(len(sensor_rangefinder_adr))
 
   m = types.Model(
     nq=mjm.nq,
