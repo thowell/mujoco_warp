@@ -232,7 +232,7 @@ def _flex_elasticity(
     vert = flex_elem[(dim + 1) * elemid + v]
     bodyid = flex_vertbodyid[flex_vertadr[f] + vert]
     for x in range(3):
-      qfrc_spring_out[worldid, body_dofadr[bodyid] + x] += force[v, x]
+      wp.atomic_add(qfrc_spring_out, worldid, body_dofadr[bodyid] + x, force[v, x])
 
 
 @event_scope
