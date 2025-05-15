@@ -44,9 +44,6 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
   if mjm.nflex > 1:
     raise NotImplementedError("Only one flex is unsupported.")
 
-  if mjm.tendon_frictionloss.any():
-    raise NotImplementedError("Tendon frictionloss is unsupported.")
-
   if mjm.geom_fluid.any():
     raise NotImplementedError("Ellipsoid fluid model not implemented.")
 
@@ -503,8 +500,11 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
     tendon_limited_adr=wp.array(np.nonzero(mjm.tendon_limited)[0], dtype=wp.int32, ndim=1),
     tendon_solref_lim=create_nmodel_batched_array(mjm.tendon_solref_lim, dtype=wp.vec2f),
     tendon_solimp_lim=create_nmodel_batched_array(mjm.tendon_solimp_lim, dtype=types.vec5),
+    tendon_solref_fri=create_nmodel_batched_array(mjm.tendon_solref_fri, dtype=wp.vec2f),
+    tendon_solimp_fri=create_nmodel_batched_array(mjm.tendon_solimp_fri, dtype=types.vec5),
     tendon_range=create_nmodel_batched_array(mjm.tendon_range, dtype=wp.vec2f),
     tendon_margin=create_nmodel_batched_array(mjm.tendon_margin, dtype=float),
+    tendon_frictionloss=create_nmodel_batched_array(mjm.tendon_frictionloss, dtype=float),
     tendon_length0=create_nmodel_batched_array(mjm.tendon_length0, dtype=float),
     tendon_invweight0=create_nmodel_batched_array(mjm.tendon_invweight0, dtype=float),
     wrap_objid=wp.array(mjm.wrap_objid, dtype=int),
