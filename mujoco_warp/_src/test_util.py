@@ -42,6 +42,8 @@ def fixture(
   constraint: bool = True,
   equality: bool = True,
   gravity: bool = True,
+  qpos0: bool = False,
+  kick: bool = False,
   eulerdamp: Optional[bool] = None,
   cone: Optional[ConeType] = None,
   integrator: Optional[IntegratorType] = None,
@@ -51,7 +53,6 @@ def fixture(
   ls_parallel: Optional[bool] = None,
   sparse: Optional[bool] = None,
   disableflags: Optional[int] = None,
-  kick: bool = False,
   seed: int = 42,
   nworld: int = None,
   nconmax: int = None,
@@ -65,6 +66,7 @@ def fixture(
     mjm = mujoco.MjModel.from_xml_string(xml)
   else:
     raise ValueError("either fname or xml must be provided")
+
   if not actuation:
     mjm.opt.disableflags |= DisableBit.ACTUATION
   if not contact:
@@ -77,6 +79,7 @@ def fixture(
     mjm.opt.disableflags |= DisableBit.GRAVITY
   if not eulerdamp:
     mjm.opt.disableflags |= DisableBit.EULERDAMP
+
   if cone is not None:
     mjm.opt.cone = cone
   if integrator is not None:
@@ -94,18 +97,32 @@ def fixture(
       mjm.opt.jacobian = mujoco.mjtJacobian.mjJAC_SPARSE
     else:
       mjm.opt.jacobian = mujoco.mjtJacobian.mjJAC_DENSE
+
   mjd = mujoco.MjData(mjm)
   if keyframe > -1:
     mujoco.mj_resetDataKeyframe(mjm, mjd, keyframe)
+  elif qpos0:
+    mjd.qpos[:] = mjm.qpos0
+  else:
+    # set random qpos, underlying code should gracefully handle un-normalized quats
+    mjd.qpos[:] = np.random.random(mjm.nq)
+
   if kick:
     # give the system a little kick to ensure we have non-identity rotations
     mjd.qvel = np.random.uniform(-0.01, 0.01, mjm.nv)
     mjd.ctrl = np.random.normal(scale=0.01, size=mjm.nu)
     mujoco.mj_step(mjm, mjd, 3)  # let dynamics get state significantly non-zero
+
+  if mjm.nmocap:
+    mjd.mocap_pos = np.random.random(mjd.mocap_pos.shape)
+    mocap_quat = np.random.random(mjd.mocap_quat.shape)
+    mjd.mocap_quat = mocap_quat
+
   mujoco.mj_forward(mjm, mjd)
   m = io.put_model(mjm)
   if ls_parallel is not None:
     m.opt.ls_parallel = ls_parallel
+
   d = io.put_data(mjm, mjd, nworld=nworld, nconmax=nconmax, njmax=njmax)
   return mjm, mjd, m, d
 
