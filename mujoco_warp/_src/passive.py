@@ -194,7 +194,7 @@ def _flex_elasticity(
   kD = flex_damping[f] / timestep
 
   edges = wp.mat(1, 2, 2, 0, 0, 1, shape=(3, 2), dtype=int)
-  gradient = wp.mat(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, shape=(3, 6))
+  gradient = wp.mat(0.0, shape=(3, 6))
   for e in range(nedge):
     vert0 = flex_elem[(dim + 1) * t + edges[e, 0]]
     vert1 = flex_elem[(dim + 1) * t + edges[e, 1]]
@@ -204,7 +204,7 @@ def _flex_elasticity(
       gradient[e, 0 + i] = xpos0[i] - xpos1[i]
       gradient[e, 3 + i] = xpos1[i] - xpos0[i]
 
-  elongation = wp.vec3(0.0, 0.0, 0.0)
+  elongation = wp.vec3(0.0)
   for e in range(nedge):
     idx = flex_elemedge[flex_elemedgeadr[f] + t * nedge + e]
     vel = flexedge_velocity_in[worldid, flex_edgeadr[f] + idx]
@@ -213,7 +213,7 @@ def _flex_elasticity(
     previous = deformed - vel * timestep
     elongation[e] = deformed * deformed - reference * reference + (deformed * deformed - previous * previous) * kD
 
-  metric = wp.mat33(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+  metric = wp.mat33(0.0)
   id = 0
   for ed1 in range(nedge):
     for ed2 in range(ed1, nedge):
@@ -221,7 +221,7 @@ def _flex_elasticity(
       metric[ed2, ed1] = flex_stiffness[21 * t + id]
       id += 1
 
-  force = wp.mat33(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+  force = wp.mat33(0.0)
   for ed1 in range(nedge):
     for ed2 in range(nedge):
       for i in range(2):
