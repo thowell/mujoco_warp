@@ -23,7 +23,6 @@ from absl.testing import parameterized
 import mujoco_warp as mjwarp
 
 from . import collision_driver
-from . import io
 from . import test_util
 
 
