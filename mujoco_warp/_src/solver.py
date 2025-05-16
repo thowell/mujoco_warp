@@ -2062,6 +2062,7 @@ def update_gradient_JTCJ(
   dof_tri_row: wp.array(dtype=int),
   dof_tri_col: wp.array(dtype=int),
   # Data in:
+  nconmax_in: int,
   ncon_in: wp.array(dtype=int),
   contact_friction_in: wp.array(dtype=types.vec5),
   contact_dim_in: wp.array(dtype=int),
@@ -2086,7 +2087,7 @@ def update_gradient_JTCJ(
   for i in range(nblocks_perblock):
     conid = conid_start + i * dim_y
 
-    if conid >= ncon_in[0]:
+    if conid >= min(ncon_in[0], nconmax_in):
       return
 
     if efc_done_in[contact_worldid_in[conid]]:
@@ -2296,6 +2297,7 @@ def _update_gradient(m: types.Model, d: types.Data):
           m.opt.impratio,
           m.dof_tri_row,
           m.dof_tri_col,
+          d.nconmax,
           d.ncon,
           d.contact.friction,
           d.contact.dim,
