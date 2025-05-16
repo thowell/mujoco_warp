@@ -596,6 +596,7 @@ def make_data(mjm: mujoco.MjModel, nworld: int = 1, nconmax: int = -1, njmax: in
     nl=wp.zeros(1, dtype=int),
     nefc=wp.zeros(1, dtype=int),
     time=wp.zeros(nworld, dtype=float),
+    energy=wp.zeros(nworld, dtype=wp.vec2),
     qpos=wp.zeros((nworld, mjm.nq), dtype=float),
     qvel=wp.zeros((nworld, mjm.nv), dtype=float),
     act=wp.zeros((nworld, mjm.na), dtype=float),
@@ -890,6 +891,7 @@ def put_data(
     nl=arr([mjd.nl * nworld]),
     nefc=arr([mjd.nefc * nworld]),
     time=arr(mjd.time * np.ones(nworld)),
+    energy=tile(mjd.energy, dtype=wp.vec2),
     qpos=tile(mjd.qpos),
     qvel=tile(mjd.qvel),
     act=tile(mjd.act),
@@ -1076,6 +1078,7 @@ def get_data_into(
     mujoco._functions._realloc_con_efc(result, ncon=ncon, nefc=nefc)
 
   result.time = d.time.numpy()[0]
+  result.energy = d.energy.numpy()[0]
   result.ne = d.ne.numpy()[0]
   result.qpos[:] = d.qpos.numpy()[0]
   result.qvel[:] = d.qvel.numpy()[0]
