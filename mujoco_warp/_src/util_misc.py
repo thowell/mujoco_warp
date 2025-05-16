@@ -180,13 +180,7 @@ def wrap_circle(end: wp.vec4, side: wp.vec2, radius: float):
 
 
 @wp.func
-def wrap_inside(
-  end: wp.vec4,
-  radius: float,
-  maxiter: int = 20,
-  zinit: float = 1.0 - 1.0e-7,
-  tolerance: float = 1.0e-6,
-):
+def wrap_inside(end: wp.vec4, radius: float):
   """2D inside wrap.
 
   Args:
@@ -199,6 +193,12 @@ def wrap_inside(
   Returns:
     0.0 if wrap else -1.0, pair of 2D wrap points
   """
+  # defaults
+  # TODO(team): update kernel analyzer to allow defaults
+  maxiter = 20
+  zinit = 1.0 - 1.0e-7
+  tolerance = 1.0e-6
+
   # TODO(team): return type
   end0 = wp.vec2(end[0], end[1])
   end1 = wp.vec2(end[2], end[3])
@@ -210,13 +210,7 @@ def wrap_inside(
   dd = wp.dot(dif, dif)
 
   # either point inside circle or circle too small: no wrap
-  if (
-    (len0 <= radius)
-    or (len1 <= radius)
-    or (radius < MJ_MINVAL)
-    or (len0 < MJ_MINVAL)
-    or (len1 < MJ_MINVAL)
-  ):
+  if (len0 <= radius) or (len1 <= radius) or (radius < MJ_MINVAL) or (len0 < MJ_MINVAL) or (len1 < MJ_MINVAL):
     return -1.0, wp.vec2(wp.inf), wp.vec2(wp.inf)
 
   # segment-circle intersection: no wrap
@@ -311,21 +305,15 @@ def wrap_inside(
 
 @wp.func
 def wrap(
-  x0: wp.vec3,
-  x1: wp.vec3,
-  xpos: wp.vec3,
-  xmat: wp.mat33,
-  radius: float,
-  geomtype: int,
-  side: wp.vec3,
+  x0: wp.vec3, x1: wp.vec3, pos: wp.vec3, mat: wp.mat33, radius: float, geomtype: int, side: wp.vec3
 ) -> Tuple[float, wp.vec3, wp.vec3]:
   """Wrap tendons around spheres and cylinders.
 
   Args:
     x0: 3D endpoint
     x1: 3D endpoint
-    xpos: position of geom
-    xmat: orientation of geom
+    pos: position of geom
+    mat: orientation of geom
     radius: geom radius
     type: wrap type (mjtWrap)
     side: 3D position for sidesite, no side point: wp.vec3(wp.inf)
@@ -336,9 +324,9 @@ def wrap(
   # TODO(team): check object type; SHOULD NOT OCCUR
 
   # map sites to wrap object's local frame
-  xmatT = wp.transpose(xmat)
-  p0 = xmatT @ (x0 - xpos)
-  p1 = xmatT @ (x1 - xpos)
+  matT = wp.transpose(mat)
+  p0 = matT @ (x0 - pos)
+  p1 = matT @ (x1 - pos)
 
   # too close to origin: return
   if (wp.norm_l2(p0) < MJ_MINVAL) or (wp.norm_l2(p1) < MJ_MINVAL):
@@ -394,7 +382,7 @@ def wrap(
 
   if valid_side:
     # side point: apply same projection as x0, x1
-    sidepnt = xmatT @ (side - xpos)
+    sidepnt = matT @ (side - pos)
 
     # side point: project and rescale
     sidepnt_proj = wp.vec2(
@@ -424,12 +412,8 @@ def wrap(
   # cylinder: correct along z
   if geomtype == int(WrapType.CYLINDER.value):
     # set vertical coordinates
-    L0 = wp.sqrt(
-      (p0[0] - res0[0]) * (p0[0] - res0[0]) + (p0[1] - res0[1]) * (p0[1] - res0[1])
-    )
-    L1 = wp.sqrt(
-      (p1[0] - res1[0]) * (p1[0] - res1[0]) + (p1[1] - res1[1]) * (p1[1] - res1[1])
-    )
+    L0 = wp.sqrt((p0[0] - res0[0]) * (p0[0] - res0[0]) + (p0[1] - res0[1]) * (p0[1] - res0[1]))
+    L1 = wp.sqrt((p1[0] - res1[0]) * (p1[0] - res1[0]) + (p1[1] - res1[1]) * (p1[1] - res1[1]))
     res0[2] = p0[2] + (p1[2] - p0[2]) * L0 / (L0 + wlen + L1)
     res1[2] = p0[2] + (p1[2] - p0[2]) * (L0 + wlen) / (L0 + wlen + L1)
 
@@ -438,7 +422,7 @@ def wrap(
     wlen = wp.sqrt(wlen * wlen + height * height)
 
   # map back to global frame: wpnt
-  wpnt0 = xmat @ res0 + xpos
-  wpnt1 = xmat @ res1 + xpos
+  wpnt0 = mat @ res0 + pos
+  wpnt1 = mat @ res1 + pos
 
   return wlen, wpnt0, wpnt1

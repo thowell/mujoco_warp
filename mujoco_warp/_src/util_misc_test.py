@@ -38,13 +38,15 @@ def _is_intersect(p1: np.array, p2: np.array, p3: np.array, p4: np.array) -> boo
 
   @wp.kernel
   def is_intersect(
+    # In:
     p1: wp.vec2,
     p2: wp.vec2,
     p3: wp.vec2,
     p4: wp.vec2,
-    intersect: wp.array(dtype=bool),
+    # Out:
+    intersect_out: wp.array(dtype=bool),
   ):
-    intersect[0] = util_misc.is_intersect(p1, p2, p3, p4)
+    intersect_out[0] = util_misc.is_intersect(p1, p2, p3, p4)
 
   wp.launch(
     is_intersect,
@@ -67,13 +69,15 @@ def _length_circle(p0: np.array, p1: np.array, ind: int, radius: float) -> float
 
   @wp.kernel
   def length_circle(
+    # In:
     p0: wp.vec2,
     p1: wp.vec2,
     ind: int,
     radius: float,
-    length: wp.array(dtype=float),
+    # Out:
+    length_out: wp.array(dtype=float),
   ):
-    length[0] = util_misc.length_circle(p0, p1, ind, radius)
+    length_out[0] = util_misc.length_circle(p0, p1, ind, radius)
 
   wp.launch(
     length_circle,
@@ -86,26 +90,26 @@ def _length_circle(p0: np.array, p1: np.array, ind: int, radius: float) -> float
   return length.numpy()[0]
 
 
-def _wrap_circle(
-  end: np.array, side: np.array, radius: float
-) -> Tuple[float, np.array, np.array]:
+def _wrap_circle(end: np.array, side: np.array, radius: float) -> Tuple[float, np.array, np.array]:
   length = wp.empty(1, dtype=float)
   wpnt0 = wp.empty(1, dtype=wp.vec2)
   wpnt1 = wp.empty(1, dtype=wp.vec2)
 
   @wp.kernel
   def wrap_circle(
+    # In:
     end: wp.vec4,
     side: wp.vec2,
     radius: float,
-    length: wp.array(dtype=float),
-    wpnt0: wp.array(dtype=wp.vec2),
-    wpnt1: wp.array(dtype=wp.vec2),
+    # Out:
+    length_out: wp.array(dtype=float),
+    wpnt0_out: wp.array(dtype=wp.vec2),
+    wpnt1_out: wp.array(dtype=wp.vec2),
   ):
     length_, wpnt0_, wpnt1_ = util_misc.wrap_circle(end, side, radius)
-    length[0] = length_
-    wpnt0[0] = wpnt0_
-    wpnt1[0] = wpnt1_
+    length_out[0] = length_
+    wpnt0_out[0] = wpnt0_
+    wpnt1_out[0] = wpnt1_
 
   wp.launch(
     wrap_circle,
@@ -131,16 +135,18 @@ def _wrap_inside(end: np.array, radius: float) -> Tuple[float, np.array, np.arra
 
   @wp.kernel
   def wrap_inside(
+    # In:
     end: wp.vec4,
     radius: float,
-    length: wp.array(dtype=float),
-    wpnt0: wp.array(dtype=wp.vec2),
-    wpnt1: wp.array(dtype=wp.vec2),
+    # Out:
+    length_out: wp.array(dtype=float),
+    wpnt0_out: wp.array(dtype=wp.vec2),
+    wpnt1_out: wp.array(dtype=wp.vec2),
   ):
     length_, wpnt0_, wpnt1_ = util_misc.wrap_inside(end, radius)
-    length[0] = length_
-    wpnt0[0] = wpnt0_
-    wpnt1[0] = wpnt1_
+    length_out[0] = length_
+    wpnt0_out[0] = wpnt0_
+    wpnt1_out[0] = wpnt1_
 
   wp.launch(
     wrap_inside,
@@ -170,21 +176,23 @@ def _wrap(
 
   @wp.kernel
   def wrap(
+    # In:
     x0: wp.vec3,
     x1: wp.vec3,
-    xpos: wp.vec3,
-    xmat: wp.mat33,
+    pos: wp.vec3,
+    mat: wp.mat33,
     radius: float,
     geomtype: int,
     side: wp.vec3,
-    length: wp.array(dtype=float),
-    wpnt0: wp.array(dtype=wp.vec3),
-    wpnt1: wp.array(dtype=wp.vec3),
+    # Out:
+    length_out: wp.array(dtype=float),
+    wpnt0_out: wp.array(dtype=wp.vec3),
+    wpnt1_out: wp.array(dtype=wp.vec3),
   ):
-    length_, wpnt0_, wpnt1_ = util_misc.wrap(x0, x1, xpos, xmat, radius, geomtype, side)
-    length[0] = length_
-    wpnt0[0] = wpnt0_
-    wpnt1[0] = wpnt1_
+    length_, wpnt0_, wpnt1_ = util_misc.wrap(x0, x1, pos, mat, radius, geomtype, side)
+    length_out[0] = length_
+    wpnt0_out[0] = wpnt0_
+    wpnt1_out[0] = wpnt1_
 
   wp.launch(
     wrap,
@@ -270,9 +278,7 @@ class UtilMiscTest(parameterized.TestCase):
 
   def test_wrap_circle(self):
     # no wrap
-    wlen, wpnt0, wpnt1 = _wrap_circle(
-      np.array([1, 0, 0, 1]), np.array([np.inf, np.inf]), 0.1
-    )
+    wlen, wpnt0, wpnt1 = _wrap_circle(np.array([1, 0, 0, 1]), np.array([np.inf, np.inf]), 0.1)
     _assert_eq(wlen, -1.0, "wlen")
     _assert_eq(wpnt0, np.array([np.inf, np.inf]), "wpnt0")
     _assert_eq(wpnt1, np.array([np.inf, np.inf]), "wpnt1")
@@ -284,42 +290,32 @@ class UtilMiscTest(parameterized.TestCase):
     _assert_eq(wpnt1, np.array([np.inf, np.inf]), "wpnt1")
 
     # wrap
-    wlen, wpnt0, wpnt1 = _wrap_circle(
-      np.array([np.sqrt(2.0), 0, 0, np.sqrt(2.0)]), np.array([np.inf, np.inf]), 1.0 + 5e-4
-    )
+    wlen, wpnt0, wpnt1 = _wrap_circle(np.array([np.sqrt(2.0), 0, 0, np.sqrt(2.0)]), np.array([np.inf, np.inf]), 1.0 + 5e-4)
     _assert_eq(wlen, 0.0, "wlen")
     _assert_eq(wpnt0, np.array([np.sqrt(2.0) / 2.0, np.sqrt(2.0) / 2.0]), "wpnt0")
     _assert_eq(wpnt1, np.array([np.sqrt(2.0) / 2.0, np.sqrt(2.0) / 2.0]), "wpnt1")
 
     # wrap
-    wlen, wpnt0, wpnt1 = _wrap_circle(
-      np.array([np.sqrt(2.0), 0, 0, np.sqrt(2.0)]), np.array([0.0, 0.0]), 1.0 + 5e-4
-    )
+    wlen, wpnt0, wpnt1 = _wrap_circle(np.array([np.sqrt(2.0), 0, 0, np.sqrt(2.0)]), np.array([0.0, 0.0]), 1.0 + 5e-4)
     _assert_eq(wlen, 0.0, "wlen")
     _assert_eq(wpnt0, np.array([np.sqrt(2.0) / 2.0, np.sqrt(2.0) / 2.0]), "wpnt0")
     _assert_eq(wpnt1, np.array([np.sqrt(2.0) / 2.0, np.sqrt(2.0) / 2.0]), "wpnt1")
 
     # wrap
-    wlen, wpnt0, wpnt1 = _wrap_circle(
-      np.array([1.0, 0, 0, 1.0]), np.array([0.0, 0.0]), 1.0
-    )
+    wlen, wpnt0, wpnt1 = _wrap_circle(np.array([1.0, 0, 0, 1.0]), np.array([0.0, 0.0]), 1.0)
     _assert_eq(wlen, 0.5 * np.pi, "wlen")
     _assert_eq(wpnt0, np.array([1.0, 0.0]), "wpnt0")
     _assert_eq(wpnt1, np.array([0.0, 1.0]), "wpnt1")
 
     # wrap w/ sidesite
-    wlen, wpnt0, wpnt1 = _wrap_circle(
-      np.array([0, -100, 0, 100]), np.array([0.2, 0.0]), 0.1
-    )
+    wlen, wpnt0, wpnt1 = _wrap_circle(np.array([0, -100, 0, 100]), np.array([0.2, 0.0]), 0.1)
 
     # wlen, wpnt0[1], wpnt1[1] are ~0
     _assert_eq(wlen, 0.0, "wlen")
     _assert_eq(wpnt0, np.array([0.1, 0]), "wpnt0")
     _assert_eq(wpnt1, np.array([0.1, 0]), "wpnt1")
 
-    wlen, wpnt0, wpnt1 = _wrap_circle(
-      np.array([0, -100, 0, 100]), np.array([-0.2, 0.0]), 0.1
-    )
+    wlen, wpnt0, wpnt1 = _wrap_circle(np.array([0, -100, 0, 100]), np.array([-0.2, 0.0]), 0.1)
 
     # wlen, wpnt0[1], wpnt1[1] are ~0
     _assert_eq(wlen, 0.0, "wlen")
