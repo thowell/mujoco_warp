@@ -880,26 +880,26 @@ def _linesearch_iterative(m: types.Model, d: types.Data):
           d.efc.uv, d.efc.vv
         ],
         outputs=[d.efc.lo_next, d.efc.hi_next, d.efc.mid])  # fmt: skip
-  else:
-    wp.launch(
-      linesearch_iterative_next_quad_pyramidal,
-      dim=(d.njmax,),
-      inputs=[
-        d.ne, d.nf, d.nefc, d.efc.worldid, d.efc.Jaref, d.efc.jv, d.efc.quad, d.efc.done, d.efc.ls_done,
-        d.efc.lo_next_alpha, d.efc.hi_next_alpha, d.efc.mid_alpha
-      ],
-      outputs=[d.efc.lo_next, d.efc.hi_next, d.efc.mid])  # fmt: skip
+    else:
+      wp.launch(
+        linesearch_iterative_next_quad_pyramidal,
+        dim=(d.njmax,),
+        inputs=[
+          d.ne, d.nf, d.nefc, d.efc.worldid, d.efc.Jaref, d.efc.jv, d.efc.quad, d.efc.done, d.efc.ls_done,
+          d.efc.lo_next_alpha, d.efc.hi_next_alpha, d.efc.mid_alpha
+        ],
+        outputs=[d.efc.lo_next, d.efc.hi_next, d.efc.mid])  # fmt: skip
 
-  wp.launch(
-    linesearch_iterative_swap,
-    dim=(d.nworld,),
-    inputs=[
-      d.efc.gtol, d.efc.done, d.efc.ls_done, d.efc.p0, d.efc.lo, d.efc.lo_alpha, d.efc.hi, d.efc.hi_alpha,
-      d.efc.lo_next, d.efc.lo_next_alpha, d.efc.hi_next, d.efc.hi_next_alpha, d.efc.mid, d.efc.mid_alpha
-    ],
-    outputs=[
-      d.efc.alpha, d.efc.ls_done, d.efc.lo, d.efc.lo_alpha, d.efc.hi, d.efc.hi_alpha
-    ])  # fmt: skip
+    wp.launch(
+      linesearch_iterative_swap,
+      dim=(d.nworld,),
+      inputs=[
+        d.efc.gtol, d.efc.done, d.efc.ls_done, d.efc.p0, d.efc.lo, d.efc.lo_alpha, d.efc.hi, d.efc.hi_alpha,
+        d.efc.lo_next, d.efc.lo_next_alpha, d.efc.hi_next, d.efc.hi_next_alpha, d.efc.mid, d.efc.mid_alpha
+      ],
+      outputs=[
+        d.efc.alpha, d.efc.ls_done, d.efc.lo, d.efc.lo_alpha, d.efc.hi, d.efc.hi_alpha
+      ])  # fmt: skip
 
 
 @wp.kernel
@@ -1425,8 +1425,8 @@ def update_constraint_init_cost(
     return
 
   efc_gauss_out[worldid] = 0.0
-  efc_cost_out[worldid] = 0.0
   efc_prev_cost_out[worldid] = efc_cost_in[worldid]
+  efc_cost_out[worldid] = 0.0
 
 
 @wp.kernel
@@ -2013,6 +2013,7 @@ def update_gradient_JTDAJ(
   dof_tri_row: wp.array(dtype=int),
   dof_tri_col: wp.array(dtype=int),
   # Data in:
+  njmax_in: int,
   nefc_in: wp.array(dtype=int),
   efc_worldid_in: wp.array(dtype=int),
   efc_J_in: wp.array2d(dtype=float),
@@ -2033,7 +2034,7 @@ def update_gradient_JTDAJ(
   for i in range(nblocks_perblock):
     efcid = efcid_temp + i * dim_x
 
-    if efcid >= nefc:
+    if efcid >= min(nefc, njmax_in):
       return
 
     worldid = efc_worldid_in[efcid]
@@ -2256,6 +2257,7 @@ def _update_gradient(m: types.Model, d: types.Data):
       inputs=[
         m.dof_tri_row,
         m.dof_tri_col,
+        d.njmax,
         d.nefc,
         d.efc.worldid,
         d.efc.J,
