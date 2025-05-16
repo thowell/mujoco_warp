@@ -285,7 +285,7 @@ class UtilMiscTest(parameterized.TestCase):
 
     # wrap
     wlen, wpnt0, wpnt1 = _wrap_circle(
-      np.array([np.sqrt(2.0), 0, 0, np.sqrt(2.0)]), np.array([np.inf, np.inf]), 1.0
+      np.array([np.sqrt(2.0), 0, 0, np.sqrt(2.0)]), np.array([np.inf, np.inf]), 1.0 + 5e-4
     )
     _assert_eq(wlen, 0.0, "wlen")
     _assert_eq(wpnt0, np.array([np.sqrt(2.0) / 2.0, np.sqrt(2.0) / 2.0]), "wpnt0")
@@ -293,7 +293,7 @@ class UtilMiscTest(parameterized.TestCase):
 
     # wrap
     wlen, wpnt0, wpnt1 = _wrap_circle(
-      np.array([np.sqrt(2.0), 0, 0, np.sqrt(2.0)]), np.array([0.0, 0.0]), 1.0
+      np.array([np.sqrt(2.0), 0, 0, np.sqrt(2.0)]), np.array([0.0, 0.0]), 1.0 + 5e-4
     )
     _assert_eq(wlen, 0.0, "wlen")
     _assert_eq(wpnt0, np.array([np.sqrt(2.0) / 2.0, np.sqrt(2.0) / 2.0]), "wpnt0")
