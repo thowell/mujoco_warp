@@ -78,7 +78,7 @@
   </worldbody>
 
   <tendon>
-    <fixed name="tendon_1" frictionloss=".1">
+    <fixed name="tendon_1" stiffness=".1" damping=".2" frictionloss=".1">
       <joint joint="joint3" coef=".1"/>
       <joint joint="joint4" coef="-.2"/>
     </fixed>
