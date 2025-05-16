@@ -191,7 +191,7 @@ def linesearch_iterative_init_p0_elliptic1(
   efc_jv_in: wp.array(dtype=float),
   efc_quad_in: wp.array(dtype=wp.vec3),
   efc_done_in: wp.array(dtype=bool),
-  efc_u_in: wp.array2d(dtype=float),
+  efc_u_in: wp.array(dtype=types.vec6),
   efc_uu_in: wp.array(dtype=float),
   efc_uv_in: wp.array(dtype=float),
   efc_vv_in: wp.array(dtype=float),
@@ -215,7 +215,7 @@ def linesearch_iterative_init_p0_elliptic1(
   pt = _eval_pt_elliptic(
     opt_impratio,
     contact_friction_in[conid],
-    efc_u_in[conid, 0],
+    efc_u_in[conid][0],
     efc_uu_in[conid],
     efc_uv_in[conid],
     efc_vv_in[conid],
@@ -337,7 +337,7 @@ def linesearch_iterative_init_lo_elliptic1(
   efc_quad_in: wp.array(dtype=wp.vec3),
   efc_done_in: wp.array(dtype=bool),
   efc_lo_alpha_in: wp.array(dtype=float),
-  efc_u_in: wp.array2d(dtype=float),
+  efc_u_in: wp.array(dtype=types.vec6),
   efc_uu_in: wp.array(dtype=float),
   efc_uv_in: wp.array(dtype=float),
   efc_vv_in: wp.array(dtype=float),
@@ -361,7 +361,7 @@ def linesearch_iterative_init_lo_elliptic1(
   pt = _eval_pt_elliptic(
     opt_impratio,
     contact_friction_in[conid],
-    efc_u_in[conid, 0],
+    efc_u_in[conid][0],
     efc_uu_in[conid],
     efc_uv_in[conid],
     efc_vv_in[conid],
@@ -571,7 +571,7 @@ def linesearch_iterative_next_quad_elliptic1(
   efc_lo_next_alpha_in: wp.array(dtype=float),
   efc_hi_next_alpha_in: wp.array(dtype=float),
   efc_mid_alpha_in: wp.array(dtype=float),
-  efc_u_in: wp.array2d(dtype=float),
+  efc_u_in: wp.array(dtype=types.vec6),
   efc_uu_in: wp.array(dtype=float),
   efc_uv_in: wp.array(dtype=float),
   efc_vv_in: wp.array(dtype=float),
@@ -596,7 +596,7 @@ def linesearch_iterative_next_quad_elliptic1(
   efcid = contact_efc_address_in[conid, 0]
 
   friction = contact_friction_in[conid]
-  u = efc_u_in[conid, 0]
+  u = efc_u_in[conid][0]
   uu = efc_uu_in[conid]
   uv = efc_uv_in[conid]
   vv = efc_vv_in[conid]
@@ -1183,7 +1183,7 @@ def linesearch_quad_elliptic(
   efc_jv_in: wp.array(dtype=float),
   efc_quad_in: wp.array(dtype=wp.vec3),
   efc_done_in: wp.array(dtype=bool),
-  efc_u_in: wp.array2d(dtype=float),
+  efc_u_in: wp.array(dtype=types.vec6),
   # Data out:
   efc_quad_out: wp.array(dtype=wp.vec3),
   efc_uv_out: wp.array(dtype=float),
@@ -1210,7 +1210,7 @@ def linesearch_quad_elliptic(
   wp.atomic_add(efc_quad_out, efcid0, efc_quad_in[efcid])
 
   # rescale to make primal cone circular
-  u = efc_u_in[conid, dimid]
+  u = efc_u_in[conid][dimid]
   v = efc_jv_in[efcid] * contact_friction_in[conid][dimid - 1]
   wp.atomic_add(efc_uv_out, conid, u * v)
   wp.atomic_add(efc_vv_out, conid, v * v)
@@ -1504,7 +1504,7 @@ def update_constraint_u_elliptic(
   efc_Jaref_in: wp.array(dtype=float),
   efc_done_in: wp.array(dtype=bool),
   # Data out:
-  efc_u_out: wp.array2d(dtype=float),
+  efc_u_out: wp.array(dtype=types.vec6),
   efc_uu_out: wp.array(dtype=float),
   efc_condim_out: wp.array(dtype=int),
 ):
@@ -1530,7 +1530,7 @@ def update_constraint_u_elliptic(
     else:
       fri = contact_friction_in[conid][dimid - 1]
     u = efc_Jaref_in[efcid] * fri
-    efc_u_out[conid, dimid] = u
+    efc_u_out[conid][dimid] = u
     if dimid > 0:
       wp.atomic_add(efc_uu_out, conid, u * u)
 
@@ -1546,7 +1546,7 @@ def update_constraint_active_elliptic_bottom_zone(
   contact_efc_address_in: wp.array2d(dtype=int),
   contact_worldid_in: wp.array(dtype=int),
   efc_done_in: wp.array(dtype=bool),
-  efc_u_in: wp.array2d(dtype=float),
+  efc_u_in: wp.array(dtype=types.vec6),
   efc_uu_in: wp.array(dtype=float),
   # Data out:
   efc_active_out: wp.array(dtype=bool),
@@ -1564,7 +1564,7 @@ def update_constraint_active_elliptic_bottom_zone(
     return
 
   mu = contact_friction_in[conid][0] / opt_impratio
-  n = efc_u_in[conid, 0]
+  n = efc_u_in[conid][0]
   tt = efc_uu_in[conid]
   if tt <= 0.0:
     t = 0.0
@@ -1663,7 +1663,7 @@ def update_constraint_efc_elliptic1(
   contact_worldid_in: wp.array(dtype=int),
   efc_D_in: wp.array(dtype=float),
   efc_done_in: wp.array(dtype=bool),
-  efc_u_in: wp.array2d(dtype=float),
+  efc_u_in: wp.array(dtype=types.vec6),
   efc_uu_in: wp.array(dtype=float),
   # Data out:
   efc_force_out: wp.array(dtype=float),
@@ -1686,7 +1686,7 @@ def update_constraint_efc_elliptic1(
   efcid = contact_efc_address_in[conid, dimid]
 
   mu = friction[0] / opt_impratio
-  n = efc_u_in[conid, 0]
+  n = efc_u_in[conid][0]
   tt = efc_uu_in[conid]
   if tt <= 0.0:
     t = 0.0
@@ -1707,7 +1707,7 @@ def update_constraint_efc_elliptic1(
     force = -dm * nmt * mu
     if dimid > 0:
       force_fri = -force / t
-      force_fri *= efc_u_in[conid, dimid] * friction[dimid - 1]
+      force_fri *= efc_u_in[conid][dimid] * friction[dimid - 1]
       efc_force_out[efcid] += force_fri
     else:
       efc_force_out[efcid] += force
@@ -2070,7 +2070,7 @@ def update_gradient_JTCJ(
   efc_J_in: wp.array2d(dtype=float),
   efc_D_in: wp.array(dtype=float),
   efc_done_in: wp.array(dtype=bool),
-  efc_u_in: wp.array2d(dtype=float),
+  efc_u_in: wp.array(dtype=types.vec6),
   efc_uu_in: wp.array(dtype=float),
   # In:
   nblocks_perblock: int,
@@ -2099,7 +2099,7 @@ def update_gradient_JTCJ(
 
     fri = contact_friction_in[conid]
     mu = fri[0] / opt_impratio
-    n = efc_u_in[conid, 0]
+    n = efc_u_in[conid][0]
     tt = efc_uu_in[conid]
     if tt <= 0.0:
       t = 0.0
@@ -2121,12 +2121,31 @@ def update_gradient_JTCJ(
     if dm == 0.0:
       continue
 
-    h = float(0.0)
+    u = efc_u_in[conid]
+
+    efc_h = float(0.0)
 
     for dim1id in range(condim):
-      for dim2id in range(dim1id, condim):
-        ui = efc_u_in[conid, dim1id]
-        uj = efc_u_in[conid, dim2id]
+      if dim1id == 0:
+        efcid1 = efc0
+      else:
+        efcid1 = contact_efc_address_in[conid, dim1id]
+
+      efc_J11 = efc_J_in[efcid1, dof1id]
+      efc_J12 = efc_J_in[efcid1, dof2id]
+
+      ui = u[dim1id]
+
+      for dim2id in range(0, dim1id + 1):
+        if dim2id == 0:
+          efcid2 = efc0
+        else:
+          efcid2 = contact_efc_address_in[conid, dim2id]
+
+        efc_J21 = efc_J_in[efcid2, dof1id]
+        efc_J22 = efc_J_in[efcid2, dof2id]
+
+        uj = u[dim2id]
 
         # set first row/column: (1, -mu/t * u)
         if dim1id == 0 and dim2id == 0:
@@ -2156,16 +2175,13 @@ def update_gradient_JTCJ(
         hcone *= dm * fri1 * fri2
 
         if hcone != 0.0:
-          efc1id = contact_efc_address_in[conid, dim1id]
-          efc2id = contact_efc_address_in[conid, dim2id]
-
-          h += efc_J_in[efc1id, dof1id] * efc_J_in[efc2id, dof2id] * hcone
+          efc_h += hcone * efc_J11 * efc_J22
 
           if dim1id != dim2id:
-            h += efc_J_in[efc1id, dof2id] * efc_J_in[efc2id, dof1id] * hcone
+            efc_h += hcone * efc_J12 * efc_J21
 
     worldid = contact_worldid_in[conid]
-    wp.atomic_add(efc_h_out[worldid, dof1id], dof2id, h)
+    efc_h_out[worldid, dof1id, dof2id] += efc_h
 
 
 def update_gradient_cholesky(tile_size: int):
