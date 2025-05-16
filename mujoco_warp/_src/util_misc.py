@@ -560,20 +560,20 @@ def muscle_dynamics_timescale(dctrl: float, tau_act: float, tau_deact: float, sm
 
 
 @wp.func
-def muscle_dynamics(ctrl: float, act: float, prm: vec10) -> float:
+def muscle_dynamics(control: float, activation: float, prm: vec10) -> float:
   """Muscle activation dynamics, prm = (tau_act, tau_deact, smooth_width)."""
 
   # clamp control
-  ctrlclamp = wp.clamp(ctrl, 0.0, 1.0)
+  ctrlclamp = wp.clamp(control, 0.0, 1.0)
 
   # clamp activation
-  actclamp = wp.clamp(act, 0.0, 1.0)
+  actclamp = wp.clamp(activation, 0.0, 1.0)
 
   # compute timescales as in Millard et al. (2013) https://doi.org/10.1115/1.4023390
   tau_act = prm[0] * (0.5 + 1.5 * actclamp)  # activation timescale
   tau_deact = prm[1] / (0.5 + 1.5 * actclamp)  # deactivation timescale
   smooth_width = prm[2]  # width of smoothing sigmoid
-  dctrl = ctrlclamp - act  # excess excitation
+  dctrl = ctrlclamp - activation  # excess excitation
 
   tau = muscle_dynamics_timescale(dctrl, tau_act, tau_deact, smooth_width)
 

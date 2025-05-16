@@ -24,8 +24,8 @@ from absl.testing import parameterized
 
 from . import util_misc
 from .types import MJ_MINVAL
-from .types import vec10
 from .types import WrapType
+from .types import vec10
 
 
 def _assert_eq(a, b, name):
@@ -246,8 +246,8 @@ def _muscle_dynamics_millard(ctrl, act, prm):
 
 def _muscle_dynamics(ctrl, act, prm):
   @wp.kernel
-  def muscle_dynamics(ctrl: float, act: float, prm: vec10, output: wp.array(dtype=float)):
-    output[0] = util_misc.muscle_dynamics(ctrl, act, prm)
+  def muscle_dynamics(control: float, activation: float, prm: vec10, dynamics_out: wp.array(dtype=float)):
+    dynamics_out[0] = util_misc.muscle_dynamics(control, activation, prm)
 
   output = wp.empty(1, dtype=float)
   wp.launch(
@@ -266,8 +266,8 @@ def _muscle_dynamics(ctrl, act, prm):
 
 def _muscle_gain_length(length, lmin, lmax):
   @wp.kernel
-  def muscle_gain_length(length: float, lmin: float, lmax: float, output: wp.array(dtype=float)):
-    output[0] = util_misc.muscle_gain_length(length, lmin, lmax)
+  def muscle_gain_length(length: float, lmin: float, lmax: float, gain_length_out: wp.array(dtype=float)):
+    gain_length_out[0] = util_misc.muscle_gain_length(length, lmin, lmax)
 
   output = wp.empty(1, dtype=float)
   wp.launch(muscle_gain_length, dim=(1,), inputs=[length, lmin, lmax], outputs=[output])
@@ -278,13 +278,9 @@ def _muscle_gain_length(length, lmin, lmax):
 def _muscle_dynamics_timescale(dctrl, tau_act, tau_deact, smooth_width):
   @wp.kernel
   def muscle_gain_length(
-    dctrl: float,
-    tau_act: float,
-    tau_deact: float,
-    smooth_width: float,
-    output: wp.array(dtype=float),
+    dctrl: float, tau_act: float, tau_deact: float, smooth_width: float, dynamics_timescale_out: wp.array(dtype=float)
   ):
-    output[0] = util_misc.muscle_dynamics_timescale(dctrl, tau_act, tau_deact, smooth_width)
+    dynamics_timescale_out[0] = util_misc.muscle_dynamics_timescale(dctrl, tau_act, tau_deact, smooth_width)
 
   output = wp.empty(1, dtype=float)
   wp.launch(
