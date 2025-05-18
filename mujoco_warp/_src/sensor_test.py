@@ -193,6 +193,8 @@ class SensorTest(parameterized.TestCase):
           <subtreelinvel body="body4" cutoff=".001"/>
           <subtreeangmom body="body4"/>
           <subtreeangmom body="body4" cutoff=".001"/>
+          <e_kinetic/>
+          <e_kinetic cutoff=".001"/>
           <accelerometer site="force_site"/>
           <accelerometer site="force_site" cutoff=".001"/>
           <force site="force_site"/>
