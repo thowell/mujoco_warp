@@ -441,20 +441,21 @@ def _flex_bending(
   nvert = 4
   f = 0  # TODO(quaglino): this should become a function of t
 
-  v = wp.vec4(flex_edge[2*(edgeid+flex_edgeadr[f])],
-              flex_edge[2*(edgeid+flex_edgeadr[f])+1],
-              flex_edgeflap[2*(edgeid+flex_edgeadr[f])],
-              flex_edgeflap[2*(edgeid+flex_edgeadr[f]+1)])
-  
+  v = wp.vec4(
+    flex_edge[2 * (edgeid + flex_edgeadr[f])],
+    flex_edge[2 * (edgeid + flex_edgeadr[f]) + 1],
+    flex_edgeflap[2 * (edgeid + flex_edgeadr[f])],
+    flex_edgeflap[2 * (edgeid + flex_edgeadr[f] + 1)],
+  )
+
   if v[3] == -1:
     return
-  
-  force = wp.mat(0., shape=(nvert, 3))
+
+  force = wp.mat(0.0, shape=(nvert, 3))
   for i in range(nvert):
     for j in range(nvert):
       for x in range(3):
-        force[i, x] += flex_bending[16*edgeid+4*i+j] * flexvert_xpos_in[v[j], x]
-
+        force[i, x] += flex_bending[16 * edgeid + 4 * i + j] * flexvert_xpos_in[v[j], x]
 
   for i in range(nvert):
     bodyid = flex_vertbodyid[flex_vertadr[f] + v[i]]
