@@ -429,8 +429,8 @@ def _flex_bending(
   flex_vertadr: wp.array(dtype=int),
   flex_edgeadr: wp.array(dtype=int),
   flex_vertbodyid: wp.array(dtype=int),
-  flex_edge: wp.array(dtype=int),
-  flex_edgeflap: wp.array(dtype=int),
+  flex_edge: wp.array(dtype=vec2i),
+  flex_edgeflap: wp.array(dtype=vec2i),
   flex_bending: wp.array(dtype=float),
   # Data in:
   flexvert_xpos_in: wp.array2d(dtype=wp.vec3),
@@ -442,10 +442,10 @@ def _flex_bending(
   f = 0  # TODO(quaglino): this should become a function of t
 
   v = wp.vec4(
-    flex_edge[2 * (edgeid + flex_edgeadr[f])],
-    flex_edge[2 * (edgeid + flex_edgeadr[f]) + 1],
-    flex_edgeflap[2 * (edgeid + flex_edgeadr[f])],
-    flex_edgeflap[2 * (edgeid + flex_edgeadr[f] + 1)],
+    flex_edge[edgeid + flex_edgeadr[f], 0],
+    flex_edge[edgeid + flex_edgeadr[f], 1],
+    flex_edgeflap[edgeid + flex_edgeadr[f], 0],
+    flex_edgeflap[edgeid + flex_edgeadr[f], 1],
   )
 
   if v[3] == -1:
