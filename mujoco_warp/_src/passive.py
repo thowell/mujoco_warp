@@ -429,8 +429,8 @@ def _flex_bending(
   flex_vertadr: wp.array(dtype=int),
   flex_edgeadr: wp.array(dtype=int),
   flex_vertbodyid: wp.array(dtype=int),
-  flex_edge: wp.array(dtype=vec2i),
-  flex_edgeflap: wp.array(dtype=vec2i),
+  flex_edge: wp.array(dtype=wp.vec2i),
+  flex_edgeflap: wp.array(dtype=wp.vec2i),
   flex_bending: wp.array(dtype=float),
   # Data in:
   flexvert_xpos_in: wp.array2d(dtype=wp.vec3),
