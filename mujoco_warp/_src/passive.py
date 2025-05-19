@@ -441,7 +441,7 @@ def _flex_bending(
   nvert = 4
   f = 0  # TODO(quaglino): this should become a function of t
 
-  v = wp.vec4(
+  v = wp.vec4i(
     flex_edge[edgeid + flex_edgeadr[f]][0],
     flex_edge[edgeid + flex_edgeadr[f]][1],
     flex_edgeflap[edgeid + flex_edgeadr[f]][0],
