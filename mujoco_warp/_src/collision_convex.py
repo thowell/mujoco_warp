@@ -94,7 +94,7 @@ def _gjk_support_geom(geom: Geom, geomtype: int, dir: wp.vec3):
     # exhaustive search over all vertices
     # TODO(team): consider hill-climb over graph data
     for i in range(geom.vertnum):
-      vert = geom.verts[geom.vertadr + i]
+      vert = geom.vert[geom.vertadr + i]
       dist = wp.dot(vert, local_dir)
       if dist > max_dist:
         max_dist = dist
