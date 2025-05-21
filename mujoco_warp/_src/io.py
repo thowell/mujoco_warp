@@ -342,7 +342,7 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
     body_subtreemass=create_nmodel_batched_array(mjm.body_subtreemass, dtype=float),
     subtree_mass=create_nmodel_batched_array(subtree_mass, dtype=float),
     body_inertia=create_nmodel_batched_array(mjm.body_inertia, dtype=wp.vec3),
-    body_invweight0=create_nmodel_batched_array(mjm.body_invweight0, dtype=float),
+    body_invweight0=create_nmodel_batched_array(mjm.body_invweight0, dtype=wp.vec2),
     body_contype=wp.array(mjm.body_contype, dtype=int),
     body_conaffinity=wp.array(mjm.body_conaffinity, dtype=int),
     body_gravcomp=create_nmodel_batched_array(mjm.body_gravcomp, dtype=float),
@@ -357,7 +357,7 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
     jnt_pos=create_nmodel_batched_array(mjm.jnt_pos, dtype=wp.vec3),
     jnt_axis=create_nmodel_batched_array(mjm.jnt_axis, dtype=wp.vec3),
     jnt_stiffness=create_nmodel_batched_array(mjm.jnt_stiffness, dtype=float),
-    jnt_range=create_nmodel_batched_array(mjm.jnt_range, dtype=float),
+    jnt_range=create_nmodel_batched_array(mjm.jnt_range, dtype=wp.vec2),
     jnt_actfrcrange=create_nmodel_batched_array(mjm.jnt_actfrcrange, dtype=wp.vec2),
     jnt_margin=create_nmodel_batched_array(mjm.jnt_margin, dtype=float),
     # these jnt_limited adrs are used in constraint.py

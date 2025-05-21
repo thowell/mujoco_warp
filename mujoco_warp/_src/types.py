@@ -886,7 +886,7 @@ class Model:
   body_subtreemass: wp.array2d(dtype=float)
   subtree_mass: wp.array2d(dtype=float)
   body_inertia: wp.array2d(dtype=wp.vec3)
-  body_invweight0: wp.array3d(dtype=float)
+  body_invweight0: wp.array2d(dtype=wp.vec2)
   body_contype: wp.array(dtype=int)
   body_conaffinity: wp.array(dtype=int)
   body_gravcomp: wp.array2d(dtype=float)
@@ -901,7 +901,7 @@ class Model:
   jnt_pos: wp.array2d(dtype=wp.vec3)
   jnt_axis: wp.array2d(dtype=wp.vec3)
   jnt_stiffness: wp.array2d(dtype=float)
-  jnt_range: wp.array3d(dtype=float)
+  jnt_range: wp.array2d(dtype=wp.vec2)
   jnt_actfrcrange: wp.array2d(dtype=wp.vec2)
   jnt_margin: wp.array2d(dtype=float)
   jnt_limited_slide_hinge_adr: wp.array(dtype=int)  # warp only
