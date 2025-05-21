@@ -204,6 +204,7 @@ class GeomType(enum.IntEnum):
 
   Members:
     PLANE: plane
+    HFIELD: heightfield
     SPHERE: sphere
     CAPSULE: capsule
     ELLIPSOID: ellipsoid
@@ -213,14 +214,14 @@ class GeomType(enum.IntEnum):
   """
 
   PLANE = mujoco.mjtGeom.mjGEOM_PLANE
+  HFIELD = mujoco.mjtGeom.mjGEOM_HFIELD
   SPHERE = mujoco.mjtGeom.mjGEOM_SPHERE
   CAPSULE = mujoco.mjtGeom.mjGEOM_CAPSULE
   ELLIPSOID = mujoco.mjtGeom.mjGEOM_ELLIPSOID
   CYLINDER = mujoco.mjtGeom.mjGEOM_CYLINDER
   BOX = mujoco.mjtGeom.mjGEOM_BOX
   MESH = mujoco.mjtGeom.mjGEOM_MESH
-  # unsupported: HFIELD,
-  # NGEOMTYPES, ARROW*, LINE, SKIN, LABEL, NONE
+  # unsupported: NGEOMTYPES, ARROW*, LINE, SKIN, LABEL, NONE
 
 
 class SolverType(enum.IntEnum):
@@ -604,6 +605,8 @@ class Model:
     nmeshface: number of faces for all meshes                ()
     nlsp: number of step sizes for parallel linsearch        ()
     npair: number of predefined geom pairs                   ()
+    nhfield: number of heightfields                          ()
+    nhfielddata: size of elevation data                      ()
     opt: physics options
     stat: model statistics
     qpos0: qpos values at default pose                       (nworld, nq)
@@ -693,6 +696,11 @@ class Model:
     geom_margin: detect contact if dist<margin               (nworld, ngeom,)
     geom_gap: include in solver if dist<margin-gap           (nworld, ngeom,)
     geom_rgba: rgba when material is omitted                 (nworld, ngeom, 4)
+    hfield_adr: start address in hfield_data                 (nhfield,)
+    hfield_nrow: number of rows in grid                      (nhfield,)
+    hfield_ncol: number of columns in grid                   (nhfield,)
+    hfield_size: (x, y, z_top, z_bottom)                     (nhfield, 4)
+    hfield_data: elevation data                              (nhfielddata,)
     site_type: geom type for rendering (mjtGeom)             (nsite,)
     site_bodyid: id of site's body                           (nsite,)
     site_pos: local position offset rel. to body             (nworld, nsite, 3)
@@ -842,6 +850,8 @@ class Model:
   nmeshface: int
   nlsp: int  # warp only
   npair: int
+  nhfield: int
+  nhfielddata: int
   opt: Option
   stat: Statistic
   qpos0: wp.array2d(dtype=float)
@@ -930,6 +940,11 @@ class Model:
   geom_margin: wp.array2d(dtype=float)
   geom_gap: wp.array2d(dtype=float)
   geom_rgba: wp.array2d(dtype=wp.vec4)
+  hfield_adr: wp.array(dtype=int)
+  hfield_nrow: wp.array(dtype=int)
+  hfield_ncol: wp.array(dtype=int)
+  hfield_size: wp.array(dtype=wp.vec4)
+  hfield_data: wp.array(dtype=float)
   site_type: wp.array(dtype=int)
   site_bodyid: wp.array(dtype=int)
   site_size: wp.array(dtype=wp.vec3)
@@ -1195,6 +1210,7 @@ class Data:
     sap_segment_index: broadphase context                       (nworld+1,)
     dyn_geom_aabb: dynamic geometry axis-aligned bounding boxes (nworld, ngeom, 2)
     collision_pair: collision pairs from broadphase             (nconmax,)
+    collision_hftri_index: collision index for hfield pairs     (nconmax,)
     collision_worldid: collision world ids from broadphase      (nconmax,)
     ncollision: collision count from broadphase                 ()
     cacc: com-based acceleration                                (nworld, nbody, 6)
@@ -1311,6 +1327,7 @@ class Data:
 
   # collision driver
   collision_pair: wp.array(dtype=wp.vec2i)
+  collision_hftri_index: wp.array(dtype=int)
   collision_pairid: wp.array(dtype=int)
   collision_worldid: wp.array(dtype=int)
   ncollision: wp.array(dtype=int)
