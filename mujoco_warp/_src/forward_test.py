@@ -216,6 +216,16 @@ class ForwardTest(parameterized.TestCase):
 
       self.assertTrue(d.time.numpy()[0] > 0.0)
 
+  def test_tendon_actuator_force_limits(self):
+    for keyframe in range(7):
+      _, mjd, m, d = test_util.fixture("actuation/tendon_force_limit.xml", keyframe=keyframe)
+
+      d.actuator_force.zero_()
+
+      mjwarp.forward(m, d)
+
+      _assert_eq(d.actuator_force.numpy()[0], mjd.actuator_force, "actuator_force")
+
 
 if __name__ == "__main__":
   wp.init()
