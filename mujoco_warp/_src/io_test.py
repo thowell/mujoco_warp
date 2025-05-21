@@ -68,32 +68,6 @@ class IOTest(absltest.TestCase):
     with self.assertRaises(NotImplementedError):
       mjwarp.put_model(mjm)
 
-  def test_geom_type(self):
-    mjm = mujoco.MjModel.from_xml_string("""
-      <mujoco>
-        <asset>
-          <hfield name="hfield" nrow="1" ncol="1" size="1 1 1 1"/>
-          <mesh name="mesh" vertex="1 0 0  0 1 0  0 0 1  1 1 0  1 0 1  0 1 1  1 1 1  0 0 0"/>
-        </asset>
-        <worldbody>
-          <geom type="hfield" hfield="hfield"/>             
-          <geom type="ellipsoid" size="1 1 1"/>
-          <geom type="cylinder" size="1 1"/>
-          <geom type="mesh" mesh="mesh"/>
-        </worldbody>          
-      </mujoco>
-    """)
-
-    # TODO(team): sdf
-
-    with self.assertRaises(NotImplementedError):
-      mjwarp.put_model(mjm)
-
-  def test_dense(self):
-    with self.assertRaises(ValueError):
-      # dense not supported yet for large nv
-      test_util.fixture("humanoid/n_humanoids.xml")
-
   def test_actuator_trntype(self):
     mjm = mujoco.MjModel.from_xml_string("""
       <mujoco>
@@ -227,21 +201,63 @@ class IOTest(absltest.TestCase):
     np.testing.assert_allclose(mjd.qLD, mjd_ref.qLD)
     np.testing.assert_allclose(mjd.qM, mjd_ref.qM)
 
-  def test_option_physical_constants(self):
+  def test_ellipsoid_fluid_model(self):
+    with self.assertRaises(NotImplementedError):
+      mjm = mujoco.MjModel.from_xml_string(
+        """
+      <mujoco>
+        <option density="1"/>
+        <worldbody>
+          <body>
+            <geom type="sphere" size=".1" fluidshape="ellipsoid"/>
+            <freejoint/>
+          </body>
+        </worldbody>
+      </mujoco>
+      """
+      )
+      mjwarp.put_model(mjm)
+
+  def test_jacobian_auto(self):
     mjm = mujoco.MjModel.from_xml_string("""
       <mujoco>
-        <option wind="1 1 1" density="1" viscosity="1"/>
+        <option jacobian="auto"/>
         <worldbody>
+          <replicate count="11">
           <body>          
             <geom type="sphere" size=".1"/>
             <freejoint/>
-          </body>
+            </body>
+          </replicate>
         </worldbody> 
+      </mujoco>
+    """)
+    mjwarp.put_model(mjm)
+
+  def test_put_data_qLD(self):
+    mjm = mujoco.MjModel.from_xml_string("""
+    <mujoco>
+      <worldbody>
+        <body>
+          <geom type="sphere" size="1"/>
+          <joint type="hinge"/>
+        </body>
+      </worldbody>
     </mujoco>
     """)
+    mjd = mujoco.MjData(mjm)
+    d = mjwarp.put_data(mjm, mjd)
+    self.assertTrue((d.qLD.numpy() == 0.0).all())
 
-    with self.assertRaises(NotImplementedError):
-      mjwarp.put_model(mjm)
+    mujoco.mj_forward(mjm, mjd)
+    mjd.qM[:] = 0.0
+    d = mjwarp.put_data(mjm, mjd)
+    self.assertTrue((d.qLD.numpy() == 0.0).all())
+
+    mujoco.mj_forward(mjm, mjd)
+    mjd.qLD[:] = 0.0
+    d = mjwarp.put_data(mjm, mjd)
+    self.assertTrue((d.qLD.numpy() == 0.0).all())
 
 
 if __name__ == "__main__":
