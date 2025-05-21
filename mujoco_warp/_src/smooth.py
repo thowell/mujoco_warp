@@ -2083,7 +2083,7 @@ def _spatial_geom_tendon(
   body_rootid: wp.array(dtype=int),
   dof_bodyid: wp.array(dtype=int),
   geom_bodyid: wp.array(dtype=int),
-  geom_size: wp.array(dtype=wp.vec3),
+  geom_size: wp.array2d(dtype=wp.vec3),
   site_bodyid: wp.array(dtype=int),
   wrap_objid: wp.array(dtype=int),
   wrap_prm: wp.array(dtype=float),
@@ -2121,7 +2121,7 @@ def _spatial_geom_tendon(
   # get geom information
   geom_xpos = geom_xpos_in[worldid, wrap_objid_geom]
   geom_xmat = geom_xmat_in[worldid, wrap_objid_geom]
-  geomsize = geom_size[wrap_objid_geom][0]
+  geomsize = geom_size[worldid, wrap_objid_geom][0]
   geom_type = wrap_type[wrap_adr]
 
   # get body ids for site-geom-site instances
