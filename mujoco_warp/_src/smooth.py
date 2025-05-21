@@ -2046,6 +2046,7 @@ def _spatial_site_tendon(
   body0 = site_bodyid[id0]
   body1 = site_bodyid[id1]
   if body0 != body1:
+    # TODO(team): parallelize
     for i in range(nv):
       jacp1, _ = support.jac(
         body_parentid,
@@ -2164,6 +2165,7 @@ def _spatial_geom_tendon(
     dif_body_sitegeom = bodyid_site0 != bodyid_geom
     dif_body_geomsite = bodyid_geom != bodyid_site1
 
+    # TODO(team): parallelize
     for i in range(nv):
       J = float(0.0)
       # site-geom
@@ -2229,6 +2231,7 @@ def _spatial_geom_tendon(
       vec_sitesite = wp.vec3(1.0, 0.0, 0.0)
 
     if bodyid_site0 != bodyid_site1:
+      # TODO(team): parallelize
       for i in range(nv):
         jacp1, _ = support.jac(
           body_parentid,
