@@ -198,6 +198,7 @@ def _gjk_epa_pipeline(
   # determines if two objects intersect, returns simplex and normal
   @wp.func
   def _gjk(
+    # In:
     geom1: Geom,
     geom2: Geom,
   ):
@@ -304,6 +305,7 @@ def _gjk_epa_pipeline(
   # compute contact normal and depth
   @wp.func
   def _epa(
+    # In:
     geom1: Geom,
     geom2: Geom,
     simplex: mat43,
@@ -443,6 +445,7 @@ def _gjk_epa_pipeline(
 
   @wp.func
   def _multiple_contacts(
+    # In:
     geom1: Geom,
     geom2: Geom,
     depth: float,
