@@ -60,7 +60,7 @@ VECI2 = vec6(1, 2, 3, 2, 3, 3)
 
 
 @wp.func
-def _gjk_support_geom(geom: Geom, geomtype: int, dir: wp.vec3, verts: wp.array(dtype=wp.vec3)):
+def gjk_support_geom(geom: Geom, geomtype: int, dir: wp.vec3, verts: wp.array(dtype=wp.vec3)):
   local_dir = wp.transpose(geom.rot) @ dir
   if geomtype == int(GeomType.SPHERE.value):
     support_pt = geom.pos + geom.size[0] * dir
@@ -127,8 +127,8 @@ def _gjk_support(
   # Negative distance means objects are not intersecting along direction `dir`.
   # Positive distance means objects are intersecting along the given direction `dir`.
 
-  dist1, s1 = _gjk_support_geom(geom1, geomtype1, dir, verts)
-  dist2, s2 = _gjk_support_geom(geom2, geomtype2, -dir, verts)
+  dist1, s1 = gjk_support_geom(geom1, geomtype1, dir, verts)
+  dist2, s2 = gjk_support_geom(geom2, geomtype2, -dir, verts)
 
   support_pt = s1 - s2
   return dist1 + dist2, support_pt
