@@ -36,6 +36,7 @@ from .types import IntegratorType
 from .types import JointType
 from .types import Model
 from .types import TileSet
+from .types import TrnType
 from .types import vec10f
 from .warp_util import event_scope
 from .warp_util import kernel
@@ -911,6 +912,50 @@ def _actuator_force(
 
 
 @wp.kernel
+def _tendon_actuator_force(
+  # Model:
+  actuator_trntype: wp.array(dtype=int),
+  actuator_trnid: wp.array(dtype=wp.vec2i),
+  # Data in:
+  actuator_force_in: wp.array2d(dtype=float),
+  # Data out:
+  ten_actfrc_out: wp.array2d(dtype=float),
+):
+  worldid, actid = wp.tid()
+
+  if actuator_trntype[actid] == int(TrnType.TENDON.value):
+    tenid = actuator_trnid[actid][0]
+    # TODO(team): only compute for tendons with force limits?
+    wp.atomic_add(ten_actfrc_out[worldid], tenid, actuator_force_in[worldid, actid])
+
+
+@wp.kernel
+def _tendon_actuator_force_clamp(
+  # Model:
+  actuator_trntype: wp.array(dtype=int),
+  actuator_trnid: wp.array(dtype=wp.vec2i),
+  tendon_actfrclimited: wp.array(dtype=bool),
+  tendon_actfrcrange: wp.array2d(dtype=wp.vec2),
+  # Data in:
+  ten_actfrc_in: wp.array2d(dtype=float),
+  # Data out:
+  actuator_force_out: wp.array2d(dtype=float),
+):
+  worldid, actid = wp.tid()
+
+  if actuator_trntype[actid] == int(TrnType.TENDON.value):
+    tenid = actuator_trnid[actid][0]
+    if tendon_actfrclimited[tenid]:
+      ten_actfrc = ten_actfrc_in[worldid, tenid]
+      actfrcrange = tendon_actfrcrange[worldid, tenid]
+
+      if ten_actfrc < actfrcrange[0]:
+        actuator_force_out[worldid, actid] *= actfrcrange[0] / ten_actfrc
+      elif ten_actfrc > actfrcrange[1]:
+        actuator_force_out[worldid, actid] *= actfrcrange[1] / ten_actfrc
+
+
+@wp.kernel
 def _qfrc_actuator_sparse(
   # Model:
   nu: int,
@@ -1042,6 +1087,33 @@ def fwd_actuation(m: Model, d: Data):
     ],
     outputs=[d.act_dot, d.actuator_force],
   )
+
+  if m.ntendon:
+    d.ten_actfrc.zero_()
+
+    wp.launch(
+      _tendon_actuator_force,
+      dim=(d.nworld, m.nu),
+      inputs=[
+        m.actuator_trntype,
+        m.actuator_trnid,
+        d.actuator_force,
+      ],
+      outputs=[d.ten_actfrc],
+    )
+
+    wp.launch(
+      _tendon_actuator_force_clamp,
+      dim=(d.nworld, m.nu),
+      inputs=[
+        m.actuator_trntype,
+        m.actuator_trnid,
+        m.tendon_actfrclimited,
+        m.tendon_actfrcrange,
+        d.ten_actfrc,
+      ],
+      outputs=[d.actuator_force],
+    )
 
   if m.opt.is_sparse:
     wp.launch(
