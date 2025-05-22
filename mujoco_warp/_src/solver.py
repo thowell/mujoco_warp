@@ -2452,7 +2452,7 @@ def solve_done(
   efc_done_out[worldid] = (improvement < opt_tolerance) or (gradient < opt_tolerance)
 
 
-def solve_context(m: types.Model, d: types.Data, grad: bool = True):
+def create_context(m: types.Model, d: types.Data, grad: bool = True):
   # initialize some efc arrays
   wp.launch(
     solve_init_efc,
@@ -2485,7 +2485,7 @@ def solve(m: types.Model, d: types.Data):
   wp.copy(d.qacc, d.qacc_warmstart)
 
   # create context
-  solve_context(m, d, grad=True)
+  create_context(m, d, grad=True)
 
   # search = -Mgrad
   wp.launch(
