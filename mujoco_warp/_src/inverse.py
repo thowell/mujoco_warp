@@ -31,20 +31,20 @@ from .types import Model
 def _qfrc_eulerdamp(
   # Model:
   opt_timestep: float,
-  dof_damping: wp.array(dtype=float),
+  dof_damping: wp.array2d(dtype=float),
   # Data in:
   qacc_in: wp.array2d(dtype=float),
   # Out:
   qfrc_out: wp.array2d(dtype=float),
 ):
   worldid, dofid = wp.tid()
-  qfrc_out[worldid, dofid] += opt_timestep * dof_damping[dofid] * qacc_in[worldid, dofid]
+  qfrc_out[worldid, dofid] += opt_timestep * dof_damping[worldid, dofid] * qacc_in[worldid, dofid]
 
 
 @wp.kernel
 def _qfrc_inverse(
   # Model:
-  dof_armature: wp.array(dtype=float),
+  dof_armature: wp.array2d(dtype=float),
   # Data in:
   qacc_in: wp.array2d(dtype=float),
   qfrc_bias_in: wp.array2d(dtype=float),
@@ -57,7 +57,7 @@ def _qfrc_inverse(
 
   qfrc_inverse = 0.0
   qfrc_inverse += qfrc_bias_in[worldid, dofid]
-  qfrc_inverse += dof_armature[dofid] * qacc_in[worldid, dofid]
+  qfrc_inverse += dof_armature[worldid, dofid] * qacc_in[worldid, dofid]
   qfrc_inverse -= qfrc_passive_in[worldid, dofid]
   qfrc_inverse -= qfrc_constraint_in[worldid, dofid]
 
