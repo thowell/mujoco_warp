@@ -99,12 +99,14 @@ class TrnType(enum.IntEnum):
     JOINT: force on joint
     JOINTINPARENT: force on joint, expressed in parent frame
     TENDON: force on tendon
+    BODY: adhesion force on body's geoms
   """
 
   JOINT = mujoco.mjtTrn.mjTRN_JOINT
   JOINTINPARENT = mujoco.mjtTrn.mjTRN_JOINTINPARENT
   TENDON = mujoco.mjtTrn.mjTRN_TENDON
-  # unsupported: SITE, SLIDERCRANK, BODY
+  BODY = mujoco.mjtTrn.mjTRN_BODY
+  # unsupported: SITE, SLIDERCRANK
 
 
 class DynType(enum.IntEnum):
@@ -812,6 +814,8 @@ class Model:
     sensor_rne_postconstraint: evaluate rne_postconstraint
     mocap_bodyid: id of body for mocap                       (nmocap,)
     mat_rgba: rgba                                           (nworld, nmat, 4)
+    actuator_trntype_body_adr: addresses for actuators       (<=nu,)
+                               with body transmission
   """
 
   nq: int
@@ -1061,6 +1065,7 @@ class Model:
   sensor_rne_postconstraint: bool  # warp only
   mocap_bodyid: wp.array(dtype=int)  # warp only
   mat_rgba: wp.array2d(dtype=wp.vec4)
+  actuator_trntype_body_adr: wp.array(dtype=int)  # warp only
 
 
 @dataclasses.dataclass
@@ -1078,6 +1083,7 @@ class Contact:
     solimp: constraint solver impedance
     dim: contact space dimensionality: 1, 3, 4 or 6
     geom: geom ids; -1 for flex
+    exclude: flag: 0: include, 1: in gap
     efc_address: address in efc; -1: not included
     worldid: world id
   """
@@ -1092,6 +1098,7 @@ class Contact:
   solimp: wp.array(dtype=vec5)
   dim: wp.array(dtype=int)
   geom: wp.array(dtype=wp.vec2i)
+  exclude: wp.array(dtype=int)
   efc_address: wp.array2d(dtype=int)
   worldid: wp.array(dtype=int)
 
@@ -1207,6 +1214,7 @@ class Data:
     wrap_obj: geomid; -1: site; -2: pulley                      (nworld, nwrap, 2)
     wrap_xpos: Cartesian 3D points in all paths                 (nworld, nwrap, 6)
     sensordata: sensor data array                               (nsensordata,)
+    actuator_trntype_body_ncon: number of active contacts       (nworld, <=nu,)
   """
 
   nworld: int  # warp only
@@ -1330,3 +1338,6 @@ class Data:
 
   # sensors
   sensordata: wp.array2d(dtype=float)
+
+  # actuator
+  actuator_trntype_body_ncon: wp.array2d(dtype=int)

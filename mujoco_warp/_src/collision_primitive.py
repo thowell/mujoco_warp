@@ -117,6 +117,7 @@ def write_contact(
   contact_solimp_out: wp.array(dtype=vec5),
   contact_dim_out: wp.array(dtype=int),
   contact_geom_out: wp.array(dtype=wp.vec2i),
+  contact_exclude_out: wp.array(dtype=int),
   contact_worldid_out: wp.array(dtype=int),
 ):
   active = (dist_in - margin_in) < 0
@@ -128,12 +129,14 @@ def write_contact(
       contact_frame_out[cid] = frame_in
       contact_geom_out[cid] = geoms_in
       contact_worldid_out[cid] = worldid_in
-      contact_includemargin_out[cid] = margin_in - gap_in
+      includemargin = margin_in - gap_in
+      contact_includemargin_out[cid] = includemargin
       contact_dim_out[cid] = condim_in
       contact_friction_out[cid] = friction_in
       contact_solref_out[cid] = solref_in
       contact_solreffriction_out[cid] = solreffriction_in
       contact_solimp_out[cid] = solimp_in
+      contact_exclude_out[cid] = int(dist_in >= includemargin)
 
 
 @wp.func
@@ -171,6 +174,7 @@ def plane_sphere(
   contact_solimp_out: wp.array(dtype=vec5),
   contact_dim_out: wp.array(dtype=int),
   contact_geom_out: wp.array(dtype=wp.vec2i),
+  contact_exclude_out: wp.array(dtype=int),
   contact_worldid_out: wp.array(dtype=int),
 ):
   dist, pos = _plane_sphere(plane.normal, plane.pos, sphere.pos, sphere.size[0])
@@ -200,6 +204,7 @@ def plane_sphere(
     contact_solimp_out,
     contact_dim_out,
     contact_geom_out,
+    contact_exclude_out,
     contact_worldid_out,
   )
 
@@ -234,6 +239,7 @@ def _sphere_sphere(
   contact_solimp_out: wp.array(dtype=vec5),
   contact_dim_out: wp.array(dtype=int),
   contact_geom_out: wp.array(dtype=wp.vec2i),
+  contact_exclude_out: wp.array(dtype=int),
   contact_worldid_out: wp.array(dtype=int),
 ):
   dir = pos2 - pos1
@@ -270,6 +276,7 @@ def _sphere_sphere(
     contact_solimp_out,
     contact_dim_out,
     contact_geom_out,
+    contact_exclude_out,
     contact_worldid_out,
   )
 
@@ -306,6 +313,7 @@ def _sphere_sphere_ext(
   contact_solimp_out: wp.array(dtype=vec5),
   contact_dim_out: wp.array(dtype=int),
   contact_geom_out: wp.array(dtype=wp.vec2i),
+  contact_exclude_out: wp.array(dtype=int),
   contact_worldid_out: wp.array(dtype=int),
 ):
   dir = pos2 - pos1
@@ -346,6 +354,7 @@ def _sphere_sphere_ext(
     contact_solimp_out,
     contact_dim_out,
     contact_geom_out,
+    contact_exclude_out,
     contact_worldid_out,
   )
 
@@ -378,6 +387,7 @@ def sphere_sphere(
   contact_solimp_out: wp.array(dtype=vec5),
   contact_dim_out: wp.array(dtype=int),
   contact_geom_out: wp.array(dtype=wp.vec2i),
+  contact_exclude_out: wp.array(dtype=int),
   contact_worldid_out: wp.array(dtype=int),
 ):
   _sphere_sphere(
@@ -406,6 +416,7 @@ def sphere_sphere(
     contact_solimp_out,
     contact_dim_out,
     contact_geom_out,
+    contact_exclude_out,
     contact_worldid_out,
   )
 
@@ -438,6 +449,7 @@ def sphere_capsule(
   contact_solimp_out: wp.array(dtype=vec5),
   contact_dim_out: wp.array(dtype=int),
   contact_geom_out: wp.array(dtype=wp.vec2i),
+  contact_exclude_out: wp.array(dtype=int),
   contact_worldid_out: wp.array(dtype=int),
 ):
   """Calculates one contact between a sphere and a capsule."""
@@ -475,6 +487,7 @@ def sphere_capsule(
     contact_solimp_out,
     contact_dim_out,
     contact_geom_out,
+    contact_exclude_out,
     contact_worldid_out,
   )
 
@@ -507,6 +520,7 @@ def capsule_capsule(
   contact_solimp_out: wp.array(dtype=vec5),
   contact_dim_out: wp.array(dtype=int),
   contact_geom_out: wp.array(dtype=wp.vec2i),
+  contact_exclude_out: wp.array(dtype=int),
   contact_worldid_out: wp.array(dtype=int),
 ):
   axis1 = wp.vec3(cap1.rot[0, 2], cap1.rot[1, 2], cap1.rot[2, 2])
@@ -549,6 +563,7 @@ def capsule_capsule(
     contact_solimp_out,
     contact_dim_out,
     contact_geom_out,
+    contact_exclude_out,
     contact_worldid_out,
   )
 
@@ -581,6 +596,7 @@ def plane_capsule(
   contact_solimp_out: wp.array(dtype=vec5),
   contact_dim_out: wp.array(dtype=int),
   contact_geom_out: wp.array(dtype=wp.vec2i),
+  contact_exclude_out: wp.array(dtype=int),
   contact_worldid_out: wp.array(dtype=int),
 ):
   """Calculates two contacts between a capsule and a plane."""
@@ -625,6 +641,7 @@ def plane_capsule(
     contact_solimp_out,
     contact_dim_out,
     contact_geom_out,
+    contact_exclude_out,
     contact_worldid_out,
   )
 
@@ -654,6 +671,7 @@ def plane_capsule(
     contact_solimp_out,
     contact_dim_out,
     contact_geom_out,
+    contact_exclude_out,
     contact_worldid_out,
   )
 
@@ -686,6 +704,7 @@ def plane_box(
   contact_solimp_out: wp.array(dtype=vec5),
   contact_dim_out: wp.array(dtype=int),
   contact_geom_out: wp.array(dtype=wp.vec2i),
+  contact_exclude_out: wp.array(dtype=int),
   contact_worldid_out: wp.array(dtype=int),
 ):
   count = int(0)
@@ -735,6 +754,7 @@ def plane_box(
       contact_solimp_out,
       contact_dim_out,
       contact_geom_out,
+      contact_exclude_out,
       contact_worldid_out,
     )
     count += 1
@@ -773,6 +793,7 @@ def plane_convex(
   contact_solimp_out: wp.array(dtype=vec5),
   contact_dim_out: wp.array(dtype=int),
   contact_geom_out: wp.array(dtype=wp.vec2i),
+  contact_exclude_out: wp.array(dtype=int),
   contact_worldid_out: wp.array(dtype=int),
 ):
   """Calculates contacts between a plane and a convex object."""
@@ -884,6 +905,7 @@ def plane_convex(
         contact_solimp_out,
         contact_dim_out,
         contact_geom_out,
+        contact_exclude_out,
         contact_worldid_out,
       )
 
@@ -916,6 +938,7 @@ def sphere_cylinder(
   contact_solimp_out: wp.array(dtype=vec5),
   contact_dim_out: wp.array(dtype=int),
   contact_geom_out: wp.array(dtype=wp.vec2i),
+  contact_exclude_out: wp.array(dtype=int),
   contact_worldid_out: wp.array(dtype=int),
 ):
   axis = wp.vec3(
@@ -975,6 +998,7 @@ def sphere_cylinder(
       contact_solimp_out,
       contact_dim_out,
       contact_geom_out,
+      contact_exclude_out,
       contact_worldid_out,
     )
     return
@@ -1018,6 +1042,7 @@ def sphere_cylinder(
       contact_solimp_out,
       contact_dim_out,
       contact_geom_out,
+      contact_exclude_out,
       contact_worldid_out,
     )
 
@@ -1058,6 +1083,7 @@ def sphere_cylinder(
     contact_solimp_out,
     contact_dim_out,
     contact_geom_out,
+    contact_exclude_out,
     contact_worldid_out,
   )
 
@@ -1090,6 +1116,7 @@ def plane_cylinder(
   contact_solimp_out: wp.array(dtype=vec5),
   contact_dim_out: wp.array(dtype=int),
   contact_geom_out: wp.array(dtype=wp.vec2i),
+  contact_exclude_out: wp.array(dtype=int),
   contact_worldid_out: wp.array(dtype=int),
 ):
   """Calculates contacts between a cylinder and a plane."""
@@ -1156,6 +1183,7 @@ def plane_cylinder(
       contact_solimp_out,
       contact_dim_out,
       contact_geom_out,
+      contact_exclude_out,
       contact_worldid_out,
     )
   else:
@@ -1191,6 +1219,7 @@ def plane_cylinder(
       contact_solimp_out,
       contact_dim_out,
       contact_geom_out,
+      contact_exclude_out,
       contact_worldid_out,
     )
 
@@ -1229,6 +1258,7 @@ def plane_cylinder(
       contact_solimp_out,
       contact_dim_out,
       contact_geom_out,
+      contact_exclude_out,
       contact_worldid_out,
     )
 
@@ -1259,6 +1289,7 @@ def plane_cylinder(
       contact_solimp_out,
       contact_dim_out,
       contact_geom_out,
+      contact_exclude_out,
       contact_worldid_out,
     )
 
@@ -1374,6 +1405,7 @@ def _sphere_box(
   contact_solimp_out: wp.array(dtype=vec5),
   contact_dim_out: wp.array(dtype=int),
   contact_geom_out: wp.array(dtype=wp.vec2i),
+  contact_exclude_out: wp.array(dtype=int),
   contact_worldid_out: wp.array(dtype=int),
 ):
   center = wp.transpose(box_rot) @ (sphere_pos - box_pos)
@@ -1432,6 +1464,7 @@ def _sphere_box(
     contact_solimp_out,
     contact_dim_out,
     contact_geom_out,
+    contact_exclude_out,
     contact_worldid_out,
   )
 
@@ -1464,6 +1497,7 @@ def sphere_box(
   contact_solimp_out: wp.array(dtype=vec5),
   contact_dim_out: wp.array(dtype=int),
   contact_geom_out: wp.array(dtype=wp.vec2i),
+  contact_exclude_out: wp.array(dtype=int),
   contact_worldid_out: wp.array(dtype=int),
 ):
   _sphere_box(
@@ -1493,6 +1527,7 @@ def sphere_box(
     contact_solimp_out,
     contact_dim_out,
     contact_geom_out,
+    contact_exclude_out,
     contact_worldid_out,
   )
 
@@ -1525,6 +1560,7 @@ def capsule_box(
   contact_solimp_out: wp.array(dtype=vec5),
   contact_dim_out: wp.array(dtype=int),
   contact_geom_out: wp.array(dtype=wp.vec2i),
+  contact_exclude_out: wp.array(dtype=int),
   contact_worldid_out: wp.array(dtype=int),
 ):
   """Calculates contacts between a capsule and a box."""
@@ -1846,6 +1882,7 @@ def capsule_box(
     contact_solimp_out,
     contact_dim_out,
     contact_geom_out,
+    contact_exclude_out,
     contact_worldid_out,
   )
 
@@ -1879,6 +1916,7 @@ def capsule_box(
       contact_solimp_out,
       contact_dim_out,
       contact_geom_out,
+      contact_exclude_out,
       contact_worldid_out,
     )
 
@@ -1943,6 +1981,7 @@ def box_box(
   contact_solimp_out: wp.array(dtype=vec5),
   contact_dim_out: wp.array(dtype=int),
   contact_geom_out: wp.array(dtype=wp.vec2i),
+  contact_exclude_out: wp.array(dtype=int),
   contact_worldid_out: wp.array(dtype=int),
 ):
   # Compute transforms between box's frames
@@ -2372,6 +2411,7 @@ def box_box(
     contact_solref_out[cid] = solref
     contact_solreffriction_out[cid] = solreffriction
     contact_solimp_out[cid] = solimp
+    contact_exclude_out[cid] = int(depth[i] >= margin - gap)
 
 
 @wp.kernel
@@ -2418,6 +2458,7 @@ def _primitive_narrowphase(
   contact_solimp_out: wp.array(dtype=vec5),
   contact_dim_out: wp.array(dtype=int),
   contact_geom_out: wp.array(dtype=wp.vec2i),
+  contact_exclude_out: wp.array(dtype=int),
   contact_worldid_out: wp.array(dtype=int),
 ):
   tid = wp.tid()
@@ -2505,6 +2546,7 @@ def _primitive_narrowphase(
       contact_solimp_out,
       contact_dim_out,
       contact_geom_out,
+      contact_exclude_out,
       contact_worldid_out,
     )
   elif type1 == int(GeomType.SPHERE.value) and type2 == int(GeomType.SPHERE.value):
@@ -2532,6 +2574,7 @@ def _primitive_narrowphase(
       contact_solimp_out,
       contact_dim_out,
       contact_geom_out,
+      contact_exclude_out,
       contact_worldid_out,
     )
   elif type1 == int(GeomType.PLANE.value) and type2 == int(GeomType.CAPSULE.value):
@@ -2559,6 +2602,7 @@ def _primitive_narrowphase(
       contact_solimp_out,
       contact_dim_out,
       contact_geom_out,
+      contact_exclude_out,
       contact_worldid_out,
     )
   elif type1 == int(GeomType.PLANE.value) and type2 == int(GeomType.BOX.value):
@@ -2586,6 +2630,7 @@ def _primitive_narrowphase(
       contact_solimp_out,
       contact_dim_out,
       contact_geom_out,
+      contact_exclude_out,
       contact_worldid_out,
     )
   elif type1 == int(GeomType.CAPSULE.value) and type2 == int(GeomType.CAPSULE.value):
@@ -2613,6 +2658,7 @@ def _primitive_narrowphase(
       contact_solimp_out,
       contact_dim_out,
       contact_geom_out,
+      contact_exclude_out,
       contact_worldid_out,
     )
   elif type1 == int(GeomType.PLANE.value) and type2 == int(GeomType.MESH.value):
@@ -2640,6 +2686,7 @@ def _primitive_narrowphase(
       contact_solimp_out,
       contact_dim_out,
       contact_geom_out,
+      contact_exclude_out,
       contact_worldid_out,
     )
   elif type1 == int(GeomType.SPHERE.value) and type2 == int(GeomType.CAPSULE.value):
@@ -2667,6 +2714,7 @@ def _primitive_narrowphase(
       contact_solimp_out,
       contact_dim_out,
       contact_geom_out,
+      contact_exclude_out,
       contact_worldid_out,
     )
   elif type1 == int(GeomType.SPHERE.value) and type2 == int(GeomType.CYLINDER.value):
@@ -2694,6 +2742,7 @@ def _primitive_narrowphase(
       contact_solimp_out,
       contact_dim_out,
       contact_geom_out,
+      contact_exclude_out,
       contact_worldid_out,
     )
   elif type1 == int(GeomType.SPHERE.value) and type2 == int(GeomType.BOX.value):
@@ -2721,6 +2770,7 @@ def _primitive_narrowphase(
       contact_solimp_out,
       contact_dim_out,
       contact_geom_out,
+      contact_exclude_out,
       contact_worldid_out,
     )
   elif type1 == int(GeomType.PLANE.value) and type2 == int(GeomType.CYLINDER.value):
@@ -2748,6 +2798,7 @@ def _primitive_narrowphase(
       contact_solimp_out,
       contact_dim_out,
       contact_geom_out,
+      contact_exclude_out,
       contact_worldid_out,
     )
   elif type1 == int(GeomType.BOX.value) and type2 == int(GeomType.BOX.value):
@@ -2775,6 +2826,7 @@ def _primitive_narrowphase(
       contact_solimp_out,
       contact_dim_out,
       contact_geom_out,
+      contact_exclude_out,
       contact_worldid_out,
     )
   elif type1 == int(GeomType.CAPSULE.value) and type2 == int(GeomType.BOX.value):
@@ -2802,6 +2854,7 @@ def _primitive_narrowphase(
       contact_solimp_out,
       contact_dim_out,
       contact_geom_out,
+      contact_exclude_out,
       contact_worldid_out,
     )
 
@@ -2854,6 +2907,7 @@ def primitive_narrowphase(m: Model, d: Data):
       d.contact.solimp,
       d.contact.dim,
       d.contact.geom,
+      d.contact.exclude,
       d.contact.worldid,
     ],
   )
