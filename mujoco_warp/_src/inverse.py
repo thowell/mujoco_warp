@@ -78,10 +78,9 @@ def discrete_acc(m: Model, d: Data, qacc: wp.array2d(dtype=float), qfrc: wp.arra
     # TODO(team): qacc = d.qacc if (m.dof_damping == 0.0).all()
 
     # set qfrc = (d.qM + m.opt.timestep * diag(m.dof_damping)) * d.qacc
-    skip = wp.zeros(d.nworld, dtype=bool)
 
     # d.qM @ d.qacc
-    support.mul_m(m, d, qfrc, d.qacc, skip)
+    support.mul_m(m, d, qfrc, d.qacc, d.discrete_acc_mul_m_skip)
 
     # qfrc += m.opt.timestep * m.dof_damping * d.qacc
     wp.launch(

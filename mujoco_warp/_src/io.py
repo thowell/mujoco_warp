@@ -805,6 +805,8 @@ def make_data(mjm: mujoco.MjModel, nworld: int = 1, nconmax: int = -1, njmax: in
     wrap_geom_xpos=wp.zeros((nworld, mjm.nwrap), dtype=wp.spatial_vector),
     # sensors
     sensordata=wp.zeros((nworld, mjm.nsensordata), dtype=float),
+    # mul_m
+    discrete_acc_mul_m=wp.array((nworld,), dtype=bool),
   )
 
 
@@ -1101,6 +1103,8 @@ def put_data(
     wrap_geom_xpos=wp.zeros((nworld, mjm.nwrap), dtype=wp.spatial_vector),
     # sensors
     sensordata=tile(mjd.sensordata),
+    # mul_m
+    discrete_acc_mul_m_skip=wp.zeros((nworld,), dtype=bool),
   )
 
 

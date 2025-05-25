@@ -1264,6 +1264,7 @@ class Data:
     wrap_xpos: Cartesian 3D points in all paths                 (nworld, nwrap, 6)
     wrap_geom_xpos: Cartesian 3D points for geom wrap points    (nworld, <=nwrap, 6)
     sensordata: sensor data array                               (nsensordata,)
+    discrete_acc_mul_m_skip: skip mul_m computation             (nworld,)
   """
 
   nworld: int  # warp only
@@ -1392,3 +1393,6 @@ class Data:
 
   # sensors
   sensordata: wp.array2d(dtype=float)
+
+  # mul_m
+  discrete_acc_mul_m_skip: wp.array(dtype=bool)  # warp only
