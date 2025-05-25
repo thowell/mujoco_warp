@@ -96,11 +96,13 @@ class EnableBit(enum.IntFlag):
   """Enable optional feature bitflags.
 
   Members:
+    OVERRIDE: override contact parameters
     INVDISCRETE: discrete-time inverse dynamics
   """
 
+  OVERRIDE = mujoco.mjtEnableBit.mjENBL_OVERRIDE
   INVDISCRETE = mujoco.mjtEnableBit.mjENBL_INVDISCRETE
-  # unsupported: OVERRIDE, ENERGY, FWDINV, MULTICCD, ISLAND
+  # unsupported: ENERGY, FWDINV, MULTICCD, ISLAND
 
 
 class TrnType(enum.IntEnum):
@@ -453,6 +455,11 @@ class Option:
   wind: wp.vec3
   density: float
   viscosity: float
+  # override contact solver parameters (if enabled)
+  o_margin: float
+  o_solref: wp.vec2
+  o_solimp: vec5
+  o_friction: vec5
 
 
 @dataclasses.dataclass
