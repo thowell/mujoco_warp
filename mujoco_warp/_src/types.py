@@ -398,8 +398,6 @@ vec5 = vec5f
 vec6 = vec6f
 vec10 = vec10f
 vec11 = vec11f
-array2df = wp.array2d(dtype=float)
-array3df = wp.array3d(dtype=float)
 
 
 @dataclasses.dataclass
