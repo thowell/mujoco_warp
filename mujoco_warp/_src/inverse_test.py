@@ -35,7 +35,9 @@ def _assert_eq(a, b, name):
 
 
 class InverseTest(parameterized.TestCase):
-  @parameterized.product(integrator=[IntegratorType.EULER], invdiscrete=[True, False], eulerdamp=[True, False])
+  @parameterized.product(
+    integrator=[IntegratorType.EULER, IntegratorType.IMPLICITFAST], invdiscrete=[True, False], eulerdamp=[True, False]
+  )
   def test_inverse(self, integrator, invdiscrete, eulerdamp):
     """Tests inverse dynamics."""
     mjm, mjd, m, d = test_util.fixture(

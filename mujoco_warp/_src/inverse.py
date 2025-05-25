@@ -15,6 +15,7 @@
 
 import warp as wp
 
+from . import derivative
 from . import forward
 from . import sensor
 from . import smooth
@@ -64,7 +65,7 @@ def _qfrc_inverse(
   qfrc_inverse_out[worldid, dofid] = qfrc_inverse
 
 
-def discrete_acc(m: Model, d: Data, qacc: wp.array2d(dtype=float)):
+def discrete_acc(m: Model, d: Data, qacc: wp.array2d(dtype=float), qfrc: wp.array2d(dtype=float)):
   """Convert discrete-time qacc to continuous-time qacc."""
 
   if m.opt.integrator == IntegratorType.RK4:
@@ -78,7 +79,6 @@ def discrete_acc(m: Model, d: Data, qacc: wp.array2d(dtype=float)):
 
     # set qfrc = (d.qM + m.opt.timestep * diag(m.dof_damping)) * d.qacc
     skip = wp.zeros(d.nworld, dtype=bool)
-    qfrc = wp.empty((d.nworld, m.nv), dtype=float)
 
     # d.qM @ d.qacc
     support.mul_m(m, d, qfrc, d.qacc, skip)
@@ -91,8 +91,8 @@ def discrete_acc(m: Model, d: Data, qacc: wp.array2d(dtype=float)):
       outputs=[qfrc],
     )
   elif m.opt.integrator == IntegratorType.IMPLICITFAST:
-    # TODO(team):
-    raise NotImplementedError(f"integrator {m.opt.integrator} not implemented.")
+    derivative.deriv_smooth_vel(m, d, flg_forward=False)
+    smooth._factor_solve_i_dense(m, d, d.qM, qacc, qfrc)
   else:
     raise NotImplementedError(f"integrator {m.opt.integrator} not implemented.")
 
@@ -123,7 +123,7 @@ def inverse(m: Model, d: Data):
   if invdiscrete:
     # save discrete-time qacc and compute continuous-time qacc
     wp.copy(d.qacc_discrete, d.qacc)
-    discrete_acc(m, d, d.qacc)
+    discrete_acc(m, d, d.qacc, d.qfrc_integration)
 
   inv_constraint(m, d)
   smooth.rne(m, d, flg_acc=True)

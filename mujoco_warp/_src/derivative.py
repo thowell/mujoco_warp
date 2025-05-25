@@ -69,6 +69,7 @@ def _tile_qderiv_actuator_passive(
   opt_timestep: float,
   actuation_enabled: bool,
   passive_enabled: bool,
+  flg_forward: bool,
 ):
   @wp.func
   def subtract_multiply(x: float, y: float):
@@ -79,16 +80,17 @@ def _tile_qderiv_actuator_passive(
     # Model:
     dof_damping: wp.array2d(dtype=float),
     # Data in:
+    qacc_in: wp.array3d(dtype=float),
     actuator_moment_in: wp.array3d(dtype=float),
     qM_in: wp.array3d(dtype=float),
-    qfrc_smooth_in: wp.array2d(dtype=float),
-    qfrc_constraint_in: wp.array2d(dtype=float),
+    qfrc_smooth_in: wp.array3d(dtype=float),
+    qfrc_constraint_in: wp.array3d(dtype=float),
     act_vel_integration_in: wp.array2d(dtype=float),
     # In:
     tile_nu_adr: wp.array(dtype=int),
     tile_nv_adr: wp.array(dtype=int),
     # Data out:
-    qfrc_integration_out: wp.array2d(dtype=float),
+    qfrc_integration_out: wp.array3d(dtype=float),
     qM_integration_out: wp.array3d(dtype=float),
   ):
     worldid, nodeid = wp.tid()
@@ -129,17 +131,22 @@ def _tile_qderiv_actuator_passive(
     qderiv_tile = wp.tile_map(subtract_multiply, qM_tile, qderiv_tile)
     wp.tile_store(qM_integration_out[worldid], qderiv_tile, offset=(offset_nv, offset_nv))
 
-    # sum qfrc
-    qfrc_smooth_tile = wp.tile_load(qfrc_smooth_in[worldid], shape=TILE_NV_SIZE, offset=offset_nv)
-    qfrc_constraint_tile = wp.tile_load(qfrc_constraint_in[worldid], shape=TILE_NV_SIZE, offset=offset_nv)
-    qfrc_combined = wp.add(qfrc_smooth_tile, qfrc_constraint_tile)
-    wp.tile_store(qfrc_integration_out[worldid], qfrc_combined, offset=offset_nv)
+    if wp.static(flg_forward):
+      # sum qfrc
+      qfrc_smooth_tile = wp.tile_load(qfrc_smooth_in[worldid], shape=(TILE_NV_SIZE, 1), offset=(offset_nv, 0))
+      qfrc_constraint_tile = wp.tile_load(qfrc_constraint_in[worldid], shape=(TILE_NV_SIZE, 1), offset=(offset_nv, 0))
+      qfrc_combined = wp.add(qfrc_smooth_tile, qfrc_constraint_tile)
+      wp.tile_store(qfrc_integration_out[worldid], qfrc_combined, offset=(offset_nv, 0))
+    else:  # inverse
+      qacc_tile = wp.tile_load(qacc_in[worldid], shape=(TILE_NV_SIZE, 1), offset=(offset_nv, 0))
+      qfrc_inverse = wp.tile_matmul(qderiv_tile, qacc_tile)
+      wp.tile_store(qfrc_integration_out[worldid], qfrc_inverse, offset=(offset_nv, 0))
 
   return qderiv_actuator_passive
 
 
 @event_scope
-def deriv_smooth_vel(m: Model, d: Data):
+def deriv_smooth_vel(m: Model, d: Data, flg_forward: bool = True):
   """Analytical derivative of smooth forces w.r.t velocities."""
 
   # optimization comments (AD)
@@ -193,20 +200,22 @@ def deriv_smooth_vel(m: Model, d: Data):
           m.opt.timestep,
           actuation_enabled,
           passive_enabled,
+          flg_forward,
         ),
         dim=(d.nworld, tile_nu.adr.size, tile_nv.adr.size),
         inputs=[
           m.dof_damping,
+          d.qacc.reshape(d.qacc.shape + (1,)),
           d.actuator_moment,
           d.qM,
-          d.qfrc_smooth,
-          d.qfrc_constraint,
+          d.qfrc_smooth.reshape(d.qfrc_smooth.shape + (1,)),
+          d.qfrc_constraint.reshape(d.qfrc_constraint.shape + (1,)),
           d.act_vel_integration,
           tile_nu.adr,
           tile_nv.adr,
         ],
         outputs=[
-          d.qfrc_integration,
+          d.qfrc_integration.reshape(d.qfrc_integration.shape + (1,)),
           d.qM_integration,
         ],
         block_dim=64 if actuation_enabled else 256,
