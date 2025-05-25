@@ -154,8 +154,7 @@ def mul_m(
           skip,
         ],
         outputs=[res.reshape(res.shape + (1,))],
-        # TODO(team): develop heuristic for block dim, or make configurable
-        block_dim=32,
+        block_dim=m.block_dim.mul_m_dense,
       )
 
 

@@ -593,6 +593,7 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
       ],
     ).any(),
     mat_rgba=create_nmodel_batched_array(mjm.mat_rgba, dtype=wp.vec4),
+    block_dim=types.BlockDim(),
   )
 
   return m

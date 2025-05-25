@@ -26,6 +26,30 @@ MJ_NREF = mujoco.mjNREF
 MJ_NIMP = mujoco.mjNIMP
 
 
+class BlockDim:
+  # collision_box
+  box_box: int = 32
+  # forward
+  euler_dense: int = 32
+  implicit_actuator_qderiv: wp.vec2i = wp.vec2i(64, 256)
+  actuator_velocity_sparse: int = 32
+  actuator_velocity_dense: int = 32
+  tendon_velocity: int = 32
+  qfrc_actuator: int = 32
+  # ray
+  ray: int = 64
+  # sensor
+  energy_vel_kinetic: int = 32
+  # smooth
+  cholesky_factorize: int = 32
+  cholesky_solve: int = 32
+  cholesky_factorize_solve: int = 32
+  # solver
+  update_gradient_cholesky: int = 32
+  # support
+  mul_m_dense: int = 32
+
+
 class CamLightType(enum.IntEnum):
   """Type of camera light.
 
@@ -850,6 +874,7 @@ class Model:
     sensor_rne_postconstraint: evaluate rne_postconstraint
     mocap_bodyid: id of body for mocap                       (nmocap,)
     mat_rgba: rgba                                           (nworld, nmat, 4)
+    block_dim: BlockDim
   """
 
   nq: int
@@ -1112,6 +1137,7 @@ class Model:
   sensor_rne_postconstraint: bool  # warp only
   mocap_bodyid: wp.array(dtype=int)  # warp only
   mat_rgba: wp.array2d(dtype=wp.vec4)
+  block_dim: BlockDim  # warp only
 
 
 @dataclasses.dataclass
