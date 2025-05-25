@@ -69,7 +69,7 @@ def discrete_acc(m: Model, d: Data, qacc: wp.array2d(dtype=float), qfrc: wp.arra
   """Convert discrete-time qacc to continuous-time qacc."""
 
   if m.opt.integrator == IntegratorType.RK4:
-    raise ValueError("discrete inverse dynamics is not supported by RK4 integrator")
+    raise NotImplementedError("discrete inverse dynamics is not supported by RK4 integrator")
   elif m.opt.integrator == IntegratorType.EULER:
     if m.opt.disableflags & DisableBit.EULERDAMP:
       wp.copy(qacc, d.qacc)
