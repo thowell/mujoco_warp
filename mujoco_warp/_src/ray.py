@@ -98,20 +98,26 @@ def _ray_eliminate(
 
 
 @wp.func
-def _ray_quad(a: float, b: float, c: float) -> wp.vec2:
-  """Returns two solutions for quadratic: a*x^2 + 2*b*x + c = 0."""
+def _ray_quad(a: float, b: float, c: float) -> Tuple[float, wp.vec2]:
+  """Compute solutions from quadratic: a*x^2 + 2*b*x + c = 0."""
   det = b * b - a * c
+  if det < MJ_MINVAL:
+    return wp.inf, wp.vec2(wp.inf, wp.inf)
   det = wp.sqrt(det)
 
   # compute the two solutions
   den = 1.0 / a
   x0 = (-b - det) * den
   x1 = (-b + det) * den
+  x = wp.vec2(x0, x1)
 
-  x0 = wp.where((det < MJ_MINVAL) or (x0 < 0.0), wp.inf, x0)
-  x1 = wp.where((det < MJ_MINVAL) or (x1 < 0.0), wp.inf, x1)
-
-  return wp.vec2(x0, x1)
+  # finalize result
+  if x0 >= 0.0:
+    return x0, x
+  elif x1 >= 0.0:
+    return x1, x
+  else:
+    return wp.inf, x
 
 
 @wp.func
@@ -174,82 +180,97 @@ def _ray_triangle(v0: wp.vec3, v1: wp.vec3, v2: wp.vec3, pnt: wp.vec3, vec: wp.v
 @wp.func
 def _ray_plane(pos: wp.vec3, mat: wp.mat33, size: wp.vec3, pnt: wp.vec3, vec: wp.vec3) -> float:
   """Returns the distance at which a ray intersects with a plane."""
-  pnt, vec = _ray_map(pos, mat, pnt, vec)
 
-  x = -pnt[2] / vec[2]
+  # map to local frame
+  lpnt, lvec = _ray_map(pos, mat, pnt, vec)
 
-  valid = vec[2] <= -MJ_MINVAL  # z-vec pointing towards front face
-  valid = valid and x >= 0.0
+  # z-vec not pointing torwards front face: reject
+  if lvec[2] > -MJ_MINVAL:
+    return wp.inf
 
-  # only within rendered rectangle
-  p_x = pnt[0] + x * vec[0]
-  p_y = pnt[1] + x * vec[1]
-  valid = valid and ((size[0] <= 0.0) or (wp.abs(p_x) <= size[0]))
-  valid = valid and ((size[1] <= 0.0) or (wp.abs(p_y) <= size[1]))
+  # intersection with plane
+  x = -lpnt[2] / lvec[2]
+  if x < 0.0:
+    return wp.inf
 
-  return wp.where(valid, x, wp.inf)
+  p = wp.vec2(
+    lpnt[0] + x * lvec[0],
+    lpnt[1] + x * lvec[1],
+  )
+
+  # accept only within rendered rectangle
+  if (size[0] <= 0.0 or wp.abs(p[0]) <= size[0]) and (size[1] <= 0.0 or wp.abs(p[1]) <= size[1]):
+    return x
+  else:
+    return wp.inf
 
 
 @wp.func
-def _ray_sphere(pos: wp.vec3, size: wp.vec3, pnt: wp.vec3, vec: wp.vec3) -> float:
+def _ray_sphere(pos: wp.vec3, dist_sqr: float, pnt: wp.vec3, vec: wp.vec3) -> float:
   """Returns the distance at which a ray intersects with a sphere."""
   dif = pnt - pos
 
   a = wp.dot(vec, vec)
   b = wp.dot(vec, dif)
-  c = wp.dot(dif, dif) - size[0] * size[0]
+  c = wp.dot(dif, dif) - dist_sqr
 
-  solutions = _ray_quad(a, b, c)
-  x0 = solutions[0]
-  x1 = solutions[1]
-  x = wp.where(wp.isinf(x0), x1, x0)
-
-  return x
+  sol, _ = _ray_quad(a, b, c)
+  return sol
 
 
 @wp.func
 def _ray_capsule(pos: wp.vec3, mat: wp.mat33, size: wp.vec3, pnt: wp.vec3, vec: wp.vec3) -> float:
   """Returns the distance at which a ray intersects with a capsule."""
 
-  pnt, vec = _ray_map(pos, mat, pnt, vec)
+  # bounding sphere test
+  ssz = size[0] + size[1]
+  if _ray_sphere(pos, ssz * ssz, pnt, vec) < 0.0:
+    return wp.inf
 
-  # cylinder round side: (x*lvec+lpnt)'*(x*lvec+lpnt) = size[0]*size[0]
-  # For a capsule, we only care about the x,y components when checking cylinder intersection
-  # since the z component is handled separately with the caps
-  vec_2d = wp.vec2(vec[0], vec[1])
-  pnt_2d = wp.vec2(pnt[0], pnt[1])
-  a = wp.dot(vec_2d, vec_2d)
-  b = wp.dot(pnt_2d, vec_2d)
-  c = wp.dot(pnt_2d, pnt_2d) - size[0] * size[0]
+  # map to local frame
+  lpnt, lvec = _ray_map(pos, mat, pnt, vec)
 
-  # solve a*x^2 + 2*b*x + c = 0
-  solutions = _ray_quad(a, b, c)
-  x0 = solutions[0]
-  x1 = solutions[1]
-  x = wp.where(wp.isinf(x0), x1, x0)
+  # init solution
+  x = -1.0
+
+  # cylinder round side: (x * lvec + lpnt)' * (x * lvec + lpnt) = size[0] * size[0]
+  sq_size0 = size[0] * size[0]
+  a = lvec[0] * lvec[0] + lvec[1] * lvec[1]
+  b = lvec[0] * lpnt[0] + lvec[1] * lpnt[1]
+  c = lpnt[0] * lpnt[0] + lpnt[1] * lpnt[1] - sq_size0
+
+  # solve a * x^2 + 2 * b * x + c = 0
+  sol, xx = _ray_quad(a, b, c)
 
   # make sure round solution is between flat sides
-  x = wp.where(wp.abs(pnt[2] + x * vec[2]) <= size[1], x, wp.inf)
+  if sol >= 0.0 and wp.abs(lpnt[2] + sol * vec[2]) <= size[1]:
+    if x < 0.0 or sol < x:
+      x = sol
 
   # top cap
-  dif = pnt - wp.vec3(0.0, 0.0, size[1])
-  solutions = _ray_quad(wp.dot(vec, vec), wp.dot(vec, dif), wp.dot(dif, dif) - size[0] * size[0])
-  x0 = solutions[0]
-  x1 = solutions[1]
+  ldif = wp.vec3(lpnt[0], lpnt[1], lpnt[2] - size[1])
+  a += lvec[2] * lvec[2]
+  b = wp.dot(lvec, ldif)
+  c = wp.dot(ldif, ldif) - sq_size0
+  _, xx = _ray_quad(a, b, c)
 
   # accept only top half of sphere
-  x = wp.where((pnt[2] + x0 * vec[2] >= size[1]) and (x0 < x), x0, x)
-  x = wp.where((pnt[2] + x1 * vec[2] >= size[1]) and (x1 < x), x1, x)
+  for i in range(2):
+    if xx[i] >= 0.0 and lpnt[2] + xx[i] * lvec[2] >= size[1]:
+      if x < 0.0 or xx[i] < x:
+        x = xx[i]
 
   # bottom cap
-  dif = pnt + wp.vec3(0.0, 0.0, size[1])
-  solutions = _ray_quad(wp.dot(vec, vec), wp.dot(vec, dif), wp.dot(dif, dif) - size[0] * size[0])
-  x0 = solutions[0]
-  x1 = solutions[1]
+  ldif = wp.vec3(ldif[0], ldif[1], lpnt[2] + size[1])
+  b = wp.dot(lvec, ldif)
+  c = wp.dot(ldif, ldif) - sq_size0
+  _, xx = _ray_quad(a, b, c)
 
   # accept only bottom half of sphere
-  x = wp.where((pnt[2] + x0 * vec[2] <= -size[1]) and (x0 < x), x0, x)
-  x = wp.where((pnt[2] + x1 * vec[2] <= -size[1]) and (x1 < x), x1, x)
+  for i in range(2):
+    if xx[i] >= 0.0 and lpnt[2] + xx[i] * lvec[2] <= -size[1]:
+      if x < 0.0 or xx[i] < x:
+        x = xx[i]
 
   return x
 
@@ -257,51 +278,74 @@ def _ray_capsule(pos: wp.vec3, mat: wp.mat33, size: wp.vec3, pnt: wp.vec3, vec: 
 @wp.func
 def _ray_ellipsoid(pos: wp.vec3, mat: wp.mat33, size: wp.vec3, pnt: wp.vec3, vec: wp.vec3) -> float:
   """Returns the distance at which a ray intersects with an ellipsoid."""
-  pnt, vec = _ray_map(pos, mat, pnt, vec)
+
+  # map to local frame
+  lpnt, lvec = _ray_map(pos, mat, pnt, vec)
 
   # invert size^2
-  s = wp.vec3(1.0 / (size[0] * size[0]), 1.0 / (size[1] * size[1]), 1.0 / (size[2] * size[2]))
+  s = wp.vec3(
+    1.0 / (size[0] * size[0]),
+    1.0 / (size[1] * size[1]),
+    1.0 / (size[2] * size[2]),
+  )
 
-  # (x*lvec+lpnt)' * diag(1/size^2) * (x*lvec+lpnt) = 1
-  svec = wp.vec3(s[0] * vec[0], s[1] * vec[1], s[2] * vec[2])
-  a = wp.dot(svec, vec)
-  b = wp.dot(svec, pnt)
-  c = wp.dot(wp.vec3(s[0] * pnt[0], s[1] * pnt[1], s[2] * pnt[2]), pnt) - 1.0
+  # (x * lvec + lpnt)' * diag(1 / size^2) * (x * lvec + lpnt) = 1
+  slvec = wp.cw_mul(s, lvec)
+  a = wp.dot(slvec, lvec)
+  b = wp.dot(slvec, lpnt)
+  c = wp.dot(wp.cw_mul(s, lpnt), lpnt) - 1.0
 
-  # solve a*x^2 + 2*b*x + c = 0
-  solutions = _ray_quad(a, b, c)
-  x0 = solutions[0]
-  x1 = solutions[1]
-  x = wp.where(wp.isinf(x0), x1, x0)
+  # solve a * x^2 + 2 * b * x + c = 0
+  sol, _ = _ray_quad(a, b, c)
+  return sol
 
-  return x
+
+# TODO(team): ray intersection with cylinder
+
+_IFACE = wp.types.matrix((3, 2), dtype=int)(1, 2, 0, 2, 0, 1)
 
 
 @wp.func
 def _ray_box(pos: wp.vec3, mat: wp.mat33, size: wp.vec3, pnt: wp.vec3, vec: wp.vec3) -> float:
   """Returns the distance at which a ray intersects with a box."""
-  pnt, vec = _ray_map(pos, mat, pnt, vec)
 
-  # initialize with infinity
-  min_dist = wp.inf
+  # bounding sphere test
+  ssz = wp.dot(size, size)
+  if _ray_sphere(pos, ssz, pnt, vec) < 0.0:
+    return wp.inf
 
-  # check all 6 faces of the box (2 faces per axis)
-  for i in range(wp.static(3)):
-    if vec[i] != 0.0:
-      # get indices for the other two dimensions
-      j = (i + 1) % 3
-      k = (i + 2) % 3
+  # map to local frame
+  lpnt, lvec = _ray_map(pos, mat, pnt, vec)
 
-      for t in range(wp.static(2)):
-        s = wp.where(t == 0, size[i], -size[i])
-        sol = (s - pnt[i]) / vec[i]
+  # init solution
+  x = wp.inf
 
-        pj = pnt[j] + sol * vec[j]
-        pk = pnt[k] + sol * vec[k]
-        if sol >= 0.0 and wp.abs(pj) <= size[j] and wp.abs(pk) <= size[k]:
-          min_dist = wp.min(min_dist, sol)
+  # loop over axes with non-zero vec
+  for i in range(3):
+    if wp.abs(lvec[i]) > MJ_MINVAL:
+      for side in range(-1, 2, 2):
+        # solution of: lpnt[i] + x * lvec[i] = side * size[i]
+        sol = (float(side) * size[i] - lpnt[i]) / lvec[i]
 
-  return min_dist
+        # process if non-negative
+        if sol >= 0.0:
+          id0 = _IFACE[i][0]
+          id1 = _IFACE[i][1]
+
+          # intersection with face
+          p0 = lpnt[id0] + sol * lvec[id0]
+          p1 = lpnt[id1] + sol * lvec[id1]
+
+          # accept within rectangle
+          if (wp.abs(p0) <= size[id0]) and (wp.abs(p1) <= size[id1]):
+            # update
+            if (x < 0.0) or (sol < x):
+              x = sol
+
+  return x
+
+
+# TODO(team): ray intersection with height field
 
 
 @wp.func
@@ -376,7 +420,7 @@ def ray_geom(pos: wp.vec3, mat: wp.mat33, size: wp.vec3, pnt: wp.vec3, vec: wp.v
   if geomtype == int(GeomType.PLANE.value):
     return _ray_plane(pos, mat, size, pnt, vec)
   elif geomtype == int(GeomType.SPHERE.value):
-    return _ray_sphere(pos, size, pnt, vec)
+    return _ray_sphere(pos, size[0] * size[0], pnt, vec)
   elif geomtype == int(GeomType.CAPSULE.value):
     return _ray_capsule(pos, mat, size, pnt, vec)
   elif geomtype == int(GeomType.ELLIPSOID.value):
