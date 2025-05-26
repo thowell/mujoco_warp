@@ -51,9 +51,9 @@ def _ray_eliminate(
   body_weldid: wp.array(dtype=int),
   geom_bodyid: wp.array(dtype=int),
   geom_group: wp.array(dtype=int),
-  geom_matid: wp.array(dtype=int),
-  geom_rgba: wp.array(dtype=wp.vec4),
-  mat_rgba: wp.array(dtype=wp.vec4),
+  geom_matid: wp.array(dtype=int),  # kernel_analyzer: ignore
+  geom_rgba: wp.array(dtype=wp.vec4),  # kernel_analyzer: ignore
+  mat_rgba: wp.array(dtype=wp.vec4),  # kernel_analyzer: ignore
   # In:
   geomid: int,
   geomgroup: vec6,
