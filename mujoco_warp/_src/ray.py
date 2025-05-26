@@ -619,15 +619,17 @@ def ray(
       dist: distances from ray origins to geom surfaces
       geomid: IDs of intersected geoms (-1 if none)
   """
-  nrays = pnt.shape[0]
-  dist = wp.zeros((d.nworld, nrays), dtype=float)
-  geomid = wp.zeros((d.nworld, nrays), dtype=int)
+
+  assert pnt.shape[0] == vec.shape[0]
+  assert d.ray_dist.shape[1] == d.ray_geomid.shape[1]
+  assert pnt.shape[0] == d.ray_dist.shape[1]
+
   if geomgroup is None:
     geomgroup = vec6(-1, -1, -1, -1, -1, -1)
 
   wp.launch_tiled(
     _ray,
-    dim=(d.nworld, nrays),
+    dim=(d.nworld, d.ray_dist.shape[1]),
     inputs=[
       m.ngeom,
       m.nmeshface,
@@ -651,9 +653,9 @@ def ray(
       geomgroup,
       flg_static,
       bodyexclude,
-      dist,
-      geomid,
+      d.ray_dist,
+      d.ray_geomid,
     ],
     block_dim=64,
   )
-  return dist, geomid
+  return d.ray_dist, d.ray_geomid
