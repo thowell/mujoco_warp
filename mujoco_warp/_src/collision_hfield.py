@@ -74,7 +74,7 @@ def _hfield_overlap_range(
   # get bounding radius of other geometry (including margin)
   bound_radius = geom_rbound[worldid, geomid] + geom_margin[worldid, geomid]
 
-  # Calculate grid resolution
+  # calculate grid resolution
   x_scale = 2.0 * size[0] / float(ncol - 1)
   y_scale = 2.0 * size[1] / float(nrow - 1)
 
