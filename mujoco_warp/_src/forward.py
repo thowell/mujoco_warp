@@ -24,6 +24,7 @@ from . import passive
 from . import sensor
 from . import smooth
 from . import solver
+from . import util_misc
 from .support import xfrc_accumulate
 from .types import MJ_MINVAL
 from .types import BiasType
@@ -35,6 +36,7 @@ from .types import IntegratorType
 from .types import JointType
 from .types import Model
 from .types import TileSet
+from .types import TrnType
 from .types import vec10f
 from .warp_util import event_scope
 from .warp_util import kernel
@@ -602,8 +604,6 @@ def implicit(m: Model, d: Data):
   # It would also need a different data layout for the biasprm/gainprm arrays
   # to be tileable.
 
-  # assumptions
-  assert not m.opt.is_sparse  # unsupported
   # TODO(team): add sparse version
 
   # compile-time constants
@@ -823,6 +823,8 @@ def _actuator_force(
   actuator_biasprm: wp.array2d(dtype=vec10f),
   actuator_ctrlrange: wp.array2d(dtype=wp.vec2),
   actuator_forcerange: wp.array2d(dtype=wp.vec2),
+  actuator_acc0: wp.array(dtype=float),
+  actuator_lengthrange: wp.array(dtype=wp.vec2),
   # Data in:
   act_in: wp.array2d(dtype=float),
   ctrl_in: wp.array2d(dtype=float),
@@ -844,16 +846,21 @@ def _actuator_force(
 
   if na:
     dyntype = actuator_dyntype[uid]
+    actadr = actuator_actadr[uid]
 
+    act_dot = 0.0
     if dyntype == int(DynType.INTEGRATOR.value):
-      act_dot_out[worldid, actuator_actadr[uid]] = ctrl
+      act_dot = ctrl
     elif dyntype == int(DynType.FILTER.value) or dyntype == int(DynType.FILTEREXACT.value):
       dynprm = actuator_dynprm[worldid, uid]
-      actadr = actuator_actadr[uid]
       act = act_in[worldid, actadr]
-      act_dot_out[worldid, actadr] = (ctrl - act) / wp.max(dynprm[0], MJ_MINVAL)
+      act_dot = (ctrl - act) / wp.max(dynprm[0], MJ_MINVAL)
+    elif dyntype == int(DynType.MUSCLE.value):
+      dynprm = actuator_dynprm[worldid, uid]
+      act = act_in[worldid, actadr]
+      act_dot = util_misc.muscle_dynamics(ctrl, act, dynprm)
 
-    # TODO(team): DynType.MUSCLE
+    act_dot_out[worldid, actadr] = act_dot
 
   ctrl_act = ctrl
   if na:
@@ -874,8 +881,10 @@ def _actuator_force(
     gain = gainprm[0]
   elif gaintype == int(GainType.AFFINE.value):
     gain = gainprm[0] + gainprm[1] * length + gainprm[2] * velocity
-
-  # TODO(team): GainType.MUSCLE
+  elif gaintype == int(GainType.MUSCLE.value):
+    acc0 = actuator_acc0[uid]
+    lengthrange = actuator_lengthrange[uid]
+    gain = util_misc.muscle_gain(length, velocity, lengthrange, acc0, gainprm)
 
   # bias
   biastype = actuator_biastype[uid]
@@ -884,8 +893,10 @@ def _actuator_force(
   bias = 0.0  # BiasType.NONE
   if biastype == int(BiasType.AFFINE.value):
     bias = biasprm[0] + biasprm[1] * length + biasprm[2] * velocity
-
-  # TODO(team): BiasType.MUSCLE
+  elif biastype == int(BiasType.MUSCLE.value):
+    acc0 = actuator_acc0[uid]
+    lengthrange = actuator_lengthrange[uid]
+    bias = util_misc.muscle_bias(length, lengthrange, acc0, biasprm)
 
   force = gain * ctrl_act + bias
 
@@ -896,6 +907,50 @@ def _actuator_force(
     force = wp.clamp(force, forcerange[0], forcerange[1])
 
   actuator_force_out[worldid, uid] = force
+
+
+@wp.kernel
+def _tendon_actuator_force(
+  # Model:
+  actuator_trntype: wp.array(dtype=int),
+  actuator_trnid: wp.array(dtype=wp.vec2i),
+  # Data in:
+  actuator_force_in: wp.array2d(dtype=float),
+  # Data out:
+  ten_actfrc_out: wp.array2d(dtype=float),
+):
+  worldid, actid = wp.tid()
+
+  if actuator_trntype[actid] == int(TrnType.TENDON.value):
+    tenid = actuator_trnid[actid][0]
+    # TODO(team): only compute for tendons with force limits?
+    wp.atomic_add(ten_actfrc_out[worldid], tenid, actuator_force_in[worldid, actid])
+
+
+@wp.kernel
+def _tendon_actuator_force_clamp(
+  # Model:
+  actuator_trntype: wp.array(dtype=int),
+  actuator_trnid: wp.array(dtype=wp.vec2i),
+  tendon_actfrclimited: wp.array(dtype=bool),
+  tendon_actfrcrange: wp.array2d(dtype=wp.vec2),
+  # Data in:
+  ten_actfrc_in: wp.array2d(dtype=float),
+  # Data out:
+  actuator_force_out: wp.array2d(dtype=float),
+):
+  worldid, actid = wp.tid()
+
+  if actuator_trntype[actid] == int(TrnType.TENDON.value):
+    tenid = actuator_trnid[actid][0]
+    if tendon_actfrclimited[tenid]:
+      ten_actfrc = ten_actfrc_in[worldid, tenid]
+      actfrcrange = tendon_actfrcrange[worldid, tenid]
+
+      if ten_actfrc < actfrcrange[0]:
+        actuator_force_out[worldid, actid] *= actfrcrange[0] / ten_actfrc
+      elif ten_actfrc > actfrcrange[1]:
+        actuator_force_out[worldid, actid] *= actfrcrange[1] / ten_actfrc
 
 
 @wp.kernel
@@ -1020,6 +1075,8 @@ def fwd_actuation(m: Model, d: Data):
       m.actuator_biasprm,
       m.actuator_ctrlrange,
       m.actuator_forcerange,
+      m.actuator_acc0,
+      m.actuator_lengthrange,
       d.act,
       d.ctrl,
       d.actuator_length,
@@ -1028,6 +1085,33 @@ def fwd_actuation(m: Model, d: Data):
     ],
     outputs=[d.act_dot, d.actuator_force],
   )
+
+  if m.ntendon:
+    d.ten_actfrc.zero_()
+
+    wp.launch(
+      _tendon_actuator_force,
+      dim=(d.nworld, m.nu),
+      inputs=[
+        m.actuator_trntype,
+        m.actuator_trnid,
+        d.actuator_force,
+      ],
+      outputs=[d.ten_actfrc],
+    )
+
+    wp.launch(
+      _tendon_actuator_force_clamp,
+      dim=(d.nworld, m.nu),
+      inputs=[
+        m.actuator_trntype,
+        m.actuator_trnid,
+        m.tendon_actfrclimited,
+        m.tendon_actfrcrange,
+        d.ten_actfrc,
+      ],
+      outputs=[d.actuator_force],
+    )
 
   if m.opt.is_sparse:
     wp.launch(

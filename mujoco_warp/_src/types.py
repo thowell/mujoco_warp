@@ -92,6 +92,17 @@ class DisableBit(enum.IntFlag):
   # unsupported: MIDPHASE, WARMSTART
 
 
+class EnableBit(enum.IntFlag):
+  """Enable optional feature bitflags.
+
+  Members:
+    INVDISCRETE: discrete-time inverse dynamics
+  """
+
+  INVDISCRETE = mujoco.mjtEnableBit.mjENBL_INVDISCRETE
+  # unsupported: OVERRIDE, ENERGY, FWDINV, MULTICCD, ISLAND
+
+
 class TrnType(enum.IntEnum):
   """Type of actuator transmission.
 
@@ -115,13 +126,15 @@ class DynType(enum.IntEnum):
     INTEGRATOR: integrator: da/dt = u
     FILTER: linear filter: da/dt = (u-a) / tau
     FILTEREXACT: linear filter: da/dt = (u-a) / tau, with exact integration
+    MUSCLE: piece-wise linear filter with two time constants
   """
 
   NONE = mujoco.mjtDyn.mjDYN_NONE
   INTEGRATOR = mujoco.mjtDyn.mjDYN_INTEGRATOR
   FILTER = mujoco.mjtDyn.mjDYN_FILTER
   FILTEREXACT = mujoco.mjtDyn.mjDYN_FILTEREXACT
-  # unsupported: MUSCLE, USER
+  MUSCLE = mujoco.mjtDyn.mjDYN_MUSCLE
+  # unsupported: USER
 
 
 class GainType(enum.IntEnum):
@@ -130,11 +143,13 @@ class GainType(enum.IntEnum):
   Members:
     FIXED: fixed gain
     AFFINE: const + kp*length + kv*velocity
+    MUSCLE: muscle FLV curve computed by muscle_gain
   """
 
   FIXED = mujoco.mjtGain.mjGAIN_FIXED
   AFFINE = mujoco.mjtGain.mjGAIN_AFFINE
-  # unsupported: MUSCLE, USER
+  MUSCLE = mujoco.mjtGain.mjGAIN_MUSCLE
+  # unsupported: USER
 
 
 class BiasType(enum.IntEnum):
@@ -143,11 +158,13 @@ class BiasType(enum.IntEnum):
   Members:
     NONE: no bias
     AFFINE: const + kp*length + kv*velocity
+    MUSCLE: muscle passive force computed by muscle_bias
   """
 
   NONE = mujoco.mjtBias.mjBIAS_NONE
   AFFINE = mujoco.mjtBias.mjBIAS_AFFINE
-  # unsupported: MUSCLE, USER
+  MUSCLE = mujoco.mjtBias.mjBIAS_MUSCLE
+  # unsupported: USER
 
 
 class JointType(enum.IntEnum):
@@ -204,6 +221,7 @@ class GeomType(enum.IntEnum):
 
   Members:
     PLANE: plane
+    HFIELD: heightfield
     SPHERE: sphere
     CAPSULE: capsule
     ELLIPSOID: ellipsoid
@@ -213,14 +231,14 @@ class GeomType(enum.IntEnum):
   """
 
   PLANE = mujoco.mjtGeom.mjGEOM_PLANE
+  HFIELD = mujoco.mjtGeom.mjGEOM_HFIELD
   SPHERE = mujoco.mjtGeom.mjGEOM_SPHERE
   CAPSULE = mujoco.mjtGeom.mjGEOM_CAPSULE
   ELLIPSOID = mujoco.mjtGeom.mjGEOM_ELLIPSOID
   CYLINDER = mujoco.mjtGeom.mjGEOM_CYLINDER
   BOX = mujoco.mjtGeom.mjGEOM_BOX
   MESH = mujoco.mjtGeom.mjGEOM_MESH
-  # unsupported: HFIELD,
-  # NGEOMTYPES, ARROW*, LINE, SKIN, LABEL, NONE
+  # unsupported: NGEOMTYPES, ARROW*, LINE, SKIN, LABEL, NONE
 
 
 class SolverType(enum.IntEnum):
@@ -240,6 +258,7 @@ class SensorType(enum.IntEnum):
   """Type of sensor.
 
   Members:
+    MAGNETOMETER: magnetometer
     CAMPROJECTION: camera projection
     JOINTPOS: joint position
     TENDONPOS: scalar tendon position
@@ -272,6 +291,7 @@ class SensorType(enum.IntEnum):
     FRAMEANGACC: 3D angular acceleration
   """
 
+  MAGNETOMETER = mujoco.mjtSensor.mjSENS_MAGNETOMETER
   CAMPROJECTION = mujoco.mjtSensor.mjSENS_CAMPROJECTION
   JOINTPOS = mujoco.mjtSensor.mjSENS_JOINTPOS
   TENDONPOS = mujoco.mjtSensor.mjSENS_TENDONPOS
@@ -345,16 +365,17 @@ class WrapType(enum.IntEnum):
 
   Members:
     JOINT: constant moment arm
+    PULLEY: pulley used to split tendon
     SITE: pass through site
     SPHERE: wrap around sphere
     CYLINDER: wrap around (infinite) cylinder
   """
 
   JOINT = mujoco.mjtWrap.mjWRAP_JOINT
+  PULLEY = mujoco.mjtWrap.mjWRAP_PULLEY
   SITE = mujoco.mjtWrap.mjWRAP_SITE
   SPHERE = mujoco.mjtWrap.mjWRAP_SPHERE
   CYLINDER = mujoco.mjtWrap.mjWRAP_CYLINDER
-  # unsupported: PULLEY
 
 
 class vec5f(wp.types.vector(length=5, dtype=float)):
@@ -377,8 +398,6 @@ vec5 = vec5f
 vec6 = vec6f
 vec10 = vec10f
 vec11 = vec11f
-array2df = wp.array2d(dtype=float)
-array3df = wp.array3d(dtype=float)
 
 
 @dataclasses.dataclass
@@ -391,12 +410,14 @@ class Option:
     tolerance: main solver tolerance
     ls_tolerance: CG/Newton linesearch tolerance
     gravity: gravitational acceleration
+    magnetic: global magnetic flux
     integrator: integration mode (mjtIntegrator)
     cone: type of friction cone (mjtCone)
     solver: solver algorithm (mjtSolver)
     iterations: number of main solver iterations
     ls_iterations: maximum number of CG/Newton linesearch iterations
     disableflags: bit flags for disabling standard features
+    enableflags: bit flags for enabling optional features
     is_sparse: whether to use sparse representations
     gjk_iterations: number of Gjk iterations in the convex narrowphase
     epa_iterations: number of Epa iterations in the convex narrowphase
@@ -413,12 +434,14 @@ class Option:
   tolerance: float
   ls_tolerance: float
   gravity: wp.vec3
+  magnetic: wp.vec3
   integrator: int
   cone: int
   solver: int
   iterations: int
   ls_iterations: int
   disableflags: int
+  enableflags: int
   is_sparse: bool
   gjk_iterations: int  # warp only
   epa_iterations: int  # warp only
@@ -465,7 +488,6 @@ class Constraint:
     gauss: gauss Cost                                 (nworld,)
     cost: constraint + Gauss cost                     (nworld,)
     prev_cost: cost from previous iter                (nworld,)
-    solver_niter: number of solver iterations         (nworld,)
     active: active (quadratic) constraints            (njmax,)
     gtol: linesearch termination tolerance            (nworld,)
     mv: qM @ search                                   (nworld, nv)
@@ -520,7 +542,6 @@ class Constraint:
   gauss: wp.array(dtype=float)
   cost: wp.array(dtype=float)
   prev_cost: wp.array(dtype=float)
-  solver_niter: wp.array(dtype=int)
   active: wp.array(dtype=bool)
   gtol: wp.array(dtype=float)
   mv: wp.array2d(dtype=float)
@@ -604,6 +625,8 @@ class Model:
     nmeshface: number of faces for all meshes                ()
     nlsp: number of step sizes for parallel linsearch        ()
     npair: number of predefined geom pairs                   ()
+    nhfield: number of heightfields                          ()
+    nhfielddata: size of elevation data                      ()
     opt: physics options
     stat: model statistics
     qpos0: qpos values at default pose                       (nworld, nq)
@@ -693,6 +716,11 @@ class Model:
     geom_margin: detect contact if dist<margin               (nworld, ngeom,)
     geom_gap: include in solver if dist<margin-gap           (nworld, ngeom,)
     geom_rgba: rgba when material is omitted                 (nworld, ngeom, 4)
+    hfield_adr: start address in hfield_data                 (nhfield,)
+    hfield_nrow: number of rows in grid                      (nhfield,)
+    hfield_ncol: number of columns in grid                   (nhfield,)
+    hfield_size: (x, y, z_top, z_bottom)                     (nhfield, 4)
+    hfield_data: elevation data                              (nhfielddata,)
     site_type: geom type for rendering (mjtGeom)             (nsite,)
     site_bodyid: id of site's body                           (nsite,)
     site_pos: local position offset rel. to body             (nworld, nsite, 3)
@@ -754,6 +782,8 @@ class Model:
     actuator_forcerange: range of forces                     (nworld, nu, 2)
     actuator_actrange: range of activations                  (nworld, nu, 2)
     actuator_gear: scale length and transmitted force        (nworld, nu, 6)
+    actuator_acc0: acceleration from unit force in qpos0     (nu,)
+    actuator_lengthrange: feasible actuator length range     (nu, 2)
     nxn_geom_pair: valid collision pair geom ids             (<= ngeom * (ngeom - 1) // 2,)
     nxn_pairid: predefined pair id, -1 if not predefined     (<= ngeom * (ngeom - 1) // 2,)
     pair_dim: contact dimensionality                         (npair,)
@@ -771,11 +801,13 @@ class Model:
     tendon_num: number of objects in tendon's path           (ntendon,)
     tendon_limited: does tendon have length limits           (ntendon,)
     tendon_limited_adr: addresses for limited tendons        (<=ntendon,)
+    tendon_actfrclimited: does ten have actuator force limit (ntendon,)
     tendon_solref_lim: constraint solver reference: limit    (nworld, ntendon, mjNREF)
     tendon_solimp_lim: constraint solver impedance: limit    (nworld, ntendon, mjNIMP)
     tendon_solref_fri: constraint solver reference: friction (nworld, ntendon, mjNREF)
     tendon_solimp_fri: constraint solver impedance: friction (nworld, ntendon, mjNIMP)
     tendon_range: tendon length limits                       (nworld, ntendon, 2)
+    tendon_actfrcrange: range of total actuator force        (nworld, ntendon, 2)
     tendon_margin: min distance for limit detection          (nworld, ntendon,)
     tendon_stiffness: stiffness coefficient                  (nworld, ntendon,)
     tendon_damping: damping coefficient                      (nworld, ntendon,)
@@ -787,13 +819,15 @@ class Model:
     wrap_prm: divisor, joint coef, or site id                (nwrap,)
     wrap_type: wrap object type (mjtWrap)                    (nwrap,)
     tendon_jnt_adr: joint tendon address                     (<=nwrap,)
-    tendon_site_adr: site tendon address                     (<=nwrap,)
     tendon_site_pair_adr: site pair tendon address           (<=nwrap,)
+    tendon_geom_adr: geom tendon address                     (<=nwrap,)
     ten_wrapadr_site: wrap object starting address for sites (ntendon,)
     ten_wrapnum_site: number of site wrap objects per tendon (ntendon,)
     wrap_jnt_adr: addresses for joint tendon wrap object     (<=nwrap,)
     wrap_site_adr: addresses for site tendon wrap object     (<=nwrap,)
     wrap_site_pair_adr: first address for site wrap pair     (<=nwrap,)
+    wrap_geom_adr: addresses for geom tendon wrap object     (<=nwrap,)
+    wrap_pulley_scale: pulley scaling                        (nwrap,)
     sensor_type: sensor type (mjtSensor)                     (nsensor,)
     sensor_datatype: numeric data type (mjtDataType)         (nsensor,)
     sensor_objtype: type of sensorized object (mjtObj)       (nsensor,)
@@ -842,6 +876,8 @@ class Model:
   nmeshface: int
   nlsp: int  # warp only
   npair: int
+  nhfield: int
+  nhfielddata: int
   opt: Option
   stat: Statistic
   qpos0: wp.array2d(dtype=float)
@@ -876,7 +912,7 @@ class Model:
   body_subtreemass: wp.array2d(dtype=float)
   subtree_mass: wp.array2d(dtype=float)
   body_inertia: wp.array2d(dtype=wp.vec3)
-  body_invweight0: wp.array3d(dtype=float)
+  body_invweight0: wp.array2d(dtype=wp.vec2)
   body_contype: wp.array(dtype=int)
   body_conaffinity: wp.array(dtype=int)
   body_gravcomp: wp.array2d(dtype=float)
@@ -891,7 +927,7 @@ class Model:
   jnt_pos: wp.array2d(dtype=wp.vec3)
   jnt_axis: wp.array2d(dtype=wp.vec3)
   jnt_stiffness: wp.array2d(dtype=float)
-  jnt_range: wp.array3d(dtype=float)
+  jnt_range: wp.array2d(dtype=wp.vec2)
   jnt_actfrcrange: wp.array2d(dtype=wp.vec2)
   jnt_margin: wp.array2d(dtype=float)
   jnt_limited_slide_hinge_adr: wp.array(dtype=int)  # warp only
@@ -930,6 +966,11 @@ class Model:
   geom_margin: wp.array2d(dtype=float)
   geom_gap: wp.array2d(dtype=float)
   geom_rgba: wp.array2d(dtype=wp.vec4)
+  hfield_adr: wp.array(dtype=int)
+  hfield_nrow: wp.array(dtype=int)
+  hfield_ncol: wp.array(dtype=int)
+  hfield_size: wp.array(dtype=wp.vec4)
+  hfield_data: wp.array(dtype=float)
   site_type: wp.array(dtype=int)
   site_bodyid: wp.array(dtype=int)
   site_size: wp.array(dtype=wp.vec3)
@@ -1006,6 +1047,8 @@ class Model:
   actuator_forcerange: wp.array2d(dtype=wp.vec2)
   actuator_actrange: wp.array2d(dtype=wp.vec2)
   actuator_gear: wp.array2d(dtype=wp.spatial_vector)
+  actuator_acc0: wp.array(dtype=float)
+  actuator_lengthrange: wp.array(dtype=wp.vec2)
   nxn_geom_pair: wp.array(dtype=wp.vec2i)  # warp only
   nxn_pairid: wp.array(dtype=int)  # warp only
   pair_dim: wp.array(dtype=int)
@@ -1023,11 +1066,13 @@ class Model:
   tendon_num: wp.array(dtype=int)
   tendon_limited: wp.array(dtype=int)
   tendon_limited_adr: wp.array(dtype=int)
+  tendon_actfrclimited: wp.array(dtype=bool)
   tendon_solref_lim: wp.array2d(dtype=wp.vec2)
   tendon_solimp_lim: wp.array2d(dtype=vec5)
   tendon_solref_fri: wp.array2d(dtype=wp.vec2)
   tendon_solimp_fri: wp.array2d(dtype=vec5)
   tendon_range: wp.array2d(dtype=wp.vec2)
+  tendon_actfrcrange: wp.array2d(dtype=wp.vec2)
   tendon_margin: wp.array2d(dtype=float)
   tendon_stiffness: wp.array2d(dtype=float)
   tendon_damping: wp.array2d(dtype=float)
@@ -1039,13 +1084,15 @@ class Model:
   wrap_prm: wp.array(dtype=float)
   wrap_type: wp.array(dtype=int)
   tendon_jnt_adr: wp.array(dtype=int)  # warp only
-  tendon_site_adr: wp.array(dtype=int)  # warp only
   tendon_site_pair_adr: wp.array(dtype=int)  # warp only
+  tendon_geom_adr: wp.array(dtype=int)  # warp only
   ten_wrapadr_site: wp.array(dtype=int)  # warp only
   ten_wrapnum_site: wp.array(dtype=int)  # warp only
   wrap_jnt_adr: wp.array(dtype=int)  # warp only
   wrap_site_adr: wp.array(dtype=int)  # warp only
   wrap_site_pair_adr: wp.array(dtype=int)  # warp only
+  wrap_geom_adr: wp.array(dtype=int)  # warp only
+  wrap_pulley_scale: wp.array(dtype=float)  # warp only
   sensor_type: wp.array(dtype=int)
   sensor_datatype: wp.array(dtype=int)
   sensor_objtype: wp.array(dtype=int)
@@ -1106,6 +1153,7 @@ class Data:
     nworld: number of worlds                                    ()
     nconmax: maximum number of contacts                         ()
     njmax: maximum number of constraints                        ()
+    solver_niter: number of solver iterations                   (nworld,)
     ncon: number of detected contacts                           ()
     ne: number of equality constraints                          ()
     ne_connect: number of equality connect constraints          ()
@@ -1121,6 +1169,7 @@ class Data:
     qvel: velocity                                              (nworld, nv)
     act: actuator activation                                    (nworld, na)
     qacc_warmstart: acceleration used for warmstart             (nworld, nv)
+    qacc_discrete: discrete-time acceleration                   (nworld, nv)
     ctrl: control                                               (nworld, nu)
     qfrc_applied: applied generalized force                     (nworld, nv)
     xfrc_applied: applied Cartesian force/torque                (nworld, nbody, 6)
@@ -1172,6 +1221,8 @@ class Data:
     qfrc_smooth: net unconstrained force                        (nworld, nv)
     qacc_smooth: unconstrained acceleration                     (nworld, nv)
     qfrc_constraint: constraint force                           (nworld, nv)
+    qfrc_inverse: net external force; should equal:             (nworld, nv)
+              qfrc_applied + J.T @ xfrc_applied + qfrc_actuator
     contact: contact data
     efc: constraint data
     rne_cacc: arrays used for smooth.rne                        (nworld, nbody, 6)
@@ -1197,6 +1248,7 @@ class Data:
     sap_segment_index: broadphase context                       (nworld+1,)
     dyn_geom_aabb: dynamic geometry axis-aligned bounding boxes (nworld, ngeom, 2)
     collision_pair: collision pairs from broadphase             (nconmax,)
+    collision_hftri_index: collision index for hfield pairs     (nconmax,)
     collision_worldid: collision world ids from broadphase      (nconmax,)
     ncollision: collision count from broadphase                 ()
     cacc: com-based acceleration                                (nworld, nbody, 6)
@@ -1206,15 +1258,17 @@ class Data:
     ten_J: tendon Jacobian                                      (nworld, ntendon, nv)
     ten_wrapadr: start address of tendon's path                 (nworld, ntendon)
     ten_wrapnum: number of wrap points in path                  (nworld, ntendon)
+    ten_actfrc: total actuator force at tendon                  (nworld, ntendon)
     wrap_obj: geomid; -1: site; -2: pulley                      (nworld, nwrap, 2)
     wrap_xpos: Cartesian 3D points in all paths                 (nworld, nwrap, 6)
+    wrap_geom_xpos: Cartesian 3D points for geom wrap points    (nworld, <=nwrap, 6)
     sensordata: sensor data array                               (nsensordata,)
   """
 
   nworld: int  # warp only
   nconmax: int  # warp only
   njmax: int  # warp only
-
+  solver_niter: wp.array(dtype=int)
   ncon: wp.array(dtype=int)
   ne: wp.array(dtype=int)
   ne_connect: wp.array(dtype=int)  # warp only
@@ -1230,6 +1284,7 @@ class Data:
   qvel: wp.array2d(dtype=float)
   act: wp.array2d(dtype=float)
   qacc_warmstart: wp.array2d(dtype=float)
+  qacc_discrete: wp.array2d(dtype=float)  # warp only
   ctrl: wp.array2d(dtype=float)
   qfrc_applied: wp.array2d(dtype=float)
   xfrc_applied: wp.array2d(dtype=wp.spatial_vector)
@@ -1284,6 +1339,7 @@ class Data:
   qfrc_smooth: wp.array2d(dtype=float)
   qacc_smooth: wp.array2d(dtype=float)
   qfrc_constraint: wp.array2d(dtype=float)
+  qfrc_inverse: wp.array2d(dtype=float)
   contact: Contact
   efc: Constraint
 
@@ -1313,6 +1369,7 @@ class Data:
 
   # collision driver
   collision_pair: wp.array(dtype=wp.vec2i)
+  collision_hftri_index: wp.array(dtype=int)
   collision_pairid: wp.array(dtype=int)
   collision_worldid: wp.array(dtype=int)
   ncollision: wp.array(dtype=int)
@@ -1327,8 +1384,10 @@ class Data:
   ten_J: wp.array3d(dtype=float)
   ten_wrapadr: wp.array2d(dtype=int)
   ten_wrapnum: wp.array2d(dtype=int)
+  ten_actfrc: wp.array2d(dtype=float)  # warp only
   wrap_obj: wp.array2d(dtype=wp.vec2i)
   wrap_xpos: wp.array2d(dtype=wp.spatial_vector)
+  wrap_geom_xpos: wp.array2d(dtype=wp.spatial_vector)
 
   # sensors
   sensordata: wp.array2d(dtype=float)
