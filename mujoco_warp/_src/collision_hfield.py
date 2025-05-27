@@ -264,7 +264,6 @@ def _hfield_midphase(
     collision_hftri_index_in: Array of heightfield triangle indices (-1 for heightfield pairs)
     collision_pairid_in: Array of collision pair IDs
     collision_worldid_in: Array of collision world IDs
-    ncollision_in: Number of collisions
 
     collision_pair_out: Output array of collision pairs
     collision_hftri_index_out: Output array of heightfield triangle indices
