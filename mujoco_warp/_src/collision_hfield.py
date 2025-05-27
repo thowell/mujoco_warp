@@ -19,6 +19,7 @@ from typing import Any
 
 import warp as wp
 
+from .types import MJ_MAXCONPAIR
 from .types import Data
 from .types import GeomType
 from .types import Model
@@ -329,7 +330,7 @@ def _hfield_midphase(
   ncol = hfield_ncol[dataid]
 
   # Loop through grid cells and add pairs for all triangles
-  # TODO(vreutskyy): propose a way to limit the number of contacts between a hfield and the other geom
+  count = int(0)
   for j in range(min_j, max_j + 1):
     for i in range(min_i, max_i + 1):
       # Each grid cell contains two triangles
@@ -351,6 +352,10 @@ def _hfield_midphase(
         collision_hftri_index_out[new_pairid] = base_idx + t
         collision_pairid_out[new_pairid] = pair_id
         collision_worldid_out[new_pairid] = worldid
+
+        count += 1
+        if count >= MJ_MAXCONPAIR:
+          return
 
 
 def hfield_midphase(m: Model, d: Data):
