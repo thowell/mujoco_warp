@@ -136,13 +136,13 @@ class GJKTest(absltest.TestCase):
         <asset>
           <mesh name="smallbox" scale="0.1 0.1 0.1"
                 vertex="-1 -1 -1
-			               	   1 -1 -1
-				                 1  1 -1
-			               	   1  1  1
-		  	            	   1 -1  1
-				                -1  1 -1
-				                -1  1  1
-			              	  -1 -1  1"/>
+                         1 -1 -1
+                         1  1 -1
+                         1  1  1
+                         1 -1  1
+                        -1  1 -1
+                        -1  1  1
+                        -1 -1  1"/>
          </asset>
          <worldbody>
            <geom name="geom1" pos="0 0 .90" type="box" size="0.5 0.5 0.1"/>
