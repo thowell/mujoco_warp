@@ -19,15 +19,84 @@ from absl.testing import absltest
 from .collision_gjk import gjk
 
 from . import test_util
+from .types import GeomType, Model, Data
+from .collision_primitive import Geom
+
+
+def _geom_dist(m: Model, d: Data, gid1: int, gid2: int):
+  @wp.kernel
+  def _gjk_kernel(
+    results: wp.array(dtype=float),
+    geom_xpos: wp.array2d(dtype=wp.vec3),
+    geom_xmat: wp.array2d(dtype=wp.mat33),
+    geom_size: wp.array2d(dtype=wp.vec3),
+    geom_type: wp.array(dtype=int),
+    geom_dataid: wp.array(dtype=int),
+    mesh_vertadr: wp.array(dtype=int),
+    mesh_vertnum: wp.array(dtype=int),
+    mesh_vert: wp.array(dtype=wp.vec3),
+    gid1: int,
+    gid2: int,
+  ):
+    MESHGEOM = int(GeomType.MESH.value)
+
+    geom1 = Geom()
+    geomtype1 = geom_type[gid1]
+    geom1.pos = geom_xpos[0, gid1]
+    geom1.rot = geom_xmat[0, gid1]
+    geom1.size = geom_size[0, gid1]
+
+    if geom_dataid[gid1] >= 0 and geom_type[gid1] == MESHGEOM:
+      dataid = geom_dataid[gid1]
+      geom1.vertadr = mesh_vertadr[dataid]
+      geom1.vertnum = mesh_vertnum[dataid]
+      geom1.vert = mesh_vert
+
+    geom2 = Geom()
+    geomtype2 = geom_type[gid2]
+    geom2.pos = geom_xpos[0, gid2]
+    geom2.rot = geom_xmat[0, gid2]
+    geom2.size = geom_size[0, gid2]
+
+    if geom_dataid[gid2] >= 0 and geom_type[gid2] == MESHGEOM:
+      dataid = geom_dataid[gid2]
+      geom2.vertadr = mesh_vertadr[dataid]
+      geom2.vertnum = mesh_vertnum[dataid]
+      geom2.vert = mesh_vert
+
+    x_1 = geom_xpos[0, gid1]
+    x_2 = geom_xpos[0, gid2]
+    result = gjk(1e-6, 20, geom1, geom2, x_1, x_2, geomtype1, geomtype2)
+    results[0] = result.dist
+
+  results = wp.array(length=1, dtype=float)
+  wp.launch(
+    _gjk_kernel,
+    dim=(1,),
+    inputs=[
+      results,
+      d.geom_xpos,
+      d.geom_xmat,
+      m.geom_size,
+      m.geom_type,
+      m.geom_dataid,
+      m.mesh_vertadr,
+      m.mesh_vertnum,
+      m.mesh_vert,
+      gid1,
+      gid2,
+    ],
+  )
+  return results.numpy()[0]
 
 
 class GJKTest(absltest.TestCase):
   """Tests for closest points between two convex geoms."""
 
   def test_spheres_nontouching(self):
-    """Test closest points between two spheres"""
+    """Test closest points between two spheres not touching"""
 
-    _, mjd, m, d = test_util.fixture(
+    _, _, m, d = test_util.fixture(
       xml=f"""
       <mujoco>
         <worldbody>
@@ -35,15 +104,58 @@ class GJKTest(absltest.TestCase):
           <geom name="geom2" type="sphere" pos="1.5 0 0" size="1"/>
         </worldbody>
        </mujoco>
-       """)
-    
+       """
+    )
 
-    geom1 = 
-    
-    gjk(1e-6, 10, )
+    dist = _geom_dist(m, d, 0, 1)
+    self.assertEqual(1.0, dist)
 
-    tolerance: float, gjk_iterations: int,
-        geom1: Geom, geom2: Geom, 
-        x1_0: wp.vec3, x2_0: wp.vec3,
-        geomtype1: int, geomtype2: int,
-        verts: wp.array(dtype=wp.vec3)):
+  def test_spheres_touching(self):
+    """Test closest points between two touching spheres"""
+
+    _, _, m, d = test_util.fixture(
+      xml=f"""
+      <mujoco>
+        <worldbody>
+          <geom name="geom1" type="sphere" pos="-1 0 0" size="1"/>
+          <geom name="geom2" type="sphere" pos="1 0 0" size="1"/>
+        </worldbody>
+       </mujoco>
+       """
+    )
+
+    dist = _geom_dist(m, d, 0, 1)
+    self.assertEqual(0.0, dist)
+
+  def test_box_mesh_touching(self):
+    """Test closest points between a mesh and box"""
+
+    _, _, m, d = test_util.fixture(
+      xml=f"""
+      <mujoco model="MuJoCo Model">
+        <asset>
+          <mesh name="smallbox" scale="0.1 0.1 0.1"
+                vertex="-1 -1 -1
+			               	   1 -1 -1
+				                 1  1 -1
+			               	   1  1  1
+		  	            	   1 -1  1
+				                -1  1 -1
+				                -1  1  1
+			              	  -1 -1  1"/>
+         </asset>
+         <worldbody>
+           <geom name="geom1" pos="0 0 .90" type="box" size="0.5 0.5 0.1"/>
+           <geom pos="0 0 1.2" name="geom2" type="mesh" mesh="smallbox"/>
+          </worldbody>
+       </mujoco>
+       """
+    )
+
+    dist = _geom_dist(m, d, 0, 1)
+    self.assertAlmostEqual(0.1, dist)
+
+
+if __name__ == "__main__":
+  wp.init()
+  absltest.main()
