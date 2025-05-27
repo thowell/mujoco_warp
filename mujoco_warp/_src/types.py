@@ -22,6 +22,7 @@ MJ_MINVAL = mujoco.mjMINVAL
 MJ_MAXVAL = mujoco.mjMAXVAL
 MJ_MINIMP = mujoco.mjMINIMP  # minimum constraint impedance
 MJ_MAXIMP = mujoco.mjMAXIMP  # maximum constraint impedance
+MJ_MAXCONPAIR = mujoco.mjMAXCONPAIR
 MJ_NREF = mujoco.mjNREF
 MJ_NIMP = mujoco.mjNIMP
 
