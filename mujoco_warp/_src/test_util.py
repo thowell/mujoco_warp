@@ -28,6 +28,7 @@ from . import warp_util
 from .types import ConeType
 from .types import Data
 from .types import DisableBit
+from .types import EnableBit
 from .types import IntegratorType
 from .types import Model
 from .types import SolverType
@@ -59,6 +60,7 @@ def fixture(
   nworld: int = None,
   nconmax: int = None,
   njmax: int = None,
+  multiccd: Optional[bool] = None,
 ):
   np.random.seed(seed)
   if fname is not None:
@@ -81,6 +83,9 @@ def fixture(
     mjm.opt.disableflags |= DisableBit.GRAVITY
   if not eulerdamp:
     mjm.opt.disableflags |= DisableBit.EULERDAMP
+
+  if multiccd:
+    mjm.opt.enableflags |= EnableBit.MULTICCD
 
   if cone is not None:
     mjm.opt.cone = cone
