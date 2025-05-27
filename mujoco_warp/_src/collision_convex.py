@@ -858,8 +858,13 @@ def _gjk_epa_pipeline(
 
     # TODO(btaba): split get_multiple_contacts into a separate kernel.
 
-    is_hfield = (geom_type[g1] == int(GeomType.HFIELD.value)) or (geom_type[g2] == int(GeomType.HFIELD.value))
-    if enable_multiccd and not is_hfield:
+    if (
+      enable_multiccd
+      and geom_type[g1] != int(GeomType.ELLIPSOID.value)
+      and geom_type[g1] != int(GeomType.SPHERE.value)
+      and geom_type[g2] != int(GeomType.ELLIPSOID.value)
+      and geom_type[g2] != int(GeomType.SPHERE.value)
+    ):
       count, points = _multiple_contacts(geom1, geom2, depth, normal)
     else:
       # TODO(team): _multiple_contacts should work with perturbation_angle=0
