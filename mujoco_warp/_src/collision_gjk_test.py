@@ -78,7 +78,7 @@ def _geom_dist(m: Model, d: Data, gid1: int, gid2: int):
   wp.launch(
     _gjk_kernel,
     dim=(1,),
-    inputs=[      
+    inputs=[
       m.geom_type,
       m.geom_dataid,
       m.geom_size,
