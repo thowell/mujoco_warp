@@ -1732,6 +1732,8 @@ def update_constraint_zero_qfrc_constraint(
 
 @wp.kernel
 def update_constraint_init_qfrc_constraint(
+  # Model:
+  nv: int,
   # Data in:
   nefc_in: wp.array(dtype=int),
   efc_worldid_in: wp.array(dtype=int),
@@ -1741,7 +1743,7 @@ def update_constraint_init_qfrc_constraint(
   # Data out:
   qfrc_constraint_out: wp.array2d(dtype=float),
 ):
-  dofid, efcid = wp.tid()
+  efcid = wp.tid()
 
   if efcid >= nefc_in[0]:
     return
@@ -1751,11 +1753,13 @@ def update_constraint_init_qfrc_constraint(
   if efc_done_in[worldid]:
     return
 
-  wp.atomic_add(
-    qfrc_constraint_out[worldid],
-    dofid,
-    efc_J_in[efcid, dofid] * efc_force_in[efcid],
-  )
+  force = efc_force_in[efcid]
+  for i in range(nv):
+    wp.atomic_add(
+      qfrc_constraint_out[worldid],
+      i,
+      efc_J_in[efcid, i] * force,
+    )
 
 
 @wp.kernel
@@ -1895,8 +1899,8 @@ def _update_constraint(m: types.Model, d: types.Data):
 
   wp.launch(
     update_constraint_init_qfrc_constraint,
-    dim=(m.nv, d.njmax),
-    inputs=[d.nefc, d.efc.worldid, d.efc.J, d.efc.force, d.efc.done],
+    dim=(d.njmax),
+    inputs=[m.nv, d.nefc, d.efc.worldid, d.efc.J, d.efc.force, d.efc.done],
     outputs=[d.qfrc_constraint],
   )
 
