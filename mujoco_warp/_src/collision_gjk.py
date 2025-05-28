@@ -95,7 +95,6 @@ def _project_origin_line(v1: wp.vec3, v2: wp.vec3):
 
 @wp.func
 def _project_origin_plane(v1: wp.vec3, v2: wp.vec3, v3: wp.vec3):
-  # mjtNum diff21[3], diff31[3], diff32[3], n[3], nv, nn;
   z = wp.vec3(0.0)
   diff21 = v2 - v1
   diff31 = v3 - v1
@@ -407,7 +406,6 @@ def gjk(
 
     # run the distance subalgorithm to compute the barycentric coordinates
     # of the closest point to the origin in the simplex
-    # print(simplex)
     coordinates = _subdistance(n + 1, simplex)
 
     # remove vertices from the simplex no longer needed

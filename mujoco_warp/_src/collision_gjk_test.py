@@ -24,6 +24,7 @@ from .types import GeomType
 from .types import Model
 
 
+# TODO(team): Use sensors when available instead of calling GJK directly
 def _geom_dist(m: Model, d: Data, gid1: int, gid2: int):
   @wp.kernel
   def _gjk_kernel(
