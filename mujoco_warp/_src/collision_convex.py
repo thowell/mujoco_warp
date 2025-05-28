@@ -39,9 +39,9 @@ wp.config.enable_backward = False
 FLOAT_MIN = -1e30
 FLOAT_MAX = 1e30
 EPS_BEST_COUNT = 12
-MULTI_CONTACT_COUNT = 1
+MULTI_CONTACT_COUNT = 4
 MULTI_POLYGON_COUNT = 8
-MULTI_TILT_ANGLE = 1e-5
+MULTI_TILT_ANGLE = 1.0
 
 matc3 = wp.types.matrix(shape=(EPS_BEST_COUNT, 3), dtype=float)
 vecc3 = wp.types.vector(EPS_BEST_COUNT * 3, dtype=float)
