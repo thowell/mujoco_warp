@@ -109,6 +109,8 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
   qLD_updates, dof_depth = {}, np.zeros(mjm.nv, dtype=int) - 1
 
   for k in range(mjm.nv):
+    if mjd.M_rownnz[k] == 1:
+      continue
     dof_depth[k] = dof_depth[mjm.dof_parentid[k]] + 1
     i = mjm.dof_parentid[k]
     diag_k = mjd.M_rowadr[k] + mjd.M_rownnz[k] - 1
