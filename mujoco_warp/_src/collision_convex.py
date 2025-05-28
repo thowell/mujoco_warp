@@ -23,6 +23,7 @@ from .collision_primitive import write_contact
 from .math import gjk_normalize
 from .math import make_frame
 from .math import orthonormal
+from .math import upper_tri_index
 from .support import all_same
 from .support import any_different
 from .types import MJ_MAXCONPAIR
@@ -38,9 +39,9 @@ wp.config.enable_backward = False
 FLOAT_MIN = -1e30
 FLOAT_MAX = 1e30
 EPS_BEST_COUNT = 12
-MULTI_CONTACT_COUNT = 4
+MULTI_CONTACT_COUNT = 1
 MULTI_POLYGON_COUNT = 8
-MULTI_TILT_ANGLE = 1.0
+MULTI_TILT_ANGLE = 1e-5
 
 matc3 = wp.types.matrix(shape=(EPS_BEST_COUNT, 3), dtype=float)
 vecc3 = wp.types.vector(EPS_BEST_COUNT * 3, dtype=float)
@@ -715,6 +716,7 @@ def _gjk_epa_pipeline(
   @wp.kernel
   def gjk_epa_sparse(
     # Model:
+    ngeom: int,
     geom_type: wp.array(dtype=int),
     geom_condim: wp.array(dtype=int),
     geom_dataid: wp.array(dtype=int),
@@ -741,7 +743,6 @@ def _gjk_epa_pipeline(
     pair_margin: wp.array2d(dtype=float),
     pair_gap: wp.array2d(dtype=float),
     pair_friction: wp.array2d(dtype=vec5),
-    geomid2hfieldid: wp.array(dtype=int),
     # Data in:
     nconmax_in: int,
     geom_xpos_in: wp.array2d(dtype=wp.vec3),
@@ -753,7 +754,7 @@ def _gjk_epa_pipeline(
     ncollision_in: wp.array(dtype=int),
     # Data out:
     ncon_out: wp.array(dtype=int),
-    ncon_hfield_out: wp.array2d(dtype=int),
+    ncon_hfield_out: wp.array(dtype=int),
     contact_dist_out: wp.array(dtype=float),
     contact_pos_out: wp.array(dtype=wp.vec3),
     contact_frame_out: wp.array(dtype=wp.mat33),
@@ -857,14 +858,10 @@ def _gjk_epa_pipeline(
     frame = make_frame(normal)
     for i in range(count):
       # limit maximum number of contacts with height field
-      hfid = -1
-      if geomtype1 == int(GeomType.HFIELD.value):
-        hfid = geomid2hfieldid[g1]
-      elif geomtype2 == int(GeomType.HFIELD.value):
-        hfid = geomid2hfieldid[g2]
-
-      if hfid >= 0:
-        if wp.atomic_add(ncon_hfield_out[worldid], hfid, 1) >= MJ_MAXCONPAIR:
+      if geomtype1 == int(GeomType.HFIELD.value) or geomtype2 == int(GeomType.HFIELD.value):
+        geompairid = upper_tri_index(ngeom, g1, g2)
+        hfgeompairid = wp.atomic_add(ncon_hfield_out, geompairid, 1)
+        if hfgeompairid >= MJ_MAXCONPAIR:
           return
 
       write_contact(
@@ -920,6 +917,7 @@ def gjk_narrowphase(m: Model, d: Data):
       collision_kernel,
       dim=d.nconmax,
       inputs=[
+        m.ngeom,
         m.geom_type,
         m.geom_condim,
         m.geom_dataid,
@@ -946,7 +944,6 @@ def gjk_narrowphase(m: Model, d: Data):
         m.pair_margin,
         m.pair_gap,
         m.pair_friction,
-        m.geomid2hfieldid,
         d.nconmax,
         d.geom_xpos,
         d.geom_xmat,

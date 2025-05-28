@@ -847,7 +847,6 @@ class Model:
     sensor_rne_postconstraint: evaluate rne_postconstraint
     mocap_bodyid: id of body for mocap                       (nmocap,)
     mat_rgba: rgba                                           (nworld, nmat, 4)
-    geomid2hfieldid: geom id to height field id mapping      (ngeom,)
   """
 
   nq: int
@@ -1110,7 +1109,6 @@ class Model:
   sensor_rne_postconstraint: bool  # warp only
   mocap_bodyid: wp.array(dtype=int)  # warp only
   mat_rgba: wp.array2d(dtype=wp.vec4)
-  geomid2hfieldid: wp.array(dtype=int)  # warp only
 
 
 @dataclasses.dataclass
@@ -1156,7 +1154,7 @@ class Data:
     njmax: maximum number of constraints                        ()
     solver_niter: number of solver iterations                   (nworld,)
     ncon: number of detected contacts                           ()
-    ncon_hfield: number of detected contacts per hfield         (nworld, nhfield)
+    ncon_hfield: number of contacts per geom pair with hfield   (ncon,)
     ne: number of equality constraints                          ()
     ne_connect: number of equality connect constraints          ()
     ne_weld: number of equality weld constraints                ()
@@ -1272,7 +1270,7 @@ class Data:
   njmax: int  # warp only
   solver_niter: wp.array(dtype=int)
   ncon: wp.array(dtype=int)
-  ncon_hfield: wp.array2d(dtype=int)  # warp only
+  ncon_hfield: wp.array(dtype=int)  # warp only
   ne: wp.array(dtype=int)
   ne_connect: wp.array(dtype=int)  # warp only
   ne_weld: wp.array(dtype=int)  # warp only
