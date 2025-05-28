@@ -273,6 +273,11 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
 
     nxn_pairid[pairid] = i
 
+  # mapping: geom id to height field id
+  is_hfield = mjm.geom_type == mujoco.mjtGeom.mjGEOM_HFIELD
+  geomid2hfieldid = -1 * np.ones(mjm.ngeom, dtype=int)
+  geomid2hfieldid[is_hfield] = np.arange(np.sum(is_hfield))
+
   def create_nmodel_batched_array(mjm_array, dtype):
     array = wp.array(mjm_array, dtype=dtype)
     array.ndim += 1
@@ -604,6 +609,7 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
       ],
     ).any(),
     mat_rgba=create_nmodel_batched_array(mjm.mat_rgba, dtype=wp.vec4),
+    geomid2hfieldid=wp.array(geomid2hfieldid, dtype=int),  # warp only
   )
 
   return m
@@ -631,6 +637,7 @@ def make_data(mjm: mujoco.MjModel, nworld: int = 1, nconmax: int = -1, njmax: in
     njmax=njmax,
     solver_niter=wp.zeros(nworld, dtype=int),
     ncon=wp.zeros(1, dtype=int),
+    ncon_hfield=wp.zeros((nworld, np.sum(mjm.geom_type == mujoco.mjtGeom.mjGEOM_HFIELD)), dtype=int),  # warp only
     ne=wp.zeros(1, dtype=int),
     ne_connect=wp.zeros(1, dtype=int),  # warp only
     ne_weld=wp.zeros(1, dtype=int),  # warp only
@@ -931,6 +938,7 @@ def put_data(
     njmax=njmax,
     solver_niter=tile(mjd.solver_niter[0]),
     ncon=arr([mjd.ncon * nworld]),
+    ncon_hfield=wp.zeros((nworld, np.sum(mjm.geom_type == mujoco.mjtGeom.mjGEOM_HFIELD)), dtype=int),  # warp only
     ne=arr([mjd.ne * nworld]),
     ne_connect=arr([3 * nworld * np.sum((mjm.eq_type == mujoco.mjtEq.mjEQ_CONNECT) & mjd.eq_active, dtype=int)]),
     ne_weld=arr([6 * nworld * np.sum((mjm.eq_type == mujoco.mjtEq.mjEQ_WELD) & mjd.eq_active, dtype=int)]),

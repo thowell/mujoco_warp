@@ -25,6 +25,7 @@ from .math import make_frame
 from .math import orthonormal
 from .support import all_same
 from .support import any_different
+from .types import MJ_MAXCONPAIR
 from .types import MJ_MINVAL
 from .types import Data
 from .types import GeomType
@@ -740,6 +741,7 @@ def _gjk_epa_pipeline(
     pair_margin: wp.array2d(dtype=float),
     pair_gap: wp.array2d(dtype=float),
     pair_friction: wp.array2d(dtype=vec5),
+    geomid2hfieldid: wp.array(dtype=int),
     # Data in:
     nconmax_in: int,
     geom_xpos_in: wp.array2d(dtype=wp.vec3),
@@ -751,6 +753,7 @@ def _gjk_epa_pipeline(
     ncollision_in: wp.array(dtype=int),
     # Data out:
     ncon_out: wp.array(dtype=int),
+    ncon_hfield_out: wp.array2d(dtype=int),
     contact_dist_out: wp.array(dtype=float),
     contact_pos_out: wp.array(dtype=wp.vec3),
     contact_frame_out: wp.array(dtype=wp.mat33),
@@ -853,6 +856,17 @@ def _gjk_epa_pipeline(
 
     frame = make_frame(normal)
     for i in range(count):
+      # limit maximum number of contacts with height field
+      hfid = -1
+      if geomtype1 == int(GeomType.HFIELD.value):
+        hfid = geomid2hfieldid[g1]
+      elif geomtype2 == int(GeomType.HFIELD.value):
+        hfid = geomid2hfieldid[g2]
+
+      if hfid >= 0:
+        if wp.atomic_add(ncon_hfield_out[worldid], hfid, 1) >= MJ_MAXCONPAIR:
+          return
+
       write_contact(
         nconmax_in,
         dist,
@@ -932,6 +946,7 @@ def gjk_narrowphase(m: Model, d: Data):
         m.pair_margin,
         m.pair_gap,
         m.pair_friction,
+        m.geomid2hfieldid,
         d.nconmax,
         d.geom_xpos,
         d.geom_xmat,
@@ -943,6 +958,7 @@ def gjk_narrowphase(m: Model, d: Data):
       ],
       outputs=[
         d.ncon,
+        d.ncon_hfield,
         d.contact.dist,
         d.contact.pos,
         d.contact.frame,

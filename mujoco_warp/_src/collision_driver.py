@@ -440,6 +440,7 @@ def collision(m: Model, d: Data):
 
   d.ncollision.zero_()
   d.ncon.zero_()
+  d.ncon_hfield.zero_()
 
   # Clear the collision_hftri_index buffer
   d.collision_hftri_index.zero_()
