@@ -19,7 +19,7 @@ import mujoco
 import numpy as np
 import warp as wp
 
-from . import collision_driver
+from . import math
 from . import types
 
 
@@ -267,9 +267,9 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
     pair_geom2 = mjm.pair_geom2[i]
 
     if pair_geom2 < pair_geom1:
-      pairid = np.int32(collision_driver._upper_tri_index(mjm.ngeom, int(pair_geom2), int(pair_geom1)))
+      pairid = np.int32(math.upper_tri_index(mjm.ngeom, int(pair_geom2), int(pair_geom1)))
     else:
-      pairid = np.int32(collision_driver._upper_tri_index(mjm.ngeom, int(pair_geom1), int(pair_geom2)))
+      pairid = np.int32(math.upper_tri_index(mjm.ngeom, int(pair_geom1), int(pair_geom2)))
 
     nxn_pairid[pairid] = i
 
