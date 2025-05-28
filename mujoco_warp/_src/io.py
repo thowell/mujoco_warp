@@ -19,6 +19,7 @@ import mujoco
 import numpy as np
 import warp as wp
 
+from . import collision_driver
 from . import types
 
 
@@ -60,6 +61,11 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
   nv_max = 60
   if mjm.nv > nv_max and mjm.opt.jacobian == mujoco.mjtJacobian.mjJAC_DENSE:
     raise ValueError(f"Dense is unsupported for nv > {nv_max} (nv = {mjm.nv}).")
+
+  is_sparse = mujoco.mj_isSparse(mjm)
+
+  if mjm.opt.integrator == mujoco.mjtIntegrator.mjINT_IMPLICITFAST and is_sparse:
+    raise NotImplementedError("implicitfast integrator and sparse option is unsupported.")
 
   # calculate some fields that cannot be easily computed inline
   nlsp = mjm.opt.ls_iterations  # TODO(team): how to set nlsp?
@@ -230,37 +236,42 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
 
   # precalculated geom pairs
   filterparent = not (mjm.opt.disableflags & types.DisableBit.FILTERPARENT.value)
-  exclude_signature = set(mjm.exclude_signature)
-  predefined_pairs = {(mjm.pair_geom1[i], mjm.pair_geom2[i]): i for i in range(mjm.npair)}
 
-  nxn_geom_pair, nxn_pairid = [], []
-  for geom1, geom2 in zip(*np.triu_indices(mjm.ngeom, k=1)):  # k=1 skip diagonal
-    bodyid1, bodyid2 = mjm.geom_bodyid[geom1], mjm.geom_bodyid[geom2]
-    contype1, contype2 = mjm.geom_contype[geom1], mjm.geom_contype[geom2]
-    conaffinity1 = mjm.geom_conaffinity[geom1]
-    conaffinity2 = mjm.geom_conaffinity[geom2]
-    weldid1, weldid2 = mjm.body_weldid[bodyid1], mjm.body_weldid[bodyid2]
-    weld_parentid1 = mjm.body_weldid[mjm.body_parentid[weldid1]]
-    weld_parentid2 = mjm.body_weldid[mjm.body_parentid[weldid2]]
+  geom1, geom2 = np.triu_indices(mjm.ngeom, k=1)
+  nxn_geom_pair = np.stack((geom1, geom2), axis=1)
 
-    self_collision = weldid1 == weldid2
-    parent_child_collision = (
-      filterparent and (weldid1 != 0) and (weldid2 != 0) and ((weldid1 == weld_parentid2) or (weldid2 == weld_parentid1))
-    )
-    mask = (contype1 & conaffinity2) or (contype2 & conaffinity1)
-    exclude = (bodyid1 << 16) + (bodyid2) in exclude_signature
+  bodyid1 = mjm.geom_bodyid[geom1]
+  bodyid2 = mjm.geom_bodyid[geom2]
+  contype1 = mjm.geom_contype[geom1]
+  contype2 = mjm.geom_contype[geom2]
+  conaffinity1 = mjm.geom_conaffinity[geom1]
+  conaffinity2 = mjm.geom_conaffinity[geom2]
+  weldid1 = mjm.body_weldid[bodyid1]
+  weldid2 = mjm.body_weldid[bodyid2]
+  weld_parentid1 = mjm.body_weldid[mjm.body_parentid[weldid1]]
+  weld_parentid2 = mjm.body_weldid[mjm.body_parentid[weldid2]]
 
-    if mask and (not self_collision) and (not parent_child_collision) and (not exclude):
-      pairid = -1
+  self_collision = weldid1 == weldid2
+  parent_child_collision = (
+    filterparent & (weldid1 != 0) & (weldid2 != 0) & ((weldid1 == weld_parentid2) | (weldid2 == weld_parentid1))
+  )
+  mask = np.array((contype1 & conaffinity2) | (contype2 & conaffinity1), dtype=bool)
+  exclude = np.isin((bodyid1 << 16) + bodyid2, mjm.exclude_signature)
+
+  nxn_pairid = -1 * np.ones(len(geom1), dtype=int)
+  nxn_pairid[~(mask & ~self_collision & ~parent_child_collision & ~exclude)] = -2
+
+  # contact pairs
+  for i in range(mjm.npair):
+    pair_geom1 = mjm.pair_geom1[i]
+    pair_geom2 = mjm.pair_geom2[i]
+
+    if pair_geom2 < pair_geom1:
+      pairid = np.int32(collision_driver._upper_tri_index(mjm.ngeom, int(pair_geom2), int(pair_geom1)))
     else:
-      pairid = -2
+      pairid = np.int32(collision_driver._upper_tri_index(mjm.ngeom, int(pair_geom1), int(pair_geom2)))
 
-    # check for predefined geom pair
-    pairid = predefined_pairs.get((geom1, geom2), pairid)
-    pairid = predefined_pairs.get((geom2, geom1), pairid)
-
-    nxn_geom_pair.append((geom1, geom2))
-    nxn_pairid.append(pairid)
+    nxn_pairid[pairid] = i
 
   def create_nmodel_batched_array(mjm_array, dtype):
     array = wp.array(mjm_array, dtype=dtype)
@@ -315,7 +326,7 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
       disableflags=mjm.opt.disableflags,
       enableflags=mjm.opt.enableflags,
       impratio=mjm.opt.impratio,
-      is_sparse=mujoco.mj_isSparse(mjm),
+      is_sparse=is_sparse,
       ls_parallel=False,
       gjk_iterations=1,
       epa_iterations=12,
@@ -453,10 +464,12 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
     flex_elemedgeadr=wp.array(mjm.flex_elemedgeadr, dtype=int),
     flex_vertbodyid=wp.array(mjm.flex_vertbodyid, dtype=int),
     flex_edge=wp.array(mjm.flex_edge, dtype=wp.vec2i),
+    flex_edgeflap=wp.array(mjm.flex_edgeflap, dtype=wp.vec2i),
     flex_elem=wp.array(mjm.flex_elem, dtype=int),
     flex_elemedge=wp.array(mjm.flex_elemedge, dtype=int),
     flexedge_length0=wp.array(mjm.flexedge_length0, dtype=float),
     flex_stiffness=wp.array(mjm.flex_stiffness.flatten(), dtype=float),
+    flex_bending=wp.array(mjm.flex_bending, dtype=wp.mat44f),
     flex_damping=wp.array(mjm.flex_damping, dtype=float),
     mesh_vertadr=wp.array(mjm.mesh_vertadr, dtype=int),
     mesh_vertnum=wp.array(mjm.mesh_vertnum, dtype=int),
@@ -619,6 +632,7 @@ def make_data(mjm: mujoco.MjModel, nworld: int = 1, nconmax: int = -1, njmax: in
     nworld=nworld,
     nconmax=nconmax,
     njmax=njmax,
+    solver_niter=wp.zeros(nworld, dtype=int),
     ncon=wp.zeros(1, dtype=int),
     ne=wp.zeros(1, dtype=int),
     ne_connect=wp.zeros(1, dtype=int),  # warp only
@@ -727,7 +741,6 @@ def make_data(mjm: mujoco.MjModel, nworld: int = 1, nconmax: int = -1, njmax: in
       gauss=wp.zeros((nworld,), dtype=float),
       cost=wp.zeros((nworld,), dtype=float),
       prev_cost=wp.zeros((nworld,), dtype=float),
-      solver_niter=wp.zeros((nworld,), dtype=int),
       active=wp.zeros((njmax,), dtype=bool),
       gtol=wp.zeros((nworld,), dtype=float),
       mv=wp.zeros((nworld, mjm.nv), dtype=float),
@@ -919,6 +932,7 @@ def put_data(
     nworld=nworld,
     nconmax=nconmax,
     njmax=njmax,
+    solver_niter=tile(mjd.solver_niter[0]),
     ncon=arr([mjd.ncon * nworld]),
     ne=arr([mjd.ne * nworld]),
     ne_connect=arr([3 * nworld * np.sum((mjm.eq_type == mujoco.mjtEq.mjEQ_CONNECT) & mjd.eq_active, dtype=int)]),
@@ -1024,7 +1038,6 @@ def put_data(
       gauss=wp.empty(shape=(nworld,), dtype=float),
       cost=wp.empty(shape=(nworld,), dtype=float),
       prev_cost=wp.empty(shape=(nworld,), dtype=float),
-      solver_niter=wp.empty(shape=(nworld,), dtype=int),
       active=wp.empty(shape=(njmax,), dtype=bool),
       gtol=wp.empty(shape=(nworld,), dtype=float),
       mv=wp.empty(shape=(nworld, mjm.nv), dtype=float),
@@ -1113,6 +1126,8 @@ def get_data_into(
   """Gets Data from a device into an existing mujoco.MjData."""
   if d.nworld > 1:
     raise NotImplementedError("only nworld == 1 supported for now")
+
+  result.solver_niter[0] = d.solver_niter.numpy()[0]
 
   ncon = d.ncon.numpy()[0]
   nefc = d.nefc.numpy()[0]

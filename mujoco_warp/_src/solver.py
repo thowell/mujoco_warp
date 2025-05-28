@@ -13,6 +13,8 @@
 # limitations under the License.
 # ==============================================================================
 
+from math import ceil
+
 import warp as wp
 
 from . import math
@@ -1063,30 +1065,43 @@ def linesearch_zero_jv(
   efc_jv_out[efcid] = 0.0
 
 
-@wp.kernel
-def linesearch_init_jv(
-  # Data in:
-  nefc_in: wp.array(dtype=int),
-  efc_worldid_in: wp.array(dtype=int),
-  efc_J_in: wp.array2d(dtype=float),
-  efc_search_in: wp.array2d(dtype=float),
-  efc_done_in: wp.array(dtype=bool),
-  # Data out:
-  efc_jv_out: wp.array(dtype=float),
-):
-  efcid, dofid = wp.tid()
+def linesearch_jv_fused(nv: int, dofs_per_thread: int):
+  @nested_kernel
+  def kernel(
+    # Data in:
+    nefc_in: wp.array(dtype=int),
+    efc_worldid_in: wp.array(dtype=int),
+    efc_J_in: wp.array2d(dtype=float),
+    efc_search_in: wp.array2d(dtype=float),
+    efc_done_in: wp.array(dtype=bool),
+    # Data out:
+    efc_jv_out: wp.array(dtype=float),
+  ):
+    efcid, dofstart = wp.tid()
 
-  if efcid >= nefc_in[0]:
-    return
+    if efcid >= nefc_in[0]:
+      return
 
-  worldid = efc_worldid_in[efcid]
+    worldid = efc_worldid_in[efcid]
 
-  if efc_done_in[worldid]:
-    return
+    if efc_done_in[worldid]:
+      return
 
-  j = efc_J_in[efcid, dofid]
-  search = efc_search_in[worldid, dofid]
-  wp.atomic_add(efc_jv_out, efcid, j * search)
+    jv_out = float(0.0)
+
+    if wp.static(dofs_per_thread >= nv):
+      for i in range(wp.static(min(dofs_per_thread, nv))):
+        jv_out += efc_J_in[efcid, i] * efc_search_in[worldid, i]
+      efc_jv_out[efcid] = jv_out
+
+    else:
+      for i in range(wp.static(dofs_per_thread)):
+        ii = dofstart * wp.static(dofs_per_thread) + i
+        if ii < nv:
+          jv_out += efc_J_in[efcid, ii] * efc_search_in[worldid, ii]
+      wp.atomic_add(efc_jv_out, efcid, jv_out)
+
+  return kernel
 
 
 @wp.kernel
@@ -1268,16 +1283,28 @@ def _linesearch(m: types.Model, d: types.Data):
 
   # jv = efc_J @ search
   # TODO(team): is there a better way of doing batched matmuls with dynamic array sizes?
-  wp.launch(
-    linesearch_zero_jv,
-    dim=(d.njmax),
-    inputs=[d.nefc, d.efc.worldid, d.efc.done],
-    outputs=[d.efc.jv],
-  )
+
+  # if we are only using 1 thread, it makes sense to do more dofs as we can also skip the
+  # init kernel. If we use more than 1 thread, dofs_per_thread is lower for better load balancing.
+
+  if m.nv > 50:
+    dofs_per_thread = 20
+  else:
+    dofs_per_thread = 50
+
+  threads_per_efc = ceil(m.nv / dofs_per_thread)
+  # we need to clear the jv array if we're doing atomic adds.
+  if threads_per_efc > 1:
+    wp.launch(
+      linesearch_zero_jv,
+      dim=(d.njmax),
+      inputs=[d.nefc, d.efc.worldid, d.efc.done],
+      outputs=[d.efc.jv],
+    )
 
   wp.launch(
-    linesearch_init_jv,
-    dim=(d.njmax, m.nv),
+    linesearch_jv_fused(m.nv, dofs_per_thread),
+    dim=(d.njmax, threads_per_efc),
     inputs=[d.nefc, d.efc.worldid, d.efc.J, d.efc.search, d.efc.done],
     outputs=[d.efc.jv],
   )
@@ -1360,14 +1387,14 @@ def _linesearch(m: types.Model, d: types.Data):
 @wp.kernel
 def solve_init_efc(
   # Data out:
+  solver_niter_out: wp.array(dtype=int),
   efc_search_dot_out: wp.array(dtype=float),
   efc_cost_out: wp.array(dtype=float),
-  efc_solver_niter_out: wp.array(dtype=int),
   efc_done_out: wp.array(dtype=bool),
 ):
   worldid = wp.tid()
   efc_cost_out[worldid] = wp.inf
-  efc_solver_niter_out[worldid] = 0
+  solver_niter_out[worldid] = 0
   efc_done_out[worldid] = False
   efc_search_dot_out[worldid] = 0.0
 
@@ -1732,6 +1759,8 @@ def update_constraint_zero_qfrc_constraint(
 
 @wp.kernel
 def update_constraint_init_qfrc_constraint(
+  # Model:
+  nv: int,
   # Data in:
   nefc_in: wp.array(dtype=int),
   efc_worldid_in: wp.array(dtype=int),
@@ -1741,7 +1770,7 @@ def update_constraint_init_qfrc_constraint(
   # Data out:
   qfrc_constraint_out: wp.array2d(dtype=float),
 ):
-  dofid, efcid = wp.tid()
+  efcid = wp.tid()
 
   if efcid >= nefc_in[0]:
     return
@@ -1751,11 +1780,13 @@ def update_constraint_init_qfrc_constraint(
   if efc_done_in[worldid]:
     return
 
-  wp.atomic_add(
-    qfrc_constraint_out[worldid],
-    dofid,
-    efc_J_in[efcid, dofid] * efc_force_in[efcid],
-  )
+  force = efc_force_in[efcid]
+  for i in range(nv):
+    wp.atomic_add(
+      qfrc_constraint_out[worldid],
+      i,
+      efc_J_in[efcid, i] * force,
+    )
 
 
 @wp.kernel
@@ -1895,8 +1926,8 @@ def _update_constraint(m: types.Model, d: types.Data):
 
   wp.launch(
     update_constraint_init_qfrc_constraint,
-    dim=(m.nv, d.njmax),
-    inputs=[d.nefc, d.efc.worldid, d.efc.J, d.efc.force, d.efc.done],
+    dim=(d.njmax),
+    inputs=[m.nv, d.nefc, d.efc.worldid, d.efc.J, d.efc.force, d.efc.done],
     outputs=[d.qfrc_constraint],
   )
 
@@ -2461,6 +2492,7 @@ def solve_done(
   efc_prev_cost_in: wp.array(dtype=float),
   efc_done_in: wp.array(dtype=bool),
   # Data out:
+  solver_niter_out: wp.array(dtype=int),
   efc_done_out: wp.array(dtype=bool),
 ):
   # TODO(team): static m?
@@ -2468,6 +2500,8 @@ def solve_done(
 
   if efc_done_in[worldid]:
     return
+
+  solver_niter_out[worldid] += 1
 
   improvement = _rescale(nv, stat_meaninertia, efc_prev_cost_in[worldid] - efc_cost_in[worldid])
   gradient = _rescale(nv, stat_meaninertia, wp.math.sqrt(efc_grad_dot_in[worldid]))
@@ -2479,7 +2513,7 @@ def create_context(m: types.Model, d: types.Data, grad: bool = True):
   wp.launch(
     solve_init_efc,
     dim=(d.nworld),
-    outputs=[d.efc.search_dot, d.efc.cost, d.efc.solver_niter, d.efc.done],
+    outputs=[d.solver_niter, d.efc.search_dot, d.efc.cost, d.efc.done],
   )
 
   # jaref = d.efc_J @ d.qacc - d.efc_aref
@@ -2575,7 +2609,7 @@ def solve(m: types.Model, d: types.Data):
         d.efc.prev_cost,
         d.efc.done,
       ],
-      outputs=[d.efc.done],
+      outputs=[d.solver_niter, d.efc.done],
     )
 
   wp.copy(d.qacc_warmstart, d.qacc)
