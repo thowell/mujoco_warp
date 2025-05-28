@@ -13,13 +13,10 @@
 # limitations under the License.
 # ==============================================================================
 
-from typing import Any
-
 import warp as wp
 
-from .collision_primitive import Geom
-from .collision_primitive import _geom
 from .collision_convex import gjk_support_geom
+from .collision_primitive import Geom
 from .types import MJ_MINVAL
 
 # TODO(team): improve compile time to enable backward pass
@@ -87,7 +84,6 @@ def _same_sign(a: float, b: float):
   if a < 0 and b < 0:
     return -1
   return 0
-
 
 
 @wp.func
@@ -379,14 +375,7 @@ def _S1D(s1: wp.vec3, s2: wp.vec3):
 
 @wp.func
 def gjk(
-  tolerance: float,
-  gjk_iterations: int,
-  geom1: Geom,
-  geom2: Geom, 
-  x1_0: wp.vec3,
-  x2_0: wp.vec3,
-  geomtype1: int,
-  geomtype2: int
+  tolerance: float, gjk_iterations: int, geom1: Geom, geom2: Geom, x1_0: wp.vec3, x2_0: wp.vec3, geomtype1: int, geomtype2: int
 ):
   simplex = mat43()
   simplex1 = mat43()

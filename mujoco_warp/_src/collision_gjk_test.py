@@ -16,34 +16,39 @@
 import warp as wp
 from absl.testing import absltest
 
-from .collision_gjk import gjk
-
 from . import test_util
-from .types import GeomType, Model, Data
+from .collision_gjk import gjk
 from .collision_primitive import Geom
+from .types import Data
+from .types import GeomType
+from .types import Model
 
 
 def _geom_dist(m: Model, d: Data, gid1: int, gid2: int):
   @wp.kernel
   def _gjk_kernel(
-    results: wp.array(dtype=float),
-    geom_xpos: wp.array2d(dtype=wp.vec3),
-    geom_xmat: wp.array2d(dtype=wp.mat33),
-    geom_size: wp.array2d(dtype=wp.vec3),
+    # Model:
     geom_type: wp.array(dtype=int),
     geom_dataid: wp.array(dtype=int),
+    geom_size: wp.array2d(dtype=wp.vec3),
     mesh_vertadr: wp.array(dtype=int),
     mesh_vertnum: wp.array(dtype=int),
     mesh_vert: wp.array(dtype=wp.vec3),
+    # Data in:
+    geom_xpos_in: wp.array2d(dtype=wp.vec3),
+    geom_xmat_in: wp.array2d(dtype=wp.mat33),
+    # In:
     gid1: int,
     gid2: int,
+    # Out:
+    dist_out: wp.array(dtype=float),
   ):
     MESHGEOM = int(GeomType.MESH.value)
 
     geom1 = Geom()
     geomtype1 = geom_type[gid1]
-    geom1.pos = geom_xpos[0, gid1]
-    geom1.rot = geom_xmat[0, gid1]
+    geom1.pos = geom_xpos_in[0, gid1]
+    geom1.rot = geom_xmat_in[0, gid1]
     geom1.size = geom_size[0, gid1]
 
     if geom_dataid[gid1] >= 0 and geom_type[gid1] == MESHGEOM:
@@ -54,8 +59,8 @@ def _geom_dist(m: Model, d: Data, gid1: int, gid2: int):
 
     geom2 = Geom()
     geomtype2 = geom_type[gid2]
-    geom2.pos = geom_xpos[0, gid2]
-    geom2.rot = geom_xmat[0, gid2]
+    geom2.pos = geom_xpos_in[0, gid2]
+    geom2.rot = geom_xmat_in[0, gid2]
     geom2.size = geom_size[0, gid2]
 
     if geom_dataid[gid2] >= 0 and geom_type[gid2] == MESHGEOM:
@@ -64,30 +69,32 @@ def _geom_dist(m: Model, d: Data, gid1: int, gid2: int):
       geom2.vertnum = mesh_vertnum[dataid]
       geom2.vert = mesh_vert
 
-    x_1 = geom_xpos[0, gid1]
-    x_2 = geom_xpos[0, gid2]
+    x_1 = geom_xpos_in[0, gid1]
+    x_2 = geom_xpos_in[0, gid2]
     result = gjk(1e-6, 20, geom1, geom2, x_1, x_2, geomtype1, geomtype2)
-    results[0] = result.dist
+    dist_out[0] = result.dist
 
-  results = wp.array(length=1, dtype=float)
+  dist_out = wp.array(shape=(1,), dtype=float)
   wp.launch(
     _gjk_kernel,
     dim=(1,),
-    inputs=[
-      results,
-      d.geom_xpos,
-      d.geom_xmat,
-      m.geom_size,
+    inputs=[      
       m.geom_type,
       m.geom_dataid,
+      m.geom_size,
       m.mesh_vertadr,
       m.mesh_vertnum,
       m.mesh_vert,
+      d.geom_xpos,
+      d.geom_xmat,
       gid1,
       gid2,
     ],
+    outputs=[
+      dist_out,
+    ],
   )
-  return results.numpy()[0]
+  return dist_out.numpy()[0]
 
 
 class GJKTest(absltest.TestCase):
