@@ -41,33 +41,6 @@ class IOTest(absltest.TestCase):
 
   # TODO(team): sensors
 
-  def test_tendon(self):
-    mjm = mujoco.MjModel.from_xml_string("""
-      <mujoco>
-        <worldbody>
-          <body>          
-            <geom type="sphere" size=".1"/>
-            <site name="site0"/>
-            <joint name="slide" type="slide"/>
-            <body pos="0 0 .1">
-              <geom name="sphere1" type="sphere" size=".1"/>
-              <site name="site1"/>
-            </body>
-          </body>
-        </worldbody>  
-        <tendon>
-          <spatial>
-            <site site="site0"/>
-            <geom geom="sphere1"/>
-            <site site="site1"/>
-          </spatial>                      
-        </tendon>              
-      </mujoco>
-    """)
-
-    with self.assertRaises(NotImplementedError):
-      mjwarp.put_model(mjm)
-
   def test_actuator_trntype(self):
     mjm = mujoco.MjModel.from_xml_string("""
       <mujoco>
@@ -91,78 +64,6 @@ class IOTest(absltest.TestCase):
           <general site="site0" refsite="site1"/>
           <general body="body" ctrlrange="0 1"/>
         </actuator>           
-      </mujoco>
-    """)
-
-    with self.assertRaises(NotImplementedError):
-      mjwarp.put_model(mjm)
-
-  def test_actuator_dyntype(self):
-    mjm = mujoco.MjModel.from_xml_string("""
-      <mujoco>
-        <worldbody>
-          <body>          
-            <geom type="sphere" size=".1"/>
-            <joint name="slide" type="slide"/>
-          </body>
-        </worldbody>  
-        <actuator>
-          <general joint="slide" dyntype="integrator"/>
-          <general joint="slide" dyntype="filter"/>
-          <general joint="slide" dyntype="muscle"/>
-        </actuator>
-      </mujoco>
-    """)
-
-    with self.assertRaises(NotImplementedError):
-      mjwarp.put_model(mjm)
-
-  def test_actuator_gaintype(self):
-    mjm = mujoco.MjModel.from_xml_string("""
-      <mujoco>
-        <worldbody>
-          <site name="siteworld"/>
-          <body>          
-            <geom type="sphere" size=".1"/>
-            <site name="site0"/>
-            <joint name="slide" type="slide"/>
-          </body>
-        </worldbody>  
-        <tendon>
-          <spatial name="tendon">
-            <site site="siteworld"/>
-            <site site="site0"/>
-          </spatial>                      
-        </tendon>
-        <actuator>
-          <muscle tendon="tendon" lengthrange="0 1"/>
-        </actuator>
-      </mujoco>
-    """)
-
-    with self.assertRaises(NotImplementedError):
-      mjwarp.put_model(mjm)
-
-  def test_actuator_biastype(self):
-    mjm = mujoco.MjModel.from_xml_string("""
-      <mujoco>
-        <worldbody>
-          <site name="siteworld"/>
-          <body>          
-            <geom type="sphere" size=".1"/>
-            <site name="site0"/>
-            <joint name="slide" type="slide"/>
-          </body>
-        </worldbody>  
-        <tendon>
-          <spatial name="tendon">
-            <site site="siteworld"/>
-            <site site="site0"/>
-          </spatial>                      
-        </tendon>
-        <actuator>
-          <muscle tendon="tendon" lengthrange="0 1"/>
-        </actuator>
       </mujoco>
     """)
 
@@ -258,6 +159,16 @@ class IOTest(absltest.TestCase):
     mjd.qLD[:] = 0.0
     d = mjwarp.put_data(mjm, mjd)
     self.assertTrue((d.qLD.numpy() == 0.0).all())
+
+  def test_implicitfast_sparse(self):
+    with self.assertRaises(NotImplementedError):
+      test_util.fixture(
+        xml="""
+      <mujoco>
+        <option integrator="implicitfast" jacobian="sparse"/>
+      </mujoco>
+      """
+      )
 
 
 if __name__ == "__main__":
