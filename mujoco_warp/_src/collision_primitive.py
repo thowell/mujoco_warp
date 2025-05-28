@@ -51,6 +51,8 @@ class Geom:
   vertadr: int
   vertnum: int
   vert: wp.array(dtype=wp.vec3)
+  graphadr: int
+  graph: wp.array(dtype=int)
 
 
 @wp.func
@@ -67,6 +69,8 @@ def _geom(
   mesh_vertadr: wp.array(dtype=int),
   mesh_vertnum: wp.array(dtype=int),
   mesh_vert: wp.array(dtype=wp.vec3),
+  mesh_graphadr: wp.array(dtype=int),
+  mesh_graph: wp.array(dtype=int),
   # Data in:
   geom_xpos_in: wp.array2d(dtype=wp.vec3),
   geom_xmat_in: wp.array2d(dtype=wp.mat33),
@@ -87,12 +91,15 @@ def _geom(
   if dataid >= 0 and geom_type[gid] == int(GeomType.MESH.value):
     geom.vertadr = mesh_vertadr[dataid]
     geom.vertnum = mesh_vertnum[dataid]
+    geom.graphadr = mesh_graphadr[dataid]
   else:
     geom.vertadr = -1
     geom.vertnum = -1
+    geom.graphadr = -1
 
   if geom_type[gid] == int(GeomType.MESH.value):
     geom.vert = mesh_vert
+    geom.graph = mesh_graph
 
   # If geom is HFIELD triangle, compute triangle prism verts
   if geom_type[gid] == int(GeomType.HFIELD.value):
