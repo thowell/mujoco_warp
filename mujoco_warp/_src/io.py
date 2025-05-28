@@ -307,6 +307,7 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
     nsensordata=mjm.nsensordata,
     nmeshvert=mjm.nmeshvert,
     nmeshface=mjm.nmeshface,
+    nmeshgraph=mjm.nmeshgraph,
     nlsp=nlsp,
     npair=mjm.npair,
     opt=types.Option(
@@ -476,6 +477,8 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
     mesh_vert=wp.array(mjm.mesh_vert, dtype=wp.vec3),
     mesh_faceadr=wp.array(mjm.mesh_faceadr, dtype=int),
     mesh_face=wp.array(mjm.mesh_face, dtype=wp.vec3i),
+    mesh_graphadr=wp.array(mjm.mesh_graphadr, dtype=int),
+    mesh_graph=wp.array(mjm.mesh_graph, dtype=int),
     nhfield=mjm.nhfield,
     nhfielddata=mjm.nhfielddata,
     hfield_adr=wp.array(mjm.hfield_adr, dtype=int),
