@@ -301,6 +301,7 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
     nmocap=mjm.nmocap,
     ngravcomp=mjm.ngravcomp,
     nM=mjm.nM,
+    nC=mjm.nC,
     ntendon=mjm.ntendon,
     nwrap=mjm.nwrap,
     nsensor=mjm.nsensor,
