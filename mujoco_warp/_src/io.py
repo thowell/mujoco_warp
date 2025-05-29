@@ -27,8 +27,8 @@ def _hfield_geom_pair(mjm: mujoco.MjModel) -> Tuple[int, np.array]:
   geom1, geom2 = np.triu_indices(mjm.ngeom, k=1)
   geom_type_hf = mujoco.mjtGeom.mjGEOM_HFIELD
   has_hfield = (mjm.geom_type[geom1] == geom_type_hf) | (mjm.geom_type[geom2] == geom_type_hf)
-  geompair2hfgeompair = -1 * np.ones(mjm.ngeom * (mjm.ngeom - 1) // 2, dtype=int)
   nhfieldgeompair = np.sum(has_hfield)
+  geompair2hfgeompair = -1 * np.ones(mjm.ngeom * (mjm.ngeom - 1) // 2, dtype=int)
   geompair2hfgeompair[has_hfield] = np.arange(nhfieldgeompair)
 
   return nhfieldgeompair, geompair2hfgeompair
