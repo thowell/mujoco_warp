@@ -855,16 +855,13 @@ def _gjk_epa_pipeline(
 
     # TODO(btaba): split get_multiple_contacts into a separate kernel.
 
-    if (
-      geom_type[g1] != int(GeomType.ELLIPSOID.value)
-      and geom_type[g1] != int(GeomType.SPHERE.value)
-      and geom_type[g2] != int(GeomType.ELLIPSOID.value)
-      and geom_type[g2] != int(GeomType.SPHERE.value)
-    ):
-      count, points = _multiple_contacts(geom1, geom2, depth, normal, 4, 8, 1.0e-3)
-    else:
+    sphere = int(GeomType.SPHERE.value)
+    ellipsoid = int(GeomType.ELLIPSOID.value)
+    if geom_type[g1] == sphere or geom_type[g1] == ellipsoid or geom_type[g2] == sphere or geom_type[g2] == ellipsoid:
       # TODO(team): _multiple_contacts should work with perturbation_angle=0
       count, points = _multiple_contacts(geom1, geom2, depth, normal, 1, 2, 1.0e-5)
+    else:
+      count, points = _multiple_contacts(geom1, geom2, depth, normal, 4, 8, 1.0e-3)
 
     frame = make_frame(normal)
     for i in range(count):
