@@ -535,6 +535,8 @@ class Constraint:
   Jaref: wp.array(dtype=float)
   Ma: wp.array2d(dtype=float)
   grad: wp.array2d(dtype=float)
+  cholesky_L_tmp: wp.array3d(dtype=float)
+  cholesky_y_tmp: wp.array2d(dtype=float)
   grad_dot: wp.array(dtype=float)
   Mgrad: wp.array2d(dtype=float)
   search: wp.array2d(dtype=float)
@@ -623,6 +625,7 @@ class Model:
     nsensordata: number of elements in sensor data vector    ()
     nmeshvert: number of vertices for all meshes             ()
     nmeshface: number of faces for all meshes                ()
+    nmeshgraph: number of ints in mesh auxiliary data        ()
     nlsp: number of step sizes for parallel linsearch        ()
     npair: number of predefined geom pairs                   ()
     nhfield: number of heightfields                          ()
@@ -750,6 +753,8 @@ class Model:
     mesh_vert: vertex positions for all meshes               (nmeshvert, 3)
     mesh_faceadr: first face address                         (nmesh,)
     mesh_face: face indices for all meshes                   (nface, 3)
+    mesh_graphadr: graph data address; -1: no graph          (nmesh, 1)
+    mesh_graph: convex graph data                            (nmeshgraph, 1)
     eq_type: constraint type (mjtEq)                         (neq,)
     eq_obj1id: id of object 1                                (neq,)
     eq_obj2id: id of object 2                                (neq,)
@@ -874,6 +879,7 @@ class Model:
   nsensordata: int
   nmeshvert: int
   nmeshface: int
+  nmeshgraph: int
   nlsp: int  # warp only
   npair: int
   nhfield: int
@@ -1015,6 +1021,8 @@ class Model:
   mesh_vert: wp.array(dtype=wp.vec3)
   mesh_faceadr: wp.array(dtype=int)
   mesh_face: wp.array(dtype=wp.vec3i)
+  mesh_graphadr: wp.array(dtype=int)
+  mesh_graph: wp.array(dtype=int)
   eq_type: wp.array(dtype=int)
   eq_obj1id: wp.array(dtype=int)
   eq_obj2id: wp.array(dtype=int)
