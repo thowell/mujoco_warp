@@ -357,7 +357,7 @@ class CollisionTest(parameterized.TestCase):
   @parameterized.parameters(_FIXTURES.keys())
   def test_collision(self, fixture):
     """Tests collisions with different geometries."""
-    mjm, mjd, m, d = test_util.fixture(xml=self._FIXTURES[fixture], qpos0=True, multiccd=True)
+    mjm, mjd, m, d = test_util.fixture(xml=self._FIXTURES[fixture], qpos0=True)
 
     # Exempt GJK collisions from exact contact count check
     # because GJK generates more contacts

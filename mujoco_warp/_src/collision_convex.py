@@ -27,7 +27,6 @@ from .support import all_same
 from .support import any_different
 from .types import MJ_MINVAL
 from .types import Data
-from .types import EnableBit
 from .types import GeomType
 from .types import Model
 from .types import vec5
@@ -756,8 +755,6 @@ def _gjk_epa_pipeline(
     collision_pairid_in: wp.array(dtype=int),
     collision_worldid_in: wp.array(dtype=int),
     ncollision_in: wp.array(dtype=int),
-    # In:
-    enable_multiccd: bool,
     # Data out:
     ncon_out: wp.array(dtype=int),
     contact_dist_out: wp.array(dtype=float),
@@ -859,8 +856,7 @@ def _gjk_epa_pipeline(
     # TODO(btaba): split get_multiple_contacts into a separate kernel.
 
     if (
-      enable_multiccd
-      and geom_type[g1] != int(GeomType.ELLIPSOID.value)
+      geom_type[g1] != int(GeomType.ELLIPSOID.value)
       and geom_type[g1] != int(GeomType.SPHERE.value)
       and geom_type[g2] != int(GeomType.ELLIPSOID.value)
       and geom_type[g2] != int(GeomType.SPHERE.value)
@@ -959,7 +955,6 @@ def gjk_narrowphase(m: Model, d: Data):
         d.collision_pairid,
         d.collision_worldid,
         d.ncollision,
-        m.opt.enableflags & EnableBit.MULTICCD,
       ],
       outputs=[
         d.ncon,

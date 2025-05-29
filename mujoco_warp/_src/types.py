@@ -97,12 +97,10 @@ class EnableBit(enum.IntFlag):
 
   Members:
     INVDISCRETE: discrete-time inverse dynamics
-    MULTICCD: multi-point convex collision detection
   """
 
   INVDISCRETE = mujoco.mjtEnableBit.mjENBL_INVDISCRETE
-  MULTICCD = mujoco.mjtEnableBit.mjENBL_MULTICCD
-  # unsupported: OVERRIDE, ENERGY, FWDINV, ISLAND
+  # unsupported: OVERRIDE, ENERGY, FWDINV, MULTICCD, ISLAND
 
 
 class TrnType(enum.IntEnum):
