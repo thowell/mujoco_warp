@@ -206,8 +206,8 @@ def _max_contacts_height_field(
   if geom_type[g1] == hfield or (geom_type[g2] == hfield):
     geompairid = upper_tri_index(ngeom, g1, g2)
     hfgeompairid = geompair2hfgeompair[geompairid]
-    hfgeompairid = wp.atomic_add(ncon_hfield_out[worldid], hfgeompairid, 1)
-    if hfgeompairid >= MJ_MAXCONPAIR:
+    hfncon = wp.atomic_add(ncon_hfield_out[worldid], hfgeompairid, 1)
+    if hfncon >= MJ_MAXCONPAIR:
       return True
 
   return False
