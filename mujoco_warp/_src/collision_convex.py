@@ -23,8 +23,10 @@ from .collision_primitive import write_contact
 from .math import gjk_normalize
 from .math import make_frame
 from .math import orthonormal
+from .math import upper_tri_index
 from .support import all_same
 from .support import any_different
+from .types import MJ_MAXCONPAIR
 from .types import MJ_MINVAL
 from .types import Data
 from .types import GeomType
@@ -184,6 +186,30 @@ def _expand_polytope(count: int, prev_count: int, dists: vecc3, tris: mat2c3, p:
     tris[r] = swap
 
   return dists, tris
+
+
+@wp.func
+def _max_contacts_height_field(
+  # Model:
+  ngeom: int,
+  geom_type: wp.array(dtype=int),
+  geompair2hfgeompair: wp.array(dtype=int),
+  # In:
+  g1: int,
+  g2: int,
+  worldid: int,
+  # Data out:
+  ncon_hfield_out: wp.array2d(dtype=int),
+):
+  hfield = int(GeomType.HFIELD.value)
+  if geom_type[g1] == hfield or (geom_type[g2] == hfield):
+    geompairid = upper_tri_index(ngeom, g1, g2)
+    hfgeompairid = geompair2hfgeompair[geompairid]
+    hfncon = wp.atomic_add(ncon_hfield_out[worldid], hfgeompairid, 1)
+    if hfncon >= MJ_MAXCONPAIR:
+      return True
+
+  return False
 
 
 def _gjk_epa_pipeline(
@@ -720,6 +746,7 @@ def _gjk_epa_pipeline(
   @wp.kernel
   def gjk_epa_sparse(
     # Model:
+    ngeom: int,
     geom_type: wp.array(dtype=int),
     geom_condim: wp.array(dtype=int),
     geom_dataid: wp.array(dtype=int),
@@ -748,6 +775,7 @@ def _gjk_epa_pipeline(
     pair_margin: wp.array2d(dtype=float),
     pair_gap: wp.array2d(dtype=float),
     pair_friction: wp.array2d(dtype=vec5),
+    geompair2hfgeompair: wp.array(dtype=int),
     # Data in:
     nconmax_in: int,
     geom_xpos_in: wp.array2d(dtype=wp.vec3),
@@ -759,6 +787,7 @@ def _gjk_epa_pipeline(
     ncollision_in: wp.array(dtype=int),
     # Data out:
     ncon_out: wp.array(dtype=int),
+    ncon_hfield_out: wp.array2d(dtype=int),
     contact_dist_out: wp.array(dtype=float),
     contact_pos_out: wp.array(dtype=wp.vec3),
     contact_frame_out: wp.array(dtype=wp.mat33),
@@ -871,6 +900,10 @@ def _gjk_epa_pipeline(
 
     frame = make_frame(normal)
     for i in range(count):
+      # limit maximum number of contacts with height field
+      if _max_contacts_height_field(ngeom, geom_type, geompair2hfgeompair, g1, g2, worldid, ncon_hfield_out):
+        return
+
       write_contact(
         nconmax_in,
         dist,
@@ -924,6 +957,7 @@ def gjk_narrowphase(m: Model, d: Data):
       collision_kernel,
       dim=d.nconmax,
       inputs=[
+        m.ngeom,
         m.geom_type,
         m.geom_condim,
         m.geom_dataid,
@@ -952,6 +986,7 @@ def gjk_narrowphase(m: Model, d: Data):
         m.pair_margin,
         m.pair_gap,
         m.pair_friction,
+        m.geompair2hfgeompair,
         d.nconmax,
         d.geom_xpos,
         d.geom_xmat,
@@ -963,6 +998,7 @@ def gjk_narrowphase(m: Model, d: Data):
       ],
       outputs=[
         d.ncon,
+        d.ncon_hfield,
         d.contact.dist,
         d.contact.pos,
         d.contact.frame,

@@ -22,6 +22,7 @@ MJ_MINVAL = mujoco.mjMINVAL
 MJ_MAXVAL = mujoco.mjMAXVAL
 MJ_MINIMP = mujoco.mjMINIMP  # minimum constraint impedance
 MJ_MAXIMP = mujoco.mjMAXIMP  # maximum constraint impedance
+MJ_MAXCONPAIR = mujoco.mjMAXCONPAIR
 MJ_NREF = mujoco.mjNREF
 MJ_NIMP = mujoco.mjNIMP
 
@@ -852,6 +853,8 @@ class Model:
     sensor_rne_postconstraint: evaluate rne_postconstraint
     mocap_bodyid: id of body for mocap                       (nmocap,)
     mat_rgba: rgba                                           (nworld, nmat, 4)
+    geompair2hfgeompair: geom pair to geom pair with         (ngeom * (ngeom - 1) // 2,)
+                         height field mapping
   """
 
   nq: int
@@ -1120,6 +1123,7 @@ class Model:
   sensor_rne_postconstraint: bool  # warp only
   mocap_bodyid: wp.array(dtype=int)  # warp only
   mat_rgba: wp.array2d(dtype=wp.vec4)
+  geompair2hfgeompair: wp.array(dtype=int)  # warp only
 
 
 @dataclasses.dataclass
@@ -1165,6 +1169,7 @@ class Data:
     njmax: maximum number of constraints                        ()
     solver_niter: number of solver iterations                   (nworld,)
     ncon: number of detected contacts                           ()
+    ncon_hfield: number of contacts per geom pair with hfield   (nworld, nhfieldgeompair)
     ne: number of equality constraints                          ()
     ne_connect: number of equality connect constraints          ()
     ne_weld: number of equality weld constraints                ()
@@ -1280,6 +1285,7 @@ class Data:
   njmax: int  # warp only
   solver_niter: wp.array(dtype=int)
   ncon: wp.array(dtype=int)
+  ncon_hfield: wp.array2d(dtype=int)  # warp only
   ne: wp.array(dtype=int)
   ne_connect: wp.array(dtype=int)  # warp only
   ne_weld: wp.array(dtype=int)  # warp only

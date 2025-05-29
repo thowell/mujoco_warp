@@ -19,8 +19,19 @@ import mujoco
 import numpy as np
 import warp as wp
 
-from . import collision_driver
+from . import math
 from . import types
+
+
+def _hfield_geom_pair(mjm: mujoco.MjModel) -> Tuple[int, np.array]:
+  geom1, geom2 = np.triu_indices(mjm.ngeom, k=1)
+  geom_type_hf = mujoco.mjtGeom.mjGEOM_HFIELD
+  has_hfield = (mjm.geom_type[geom1] == geom_type_hf) | (mjm.geom_type[geom2] == geom_type_hf)
+  nhfieldgeompair = np.sum(has_hfield)
+  geompair2hfgeompair = -1 * np.ones(mjm.ngeom * (mjm.ngeom - 1) // 2, dtype=int)
+  geompair2hfgeompair[has_hfield] = np.arange(nhfieldgeompair)
+
+  return nhfieldgeompair, geompair2hfgeompair
 
 
 def put_model(mjm: mujoco.MjModel) -> types.Model:
@@ -267,9 +278,9 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
     pair_geom2 = mjm.pair_geom2[i]
 
     if pair_geom2 < pair_geom1:
-      pairid = np.int32(collision_driver._upper_tri_index(mjm.ngeom, int(pair_geom2), int(pair_geom1)))
+      pairid = np.int32(math.upper_tri_index(mjm.ngeom, int(pair_geom2), int(pair_geom1)))
     else:
-      pairid = np.int32(collision_driver._upper_tri_index(mjm.ngeom, int(pair_geom1), int(pair_geom2)))
+      pairid = np.int32(math.upper_tri_index(mjm.ngeom, int(pair_geom1), int(pair_geom2)))
 
     nxn_pairid[pairid] = i
 
@@ -610,6 +621,7 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
       ],
     ).any(),
     mat_rgba=create_nmodel_batched_array(mjm.mat_rgba, dtype=wp.vec4),
+    geompair2hfgeompair=wp.array(_hfield_geom_pair(mjm)[1], dtype=int),
   )
 
   return m
@@ -637,6 +649,7 @@ def make_data(mjm: mujoco.MjModel, nworld: int = 1, nconmax: int = -1, njmax: in
     njmax=njmax,
     solver_niter=wp.zeros(nworld, dtype=int),
     ncon=wp.zeros(1, dtype=int),
+    ncon_hfield=wp.zeros((nworld, _hfield_geom_pair(mjm)[0]), dtype=int),  # warp only
     ne=wp.zeros(1, dtype=int),
     ne_connect=wp.zeros(1, dtype=int),  # warp only
     ne_weld=wp.zeros(1, dtype=int),  # warp only
@@ -939,6 +952,7 @@ def put_data(
     njmax=njmax,
     solver_niter=tile(mjd.solver_niter[0]),
     ncon=arr([mjd.ncon * nworld]),
+    ncon_hfield=wp.zeros((nworld, _hfield_geom_pair(mjm)[0]), dtype=int),  # warp only
     ne=arr([mjd.ne * nworld]),
     ne_connect=arr([3 * nworld * np.sum((mjm.eq_type == mujoco.mjtEq.mjEQ_CONNECT) & mjd.eq_active, dtype=int)]),
     ne_weld=arr([6 * nworld * np.sum((mjm.eq_type == mujoco.mjtEq.mjEQ_WELD) & mjd.eq_active, dtype=int)]),
