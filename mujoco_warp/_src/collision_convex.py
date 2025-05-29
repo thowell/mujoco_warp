@@ -39,7 +39,6 @@ FLOAT_MAX = 1e30
 EPS_BEST_COUNT = 12
 MULTI_CONTACT_COUNT = 4
 MULTI_POLYGON_COUNT = 8
-MULTI_TILT_ANGLE = 1.0
 
 matc3 = wp.types.matrix(shape=(EPS_BEST_COUNT, 3), dtype=float)
 vecc3 = wp.types.vector(EPS_BEST_COUNT * 3, dtype=float)
@@ -450,30 +449,37 @@ def _gjk_epa_pipeline(
     geom2: Geom,
     depth: float,
     normal: wp.vec3,
+    ncontact: int,
+    npolygon: int,
+    perturbation_angle: float,
   ):
     # Calculates multiple contact points given the normal from EPA.
     #  1. Calculates the polygon on each shape by tiling the normal
-    #     "MULTI_TILT_ANGLE" degrees in the orthogonal component of the normal.
-    #     The "MULTI_TILT_ANGLE" can be changed to depend on the depth of the
+    #     "perturbation_angle" (radians) in the orthogonal component of the normal.
+    #     The "perturbation_angle" can be changed to depend on the depth of the
     #     contact, in a future version.
-    #  2. The normal is tilted "MULTI_POLYGON_COUNT" times in the directions evenly
-    #    spaced in the orthogonal component of the normal.
+    #  2. The normal is tilted "npolygon" times in the directions evenly
+    #     spaced in the orthogonal component of the normal.
     #    (works well for >= 6, default is 8).
     #  3. The intersection between these two polygons is calculated in 2D space
     #    (complement to the normal). If they intersect, extreme points in both
     #    directions are found. This can be modified to the extremes in the
     #    direction of eigenvectors of the variance of points of each polygon. If
     #    they do not intersect, the closest points of both polygons are found.
+
+    assert ncontact <= MULTI_CONTACT_COUNT
+    assert npolygon <= MULTI_POLYGON_COUNT
+
     if depth < -depth_extension:
       return 0, mat3c()
 
     dir = orthonormal(normal)
     dir2 = wp.cross(normal, dir)
 
-    angle = wp.static(MULTI_TILT_ANGLE * wp.pi / 180.0)
-    c = wp.static(wp.cos(angle))
-    s = wp.static(wp.sin(angle))
-    tc = wp.static(1.0 - c)
+    angle = perturbation_angle
+    c = wp.cos(angle)
+    s = wp.sin(angle)
+    tc = 1.0 - c
 
     v1 = mat3p()
     v2 = mat3p()
@@ -484,9 +490,9 @@ def _gjk_epa_pipeline(
     # in the basis of the contact frame.
     v1count = int(0)
     v2count = int(0)
-    angle_ratio = wp.static(2.0 * wp.pi / float(MULTI_POLYGON_COUNT))
+    angle_ratio = wp.static(2.0 * wp.pi) / float(npolygon)
 
-    for i in range(wp.static(MULTI_POLYGON_COUNT)):
+    for i in range(npolygon):
       angle = angle_ratio * float(i)
       axis = wp.cos(angle) * dir + wp.sin(angle) * dir2
 
@@ -637,7 +643,7 @@ def _gjk_epa_pipeline(
       # from MJX. Deduplicate the points properly.
       last_pt = wp.vec3(FLOAT_MAX, FLOAT_MAX, FLOAT_MAX)
 
-      for k in range(wp.static(MULTI_CONTACT_COUNT)):
+      for k in range(ncontact):
         pt = out[k, 0] * dir + out[k, 1] * dir2 + out[k, 2] * normal
 
         # skip contact points that are too close
@@ -703,7 +709,7 @@ def _gjk_epa_pipeline(
               w = (m1 + (1.0 - alpha) * m2 + alpha * m2b) * 0.5
               var_rx = w[0] * dir + w[1] * dir2 + w[2] * normal
 
-      for k in range(wp.static(MULTI_CONTACT_COUNT)):
+      for k in range(ncontact):
         contact_points[k] = var_rx
 
       contact_count = 1
@@ -854,8 +860,14 @@ def _gjk_epa_pipeline(
       return
 
     # TODO(btaba): split get_multiple_contacts into a separate kernel.
-    # TODO(team): multiccd enablebit
-    count, points = _multiple_contacts(geom1, geom2, depth, normal)
+
+    sphere = int(GeomType.SPHERE.value)
+    ellipsoid = int(GeomType.ELLIPSOID.value)
+    if geom_type[g1] == sphere or geom_type[g1] == ellipsoid or geom_type[g2] == sphere or geom_type[g2] == ellipsoid:
+      # TODO(team): _multiple_contacts should work with perturbation_angle=0
+      count, points = _multiple_contacts(geom1, geom2, depth, normal, 1, 2, 1.0e-5)
+    else:
+      count, points = _multiple_contacts(geom1, geom2, depth, normal, 4, 8, 1.0e-3)
 
     frame = make_frame(normal)
     for i in range(count):
