@@ -60,7 +60,7 @@ VECI2 = vec6(1, 2, 3, 2, 3, 3)
 
 
 @wp.func
-def _gjk_support_geom(geom: Geom, geomtype: int, dir: wp.vec3):
+def gjk_support_geom(geom: Geom, geomtype: int, dir: wp.vec3):
   local_dir = wp.transpose(geom.rot) @ dir
   if geomtype == int(GeomType.SPHERE.value):
     support_pt = geom.pos + geom.size[0] * dir
@@ -126,8 +126,8 @@ def _gjk_support(
   # Negative distance means objects are not intersecting along direction `dir`.
   # Positive distance means objects are intersecting along the given direction `dir`.
 
-  dist1, s1 = _gjk_support_geom(geom1, geomtype1, dir)
-  dist2, s2 = _gjk_support_geom(geom2, geomtype2, -dir)
+  dist1, s1 = gjk_support_geom(geom1, geomtype1, dir)
+  dist2, s2 = gjk_support_geom(geom2, geomtype2, -dir)
 
   support_pt = s1 - s2
   return dist1 + dist2, support_pt
@@ -514,7 +514,7 @@ def _gjk_epa_pipeline(
         mat8 * normal[0] + mat9 * normal[1] + mat10 * normal[2],
       )
 
-      _, p = _gjk_support_geom(geom1, geomtype1, n)
+      _, p = gjk_support_geom(geom1, geomtype1, n)
       v1[v1count] = wp.vec3(wp.dot(p, dir), wp.dot(p, dir2), wp.dot(p, normal))
 
       if i == 0:
@@ -523,7 +523,7 @@ def _gjk_epa_pipeline(
         v1count += 1
 
       n = -n
-      _, p = _gjk_support_geom(geom2, geomtype2, n)
+      _, p = gjk_support_geom(geom2, geomtype2, n)
       v2[v2count] = wp.vec3(wp.dot(p, dir), wp.dot(p, dir2), wp.dot(p, normal))
 
       if i == 0:
