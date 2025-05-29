@@ -51,6 +51,7 @@ def _geom_dist(m: Model, d: Data, gid1: int, gid2: int):
     geom1.pos = geom_xpos_in[0, gid1]
     geom1.rot = geom_xmat_in[0, gid1]
     geom1.size = geom_size[0, gid1]
+    geom1.graphadr = -1
 
     if geom_dataid[gid1] >= 0 and geom_type[gid1] == MESHGEOM:
       dataid = geom_dataid[gid1]
@@ -63,6 +64,7 @@ def _geom_dist(m: Model, d: Data, gid1: int, gid2: int):
     geom2.pos = geom_xpos_in[0, gid2]
     geom2.rot = geom_xmat_in[0, gid2]
     geom2.size = geom_size[0, gid2]
+    geom2.graphadr = -1
 
     if geom_dataid[gid2] >= 0 and geom_type[gid2] == MESHGEOM:
       dataid = geom_dataid[gid2]
