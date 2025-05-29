@@ -449,9 +449,9 @@ def _gjk_epa_pipeline(
     geom2: Geom,
     depth: float,
     normal: wp.vec3,
-    ncontact: int = 4,  # kernel_analyzer: ignore
-    npolygon: int = 8,  # kernel_analyzer: ignore
-    perturbation_angle: float = 1.0e-3,  # kernel_analyzer: ignore
+    ncontact: int,
+    npolygon: int,
+    perturbation_angle: float,
   ):
     # Calculates multiple contact points given the normal from EPA.
     #  1. Calculates the polygon on each shape by tiling the normal
@@ -861,10 +861,10 @@ def _gjk_epa_pipeline(
       and geom_type[g2] != int(GeomType.ELLIPSOID.value)
       and geom_type[g2] != int(GeomType.SPHERE.value)
     ):
-      count, points = _multiple_contacts(geom1, geom2, depth, normal)
+      count, points = _multiple_contacts(geom1, geom2, depth, normal, 4, 8, 1.0e-3)
     else:
       # TODO(team): _multiple_contacts should work with perturbation_angle=0
-      count, points = _multiple_contacts(geom1, geom2, depth, normal, ncontact=1, npolygon=2, perturbation_angle=1.0e-5)
+      count, points = _multiple_contacts(geom1, geom2, depth, normal, 1, 2, 1.0e-5)
 
     frame = make_frame(normal)
     for i in range(count):
