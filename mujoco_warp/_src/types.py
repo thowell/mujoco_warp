@@ -619,6 +619,7 @@ class Model:
     nmocap: number of mocap bodies                           ()
     ngravcomp: number of bodies with nonzero gravcomp        ()
     nM: number of non-zeros in sparse inertia matrix         ()
+    nC: number of non-zeros in sparse reduced dof-dof matrix ()
     ntendon: number of tendons                               ()
     nwrap: number of wrap objects in all tendon paths        ()
     nsensor: number of sensors                               ()
@@ -644,7 +645,7 @@ class Model:
     M_rownnz: number of non-zeros in each row of qM             (nv,)
     M_rowadr: index of each row in qM                           (nv,)
     M_colind: column indices of non-zeros in qM                 (nM,)
-    mapM2M: index mapping from M (legacy) to M (CSR)            (nM)
+    mapM2M: index mapping from M (legacy) to M (CSR)            (nC)
     qM_tiles: tiling configuration
     body_tree: list of body ids by tree level
     body_parentid: id of body's parent                       (nbody,)
@@ -873,6 +874,7 @@ class Model:
   nmocap: int
   ngravcomp: int
   nM: int
+  nC: int
   ntendon: int
   nwrap: int
   nsensor: int
