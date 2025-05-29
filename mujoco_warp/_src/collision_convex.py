@@ -189,6 +189,30 @@ def _expand_polytope(count: int, prev_count: int, dists: vecc3, tris: mat2c3, p:
   return dists, tris
 
 
+@wp.func
+def _max_contacts_height_field(
+  # Model:
+  ngeom: int,
+  geom_type: wp.array(dtype=int),
+  geompair2hfgeompair: wp.array(dtype=int),
+  # In:
+  g1: int,
+  g2: int,
+  worldid: int,
+  # Data out:
+  ncon_hfield_out: wp.array2d(dtype=int),
+):
+  hfield = int(GeomType.HFIELD.value)
+  if geom_type[g1] == hfield or (geom_type[g2] == hfield):
+    geompairid = upper_tri_index(ngeom, g1, g2)
+    hfgeompairid = geompair2hfgeompair[geompairid]
+    hfgeompairid = wp.atomic_add(ncon_hfield_out[worldid], hfgeompairid, 1)
+    if hfgeompairid >= MJ_MAXCONPAIR:
+      return True
+
+  return False
+
+
 def _gjk_epa_pipeline(
   geomtype1: int,
   geomtype2: int,
@@ -859,12 +883,8 @@ def _gjk_epa_pipeline(
     frame = make_frame(normal)
     for i in range(count):
       # limit maximum number of contacts with height field
-      if geomtype1 == int(GeomType.HFIELD.value) or geomtype2 == int(GeomType.HFIELD.value):
-        geompairid = upper_tri_index(ngeom, g1, g2)
-        hfgeompairid = geompair2hfgeompair[geompairid]
-        hfgeompairid = wp.atomic_add(ncon_hfield_out[worldid], hfgeompairid, 1)
-        if hfgeompairid >= MJ_MAXCONPAIR:
-          return
+      if _max_contacts_height_field(ngeom, geom_type, geompair2hfgeompair, g1, g2, worldid, ncon_hfield_out):
+        return
 
       write_contact(
         nconmax_in,
