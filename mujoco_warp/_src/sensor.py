@@ -31,6 +31,7 @@ from .types import JointType
 from .types import Model
 from .types import ObjType
 from .types import SensorType
+from .types import vec6
 from .warp_util import event_scope
 from .warp_util import kernel as nested_kernel
 
@@ -167,6 +168,28 @@ def _cam_projection(
 
   # compute projection
   return wp.vec2f(pixel_coord_hom[0], pixel_coord_hom[1]) / denom
+
+
+@wp.kernel
+def _sensor_rangefinder_init(
+  # Model:
+  sensor_objid: wp.array(dtype=int),
+  sensor_rangefinder_adr: wp.array(dtype=int),
+  # Data in:
+  site_xpos_in: wp.array2d(dtype=wp.vec3),
+  site_xmat_in: wp.array2d(dtype=wp.mat33),
+  # Data out:
+  sensor_rangefinder_pnt_out: wp.array2d(dtype=wp.vec3),
+  sensor_rangefinder_vec_out: wp.array2d(dtype=wp.vec3),
+):
+  worldid, rfid = wp.tid()
+  sensorid = sensor_rangefinder_adr[rfid]
+  objid = sensor_objid[sensorid]
+  site_xpos = site_xpos_in[worldid, objid]
+  site_xmat = site_xmat_in[worldid, objid]
+
+  sensor_rangefinder_pnt_out[worldid, rfid] = site_xpos
+  sensor_rangefinder_vec_out[worldid, rfid] = wp.vec3(site_xmat[0, 2], site_xmat[1, 2], site_xmat[2, 2])
 
 
 @wp.func
@@ -445,6 +468,7 @@ def _sensor_pos(
   sensor_adr: wp.array(dtype=int),
   sensor_cutoff: wp.array(dtype=float),
   sensor_pos_adr: wp.array(dtype=int),
+  rangefinder_sensor_adr: wp.array(dtype=int),
   # Data in:
   time_in: wp.array(dtype=float),
   energy_in: wp.array(dtype=wp.vec2),
@@ -463,6 +487,7 @@ def _sensor_pos(
   subtree_com_in: wp.array2d(dtype=wp.vec3),
   actuator_length_in: wp.array2d(dtype=float),
   ten_length_in: wp.array2d(dtype=float),
+  sensor_rangefinder_dist_in: wp.array2d(dtype=float),
   # Data out:
   sensordata_out: wp.array2d(dtype=float),
 ):
@@ -481,6 +506,9 @@ def _sensor_pos(
       cam_fovy, cam_resolution, cam_sensorsize, cam_intrinsic, site_xpos_in, cam_xpos_in, cam_xmat_in, worldid, objid, refid
     )
     _write_vector(sensor_datatype, sensor_adr, sensor_cutoff, sensorid, 2, vec2, out)
+  elif sensortype == int(SensorType.RANGEFINDER.value):
+    val = sensor_rangefinder_dist_in[worldid, rangefinder_sensor_adr[sensorid]]
+    _write_scalar(sensor_datatype, sensor_adr, sensor_cutoff, sensorid, val, out)
   elif sensortype == int(SensorType.JOINTPOS.value):
     val = _joint_pos(jnt_qposadr, qpos_in, worldid, objid)
     _write_scalar(sensor_datatype, sensor_adr, sensor_cutoff, sensorid, val, out)
@@ -571,6 +599,37 @@ def sensor_pos(m: Model, d: Data):
   if m.opt.disableflags & DisableBit.SENSOR:
     return
 
+  # rangefinder
+  if m.sensor_rangefinder_adr.size > 0:
+    # get position and direction
+    wp.launch(
+      _sensor_rangefinder_init,
+      dim=(d.nworld, m.sensor_rangefinder_adr.size),
+      inputs=[
+        m.sensor_objid,
+        m.sensor_rangefinder_adr,
+        d.site_xpos,
+        d.site_xmat,
+      ],
+      outputs=[
+        d.sensor_rangefinder_pnt,
+        d.sensor_rangefinder_vec,
+      ],
+    )
+
+    # get distances
+    ray.rays(
+      m,
+      d,
+      d.sensor_rangefinder_pnt,
+      d.sensor_rangefinder_vec,
+      vec6(0, 0, 0, 0, 0, 0),
+      True,
+      m.sensor_rangefinder_bodyid,
+      d.sensor_rangefinder_dist,
+      d.sensor_rangefinder_geomid,
+    )
+
   if m.sensor_e_potential:
     energy_pos(m, d)
 
@@ -600,6 +659,7 @@ def sensor_pos(m: Model, d: Data):
       m.sensor_adr,
       m.sensor_cutoff,
       m.sensor_pos_adr,
+      m.rangefinder_sensor_adr,
       d.time,
       d.energy,
       d.qpos,
@@ -617,6 +677,7 @@ def sensor_pos(m: Model, d: Data):
       d.subtree_com,
       d.actuator_length,
       d.ten_length,
+      d.sensor_rangefinder_dist,
     ],
     outputs=[d.sensordata],
   )

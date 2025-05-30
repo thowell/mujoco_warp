@@ -316,6 +316,7 @@ class SensorType(enum.IntEnum):
   Members:
     MAGNETOMETER: magnetometer
     CAMPROJECTION: camera projection
+    RANGEFINDER: scalar distance to nearest geom or site along z-axis
     JOINTPOS: joint position
     TENDONPOS: scalar tendon position
     ACTUATORPOS: actuator position
@@ -352,6 +353,7 @@ class SensorType(enum.IntEnum):
 
   MAGNETOMETER = mujoco.mjtSensor.mjSENS_MAGNETOMETER
   CAMPROJECTION = mujoco.mjtSensor.mjSENS_CAMPROJECTION
+  RANGEFINDER = mujoco.mjtSensor.mjSENS_RANGEFINDER
   JOINTPOS = mujoco.mjtSensor.mjSENS_JOINTPOS
   TENDONPOS = mujoco.mjtSensor.mjSENS_TENDONPOS
   ACTUATORPOS = mujoco.mjtSensor.mjSENS_ACTUATORPOS
@@ -915,11 +917,14 @@ class Model:
     sensor_limitpos_adr: address for limit position sensors  (<=nsensor,)
     sensor_vel_adr: addresses for velocity sensors           (<=nsensor,)
     sensor_acc_adr: addresses for acceleration sensors       (<=nsensor,)
+    sensor_rangefinder_adr: addresses for rangefinder sensors(<=nsensor,)
+    rangefinder_sensor_adr: map sensor id to rangefinder id  (<=nsensor,)
                     (excluding touch sensors)
     sensor_touch_adr: addresses for touch sensors            (<=nsensor,)
     sensor_e_potential: evaluate energy_pos
     sensor_subtree_vel: evaluate subtree_vel
     sensor_rne_postconstraint: evaluate rne_postconstraint
+    sensor_rangefinder_bodyid: bodyid for rangefinder        (nrangefinder,)
     mocap_bodyid: id of body for mocap                       (nmocap,)
     mat_rgba: rgba                                           (nworld, nmat, 4)
     geompair2hfgeompair: geom pair to geom pair with         (ngeom * (ngeom - 1) // 2,)
@@ -1189,10 +1194,13 @@ class Model:
   sensor_limitpos_adr: wp.array(dtype=int)  # warp only
   sensor_vel_adr: wp.array(dtype=int)  # warp only
   sensor_acc_adr: wp.array(dtype=int)  # warp only
+  sensor_rangefinder_adr: wp.array(dtype=int)  # warp only
+  rangefinder_sensor_adr: wp.array(dtype=int)  # warp only
   sensor_touch_adr: wp.array(dtype=int)  # warp only
   sensor_e_potential: bool  # warp only
   sensor_subtree_vel: bool  # warp only
   sensor_rne_postconstraint: bool  # warp only
+  sensor_rangefinder_bodyid: wp.array(dtype=int)  # warp only
   mocap_bodyid: wp.array(dtype=int)  # warp only
   mat_rgba: wp.array2d(dtype=wp.vec4)
   geompair2hfgeompair: wp.array(dtype=int)  # warp only
@@ -1352,6 +1360,11 @@ class Data:
     wrap_xpos: Cartesian 3D points in all paths                 (nworld, nwrap, 6)
     wrap_geom_xpos: Cartesian 3D points for geom wrap points    (nworld, <=nwrap, 6)
     sensordata: sensor data array                               (nsensordata,)
+    sensor_rangefinder_pnt: points for rangefinder              (nworld, nrangefinder, 3)
+    sensor_rangefinder_vec: directions for rangefinder          (nworld, nrangefinder, 3)
+    sensor_rangefinder_dist: distances for rangefinder          (nworld, nrangefinder)
+    sensor_rangefinder_geomid: geomids for rangefinder          (nworld, nrangefinder)
+    ray_bodyexclude: id of body to exclude from ray computation ()
     ray_dist: ray distance to nearest geom                      (nworld, 1)
     ray_geomid: id of geom that intersects with ray             (nworld, 1)
   """
@@ -1484,7 +1497,12 @@ class Data:
 
   # sensors
   sensordata: wp.array2d(dtype=float)
+  sensor_rangefinder_pnt: wp.array2d(dtype=wp.vec3)  # warp only
+  sensor_rangefinder_vec: wp.array2d(dtype=wp.vec3)  # warp only
+  sensor_rangefinder_dist: wp.array2d(dtype=float)  # warp only
+  sensor_rangefinder_geomid: wp.array2d(dtype=int)  # warp only
 
   # ray
+  ray_bodyexclude: wp.array(dtype=int)  # warp only
   ray_dist: wp.array2d(dtype=float)  # warp only
   ray_geomid: wp.array2d(dtype=int)  # warp only
