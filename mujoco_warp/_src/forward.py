@@ -1046,7 +1046,7 @@ def fwd_acceleration(m: Model, d: Data):
 @event_scope
 def forward(m: Model, d: Data):
   """Forward dynamics."""
-  energy = m.opt.enableflags & EnableBit.Energy
+  energy = m.opt.enableflags & EnableBit.ENERGY
 
   fwd_position(m, d)
   sensor.sensor_pos(m, d)
