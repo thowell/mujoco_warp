@@ -629,7 +629,7 @@ def sensor_pos(m: Model, d: Data):
       d.sensor_rangefinder_dist,
       d.sensor_rangefinder_geomid,
     )
-    
+
   if m.sensor_e_potential:
     energy_pos(m, d)
 
