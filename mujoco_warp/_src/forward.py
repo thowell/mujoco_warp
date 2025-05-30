@@ -1055,7 +1055,7 @@ def forward(m: Model, d: Data):
     if m.sensor_e_potential == 0:  # not computed by sensor
       sensor.energy_pos(m, d)
   else:
-    d.energy.zeros_()
+    d.energy.zero_()
 
   fwd_velocity(m, d)
   sensor.sensor_vel(m, d)
