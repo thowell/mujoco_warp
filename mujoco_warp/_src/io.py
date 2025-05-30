@@ -872,6 +872,9 @@ def make_data(mjm: mujoco.MjModel, nworld: int = 1, nconmax: int = -1, njmax: in
     sensor_rangefinder_vec=wp.zeros((nworld, nrangefinder), dtype=wp.vec3),
     sensor_rangefinder_dist=wp.zeros((nworld, nrangefinder), dtype=float),
     sensor_rangefinder_geomid=wp.zeros((nworld, nrangefinder), dtype=int),
+    # ray
+    ray_dist=wp.zeros((nworld, 1), dtype=float),
+    ray_geomid=wp.zeros((nworld, 1), dtype=int),
   )
 
 
@@ -1180,6 +1183,9 @@ def put_data(
     sensor_rangefinder_vec=wp.zeros((nworld, nrangefinder), dtype=wp.vec3),
     sensor_rangefinder_dist=wp.zeros((nworld, nrangefinder), dtype=float),
     sensor_rangefinder_geomid=wp.zeros((nworld, nrangefinder), dtype=int),
+    # ray
+    ray_dist=wp.zeros((nworld, 1), dtype=float),
+    ray_geomid=wp.zeros((nworld, 1), dtype=int),
   )
 
 

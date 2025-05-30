@@ -1360,6 +1360,8 @@ class Data:
     sensor_rangefinder_vec: directions for rangefinder          (nworld, nrangefinder, 3)
     sensor_rangefinder_dist: distances for rangefinder          (nworld, nrangefinder)
     sensor_rangefinder_geomid: geomids for rangefinder          (nworld, nrangefinder)
+    ray_dist: ray distance to nearest geom                      (nworld, 1)
+    ray_geomid: id of geom that intersects with ray             (nworld, 1)
   """
 
   nworld: int  # warp only
@@ -1494,3 +1496,7 @@ class Data:
   sensor_rangefinder_vec: wp.array2d(dtype=wp.vec3)  # warp only
   sensor_rangefinder_dist: wp.array2d(dtype=float)  # warp only
   sensor_rangefinder_geomid: wp.array2d(dtype=int)  # warp only
+
+  # ray
+  ray_dist: wp.array2d(dtype=float)  # warp only
+  ray_geomid: wp.array2d(dtype=int)  # warp only
