@@ -27,6 +27,37 @@ MJ_NREF = mujoco.mjNREF
 MJ_NIMP = mujoco.mjNIMP
 
 
+# TODO(team): add check that all wp.launch_tiled 'block_dim' settings are configurable
+class BlockDim:
+  """
+  Block dimension 'block_dim' settings for wp.launch_tiled.
+
+  TODO(team): experimental and may be removed
+  """
+
+  # collision_box
+  box_box: int = 32
+  # forward
+  euler_dense: int = 32
+  implicit_actuator_qderiv: wp.vec2i = wp.vec2i(64, 256)
+  actuator_velocity_sparse: int = 32
+  actuator_velocity_dense: int = 32
+  tendon_velocity: int = 32
+  qfrc_actuator: int = 32
+  # ray
+  ray: int = 64
+  # sensor
+  energy_vel_kinetic: int = 32
+  # smooth
+  cholesky_factorize: int = 32
+  cholesky_solve: int = 32
+  cholesky_factorize_solve: int = 32
+  # solver
+  update_gradient_cholesky: int = 32
+  # support
+  mul_m_dense: int = 32
+
+
 class CamLightType(enum.IntEnum):
   """Type of camera light.
 
@@ -255,6 +286,30 @@ class SolverType(enum.IntEnum):
   # unsupported: PGS
 
 
+class ConstraintType(enum.IntEnum):
+  """Type of constraint.
+
+  Members:
+    EQUALITY: equality constraint
+    FRICTION_DOF: dof friction
+    FRICTION_TENDON: tendon friction
+    LIMIT_JOINT: joint limit
+    LIMIT_TENDON: tendon limit
+    CONTACT_FRICTIONLESS: frictionless contact
+    CONTACT_PYRAMIDAL: frictional contact, pyramidal friction cone
+    CONTACT_ELLIPTIC: frictional contact, elliptic friction cone
+  """
+
+  EQUALITY = mujoco.mjtConstraint.mjCNSTR_EQUALITY
+  FRICTION_DOF = mujoco.mjtConstraint.mjCNSTR_FRICTION_DOF
+  FRICTION_TENDON = mujoco.mjtConstraint.mjCNSTR_FRICTION_TENDON
+  LIMIT_JOINT = mujoco.mjtConstraint.mjCNSTR_LIMIT_JOINT
+  LIMIT_TENDON = mujoco.mjtConstraint.mjCNSTR_LIMIT_TENDON
+  CONTACT_FRICTIONLESS = mujoco.mjtConstraint.mjCNSTR_CONTACT_FRICTIONLESS
+  CONTACT_PYRAMIDAL = mujoco.mjtConstraint.mjCNSTR_CONTACT_PYRAMIDAL
+  CONTACT_ELLIPTIC = mujoco.mjtConstraint.mjCNSTR_CONTACT_ELLIPTIC
+
+
 class SensorType(enum.IntEnum):
   """Type of sensor.
 
@@ -265,6 +320,8 @@ class SensorType(enum.IntEnum):
     TENDONPOS: scalar tendon position
     ACTUATORPOS: actuator position
     BALLQUAT: ball joint orientation
+    JOINTLIMITPOS: joint limit distance-margin
+    TENDONLIMITPOS: tendon limit distance-margin
     FRAMEPOS: frame position
     FRAMEXAXIS: frame x-axis
     FRAMEYAXIS: frame y-axis
@@ -298,6 +355,8 @@ class SensorType(enum.IntEnum):
   TENDONPOS = mujoco.mjtSensor.mjSENS_TENDONPOS
   ACTUATORPOS = mujoco.mjtSensor.mjSENS_ACTUATORPOS
   BALLQUAT = mujoco.mjtSensor.mjSENS_BALLQUAT
+  JOINTLIMITPOS = mujoco.mjtSensor.mjSENS_JOINTLIMITPOS
+  TENDONLIMITPOS = mujoco.mjtSensor.mjSENS_TENDONLIMITPOS
   FRAMEPOS = mujoco.mjtSensor.mjSENS_FRAMEPOS
   FRAMEXAXIS = mujoco.mjtSensor.mjSENS_FRAMEXAXIS
   FRAMEYAXIS = mujoco.mjtSensor.mjSENS_FRAMEYAXIS
@@ -428,6 +487,7 @@ class Option:
     wind: wind (for lift, drag, and viscosity)
     density: density of medium
     viscosity: viscosity of medium
+    graph_conditional: flag to use cuda graph conditional, should be False when JAX is used
   """
 
   timestep: float
@@ -452,6 +512,7 @@ class Option:
   wind: wp.vec3
   density: float
   viscosity: float
+  graph_conditional: bool  # warp only
 
 
 @dataclasses.dataclass
@@ -471,11 +532,13 @@ class Constraint:
 
   Attributes:
     worldid: world id                                 (njmax,)
+    type: constraint type (mjtConstraint)             (njmax,)
     id: id of object of specific type                 (njmax,)
     J: constraint Jacobian                            (njmax, nv)
     pos: constraint position (equality, contact)      (njmax,)
     margin: inclusion margin (contact)                (njmax,)
     D: constraint mass                                (njmax,)
+    vel: velocity in constraint space: J*qvel         (njmax,)
     aref: reference pseudo-acceleration               (njmax,)
     frictionloss: frictionloss (friction)             (njmax,)
     force: constraint force in constraint space       (njmax,)
@@ -525,11 +588,13 @@ class Constraint:
   """
 
   worldid: wp.array(dtype=int)
+  type: wp.array(dtype=int)
   id: wp.array(dtype=int)
   J: wp.array2d(dtype=float)
   pos: wp.array(dtype=float)
   margin: wp.array(dtype=float)
   D: wp.array(dtype=float)
+  vel: wp.array(dtype=float)
   aref: wp.array(dtype=float)
   frictionloss: wp.array(dtype=float)
   force: wp.array(dtype=float)
@@ -845,6 +910,7 @@ class Model:
     sensor_adr: address in sensor array                      (nsensor,)
     sensor_cutoff: cutoff for real and positive; 0: ignore   (nsensor,)
     sensor_pos_adr: addresses for position sensors           (<=nsensor,)
+    sensor_limitpos_adr: address for limit position sensors  (<=nsensor,)
     sensor_vel_adr: addresses for velocity sensors           (<=nsensor,)
     sensor_acc_adr: addresses for acceleration sensors       (<=nsensor,)
                     (excluding touch sensors)
@@ -855,6 +921,7 @@ class Model:
     mat_rgba: rgba                                           (nworld, nmat, 4)
     geompair2hfgeompair: geom pair to geom pair with         (ngeom * (ngeom - 1) // 2,)
                          height field mapping
+    block_dim: BlockDim
   """
 
   nq: int
@@ -1116,6 +1183,7 @@ class Model:
   sensor_adr: wp.array(dtype=int)
   sensor_cutoff: wp.array(dtype=float)
   sensor_pos_adr: wp.array(dtype=int)  # warp only
+  sensor_limitpos_adr: wp.array(dtype=int)  # warp only
   sensor_vel_adr: wp.array(dtype=int)  # warp only
   sensor_acc_adr: wp.array(dtype=int)  # warp only
   sensor_touch_adr: wp.array(dtype=int)  # warp only
@@ -1124,6 +1192,7 @@ class Model:
   mocap_bodyid: wp.array(dtype=int)  # warp only
   mat_rgba: wp.array2d(dtype=wp.vec4)
   geompair2hfgeompair: wp.array(dtype=int)  # warp only
+  block_dim: BlockDim  # warp only
 
 
 @dataclasses.dataclass
@@ -1178,6 +1247,7 @@ class Data:
     nf: number of friction constraints                          ()
     nl: number of limit constraints                             ()
     nefc: number of constraints                                 (1,)
+    nsolving: number of unconverged worlds                      (1,)
     time: simulation time                                       (nworld,)
     energy: potential, kinetic energy                           (nworld, 2)
     qpos: position                                              (nworld, nq)
@@ -1294,6 +1364,7 @@ class Data:
   nf: wp.array(dtype=int)
   nl: wp.array(dtype=int)
   nefc: wp.array(dtype=int)
+  nsolving: wp.array(dtype=int)  # warp only
   time: wp.array(dtype=float)
   energy: wp.array(dtype=wp.vec2)
   qpos: wp.array2d(dtype=float)

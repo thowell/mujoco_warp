@@ -15,7 +15,7 @@
 
 import warp as wp
 
-from .collision_hfield import get_hfield_prism_vertex
+from .collision_hfield import hfield_prism_vertex
 from .collision_primitive import Geom
 from .collision_primitive import _geom
 from .collision_primitive import contact_params
@@ -104,7 +104,7 @@ def gjk_support_geom(geom: Geom, geomtype: int, dir: wp.vec3):
   elif geomtype == int(GeomType.HFIELD.value):
     max_dist = float(FLOAT_MIN)
     for i in range(6):
-      vert = get_hfield_prism_vertex(geom.hfprism, i)
+      vert = hfield_prism_vertex(geom.hfprism, i)
       dist = wp.dot(vert, local_dir)
       if dist > max_dist:
         max_dist = dist

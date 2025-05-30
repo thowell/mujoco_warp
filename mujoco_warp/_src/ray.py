@@ -701,7 +701,6 @@ def ray(
   nrays = pnt.shape[0]
   dist = wp.zeros((d.nworld, nrays), dtype=float)
   closest_hit_geom_id = wp.zeros((d.nworld, nrays), dtype=int)
-  num_threads = 64
 
   # Create default geomgroup if None is provided
   has_geomgroup = geomgroup is not None
@@ -739,6 +738,6 @@ def ray(
       dist,
       closest_hit_geom_id,
     ],
-    block_dim=num_threads,
+    block_dim=m.block_dim.ray,
   )
   return dist, closest_hit_geom_id

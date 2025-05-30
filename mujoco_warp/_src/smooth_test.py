@@ -327,6 +327,31 @@ class SmoothTest(parameterized.TestCase):
 
   # TODO(team): test factor_solve_i
 
+  def test_solve_LD_sparse(self):
+    mjm, mjd, m, d = test_util.fixture(
+      xml="""
+    <mujoco>
+      <option jacobian="sparse"/>
+      <worldbody>
+        <body>
+          <geom type="sphere" size=".1"/>
+          <freejoint/>
+        </body>
+      </worldbody>
+    </mujoco>
+    """
+    )
+
+    qM = np.zeros((mjm.nv, mjm.nv))
+    mujoco.mj_fullM(mjm, qM, mjd.qM)
+
+    res = wp.zeros((1, mjm.nv), dtype=float)
+    vec = wp.ones((1, mjm.nv), dtype=float)
+
+    mjwarp._src.smooth.solve_LD(m, d, d.qLD, d.qLDiagInv, res, vec)
+
+    _assert_eq(res.numpy()[0], np.linalg.solve(qM, vec.numpy()[0]), "qM \\ 1")
+
 
 if __name__ == "__main__":
   wp.init()

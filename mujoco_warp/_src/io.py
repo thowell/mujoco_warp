@@ -120,6 +120,9 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
   qLD_updates, dof_depth = {}, np.zeros(mjm.nv, dtype=int) - 1
 
   for k in range(mjm.nv):
+    # skip diagonal rows
+    if mjd.M_rownnz[k] == 1:
+      continue
     dof_depth[k] = dof_depth[mjm.dof_parentid[k]] + 1
     i = mjm.dof_parentid[k]
     diag_k = mjd.M_rowadr[k] + mjd.M_rownnz[k] - 1
@@ -308,7 +311,7 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
     nflexelem=mjm.nflexelem,
     nflexelemdata=mjm.nflexelemdata,
     nexclude=mjm.nexclude,
-    neq=mjm.nM,
+    neq=mjm.neq,
     nmocap=mjm.nmocap,
     ngravcomp=mjm.ngravcomp,
     nM=mjm.nM,
@@ -345,6 +348,7 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
       epa_iterations=12,
       epa_exact_neg_distance=wp.bool(False),
       depth_extension=0.1,
+      graph_conditional=True,
     ),
     stat=types.Statistic(
       meaninertia=mjm.stat.meaninertia,
@@ -591,7 +595,17 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
     sensor_adr=wp.array(mjm.sensor_adr, dtype=int),
     sensor_cutoff=wp.array(mjm.sensor_cutoff, dtype=float),
     sensor_pos_adr=wp.array(
-      np.nonzero(mjm.sensor_needstage == mujoco.mjtStage.mjSTAGE_POS)[0],
+      np.nonzero(
+        (mjm.sensor_needstage == mujoco.mjtStage.mjSTAGE_POS)
+        & (mjm.sensor_type != mujoco.mjtSensor.mjSENS_JOINTLIMITPOS)
+        & (mjm.sensor_type != mujoco.mjtSensor.mjSENS_TENDONLIMITPOS)
+      )[0],
+      dtype=int,
+    ),
+    sensor_limitpos_adr=wp.array(
+      np.nonzero(
+        (mjm.sensor_type == mujoco.mjtSensor.mjSENS_JOINTLIMITPOS) | (mjm.sensor_type == mujoco.mjtSensor.mjSENS_TENDONLIMITPOS)
+      )[0],
       dtype=int,
     ),
     sensor_vel_adr=wp.array(
@@ -622,6 +636,7 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
     ).any(),
     mat_rgba=create_nmodel_batched_array(mjm.mat_rgba, dtype=wp.vec4),
     geompair2hfgeompair=wp.array(_hfield_geom_pair(mjm)[1], dtype=int),
+    block_dim=types.BlockDim(),
   )
 
   return m
@@ -658,6 +673,7 @@ def make_data(mjm: mujoco.MjModel, nworld: int = 1, nconmax: int = -1, njmax: in
     nf=wp.zeros(1, dtype=int),
     nl=wp.zeros(1, dtype=int),
     nefc=wp.zeros(1, dtype=int),
+    nsolving=wp.zeros(1, dtype=int),  # warp only
     time=wp.zeros(nworld, dtype=float),
     energy=wp.zeros(nworld, dtype=wp.vec2),
     qpos=wp.zeros((nworld, mjm.nq), dtype=float),
@@ -739,11 +755,13 @@ def make_data(mjm: mujoco.MjModel, nworld: int = 1, nconmax: int = -1, njmax: in
     ),
     efc=types.Constraint(
       worldid=wp.zeros((njmax,), dtype=int),
+      type=wp.zeros((njmax,), dtype=int),
       id=wp.zeros((njmax,), dtype=int),
       J=wp.zeros((njmax, mjm.nv), dtype=float),
       pos=wp.zeros((njmax,), dtype=float),
       margin=wp.zeros((njmax,), dtype=float),
       D=wp.zeros((njmax,), dtype=float),
+      vel=wp.zeros((njmax,), dtype=float),
       aref=wp.zeros((njmax,), dtype=float),
       frictionloss=wp.zeros((njmax,), dtype=float),
       force=wp.zeros((njmax,), dtype=float),
@@ -961,6 +979,7 @@ def put_data(
     nf=arr([mjd.nf * nworld]),
     nl=arr([mjd.nl * nworld]),
     nefc=arr([mjd.nefc * nworld]),
+    nsolving=arr([nworld]),
     time=arr(mjd.time * np.ones(nworld)),
     energy=tile(mjd.energy, dtype=wp.vec2),
     qpos=tile(mjd.qpos),
@@ -1039,11 +1058,13 @@ def put_data(
     ),
     efc=types.Constraint(
       worldid=arr(efc_worldid),
+      type=padtile(mjd.efc_type, njmax),
       id=padtile(mjd.efc_id, njmax),
       J=padtile(efc_J, njmax),
       pos=padtile(mjd.efc_pos, njmax),
       margin=padtile(mjd.efc_margin, njmax),
       D=padtile(mjd.efc_D, njmax),
+      vel=padtile(mjd.efc_vel, njmax),
       aref=padtile(mjd.efc_aref, njmax),
       frictionloss=padtile(mjd.efc_frictionloss, njmax),
       force=padtile(mjd.efc_force, njmax),
