@@ -308,7 +308,7 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
     nflexelem=mjm.nflexelem,
     nflexelemdata=mjm.nflexelemdata,
     nexclude=mjm.nexclude,
-    neq=mjm.nM,
+    neq=mjm.neq,
     nmocap=mjm.nmocap,
     ngravcomp=mjm.ngravcomp,
     nM=mjm.nM,
