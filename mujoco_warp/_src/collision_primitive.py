@@ -15,7 +15,7 @@
 
 import warp as wp
 
-from .collision_hfield import get_hfield_triangle_prism
+from .collision_hfield import hfield_triangle_prism
 from .math import closest_segment_point
 from .math import closest_segment_to_segment_points
 from .math import make_frame
@@ -103,7 +103,7 @@ def _geom(
 
   # If geom is HFIELD triangle, compute triangle prism verts
   if geom_type[gid] == int(GeomType.HFIELD.value):
-    geom.hfprism = get_hfield_triangle_prism(
+    geom.hfprism = hfield_triangle_prism(
       geom_dataid, hfield_adr, hfield_nrow, hfield_ncol, hfield_size, hfield_data, gid, hftri_index
     )
 
