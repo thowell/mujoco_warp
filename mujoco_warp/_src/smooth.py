@@ -15,7 +15,6 @@
 
 import mujoco
 import warp as wp
-from packaging import version
 
 from . import math
 from . import support
@@ -30,8 +29,6 @@ from .types import ObjType
 from .types import TileSet
 from .types import TrnType
 from .types import WrapType
-from .types import array2df
-from .types import array3df
 from .types import vec5
 from .types import vec10
 from .types import vec11
@@ -842,66 +839,13 @@ def crb(m: Model, d: Data):
 
 
 @wp.kernel
-def _qLD_acc_legacy(
-  # Model:
-  dof_Madr: wp.array(dtype=int),
-  # In:
-  qLD_updates_: wp.array(dtype=wp.vec3i),
-  L_in: array3df,
-  # Out:
-  L_out: array3df,
-):
-  worldid, nodeid = wp.tid()
-  update = qLD_updates_[nodeid]
-  i, k, Madr_ki = update[0], update[1], update[2]
-  Madr_i = dof_Madr[i]
-  # tmp = M(k,i) / M(k,k)
-  tmp = L_in[worldid, 0, Madr_ki] / L_in[worldid, 0, dof_Madr[k]]
-  for j in range(dof_Madr[i + 1] - Madr_i):
-    # M(i,j) -= M(k,j) * tmp
-    wp.atomic_sub(L_out[worldid, 0], Madr_i + j, L_in[worldid, 0, Madr_ki + j] * tmp)
-  # M(k,i) = tmp
-  L_out[worldid, 0, Madr_ki] = tmp
-
-
-@wp.kernel
-def _qLDiag_div_legacy(
-  # Model:
-  dof_Madr: wp.array(dtype=int),
-  # In:
-  L_in: array3df,
-  # Out:
-  D_out: array2df,
-):
-  worldid, dofid = wp.tid()
-  D_out[worldid, dofid] = 1.0 / L_in[worldid, 0, dof_Madr[dofid]]
-
-
-def _factor_i_sparse_legacy(m: Model, d: Data, M: array3df, L: array3df, D: array2df):
-  """Sparse L'*D*L factorizaton of inertia-like matrix M, assumed spd."""
-
-  wp.copy(L, M)
-
-  for i in reversed(range(len(m.qLD_updates))):
-    qlD_updates = m.qLD_updates[i]
-    wp.launch(
-      _qLD_acc_legacy,
-      dim=(d.nworld, qlD_updates.size),
-      inputs=[m.dof_Madr, qlD_updates, L],
-      outputs=[L],
-    )
-
-  wp.launch(_qLDiag_div_legacy, dim=(d.nworld, m.nv), inputs=[m.dof_Madr, L], outputs=[D])
-
-
-@wp.kernel
 def _copy_CSR(
   # Model:
   mapM2M: wp.array(dtype=int),
   # In:
-  M_in: array3df,
+  M_in: wp.array3d(dtype=float),
   # Out:
-  L_out: array3df,
+  L_out: wp.array3d(dtype=float),
 ):
   worldid, ind = wp.tid()
   L_out[worldid, 0, ind] = M_in[worldid, 0, mapM2M[ind]]
@@ -914,9 +858,9 @@ def _qLD_acc(
   M_rowadr: wp.array(dtype=int),
   # In:
   qLD_updates_: wp.array(dtype=wp.vec3i),
-  L_in: array3df,
+  L_in: wp.array3d(dtype=float),
   # Out:
-  L_out: array3df,
+  L_out: wp.array3d(dtype=float),
 ):
   worldid, nodeid = wp.tid()
   update = qLD_updates_[nodeid]
@@ -938,21 +882,18 @@ def _qLDiag_div(
   M_rownnz: wp.array(dtype=int),
   M_rowadr: wp.array(dtype=int),
   # In:
-  L_in: array3df,
+  L_in: wp.array3d(dtype=float),
   # Out:
-  D_out: array2df,
+  D_out: wp.array2d(dtype=float),
 ):
   worldid, dofid = wp.tid()
   diag_i = M_rowadr[dofid] + M_rownnz[dofid] - 1  # Address of diagonal element of i
   D_out[worldid, dofid] = 1.0 / L_in[worldid, 0, diag_i]
 
 
-def _factor_i_sparse(m: Model, d: Data, M: array3df, L: array3df, D: array2df):
+def _factor_i_sparse(m: Model, d: Data, M: wp.array3d(dtype=float), L: wp.array3d(dtype=float), D: wp.array2d(dtype=float)):
   """Sparse L'*D*L factorizaton of inertia-like matrix M, assumed spd."""
-  if version.parse(mujoco.__version__) <= version.parse("3.2.7"):
-    return _factor_i_sparse_legacy(m, d, M, L, D)
-
-  wp.launch(_copy_CSR, dim=(d.nworld, m.nM), inputs=[m.mapM2M, M], outputs=[L])
+  wp.launch(_copy_CSR, dim=(d.nworld, m.nC), inputs=[m.mapM2M, M], outputs=[L])
 
   for i in reversed(range(len(m.qLD_updates))):
     qLD_updates = m.qLD_updates[i]
@@ -966,11 +907,11 @@ def _factor_i_sparse(m: Model, d: Data, M: array3df, L: array3df, D: array2df):
   wp.launch(_qLDiag_div, dim=(d.nworld, m.nv), inputs=[m.M_rownnz, m.M_rowadr, L], outputs=[D])
 
 
-def _tile_cholesky(tile: TileSet):
+def _tile_cholesky_factorize(tile: TileSet):
   """Returns a kernel for dense Cholesky factorizaton of a tile."""
 
   @nested_kernel
-  def cholesky(
+  def cholesky_factorize(
     # Data In:
     qM_in: wp.array3d(dtype=float),
     # In:
@@ -986,21 +927,18 @@ def _tile_cholesky(tile: TileSet):
     L_tile = wp.tile_cholesky(M_tile)
     wp.tile_store(L_out[worldid], L_tile, offset=(dofid, dofid))
 
-  return cholesky
+  return cholesky_factorize
 
 
 def _factor_i_dense(m: Model, d: Data, M: wp.array, L: wp.array):
   """Dense Cholesky factorizaton of inertia-like matrix M, assumed spd."""
-  # TODO(team): develop heuristic for block dim, or make configurable
-  block_dim = 32
-
   for tile in m.qM_tiles:
     wp.launch_tiled(
-      _tile_cholesky(tile),
+      _tile_cholesky_factorize(tile),
       dim=(d.nworld, tile.adr.size),
       inputs=[M, tile.adr],
       outputs=[L],
-      block_dim=block_dim,
+      block_dim=m.block_dim.cholesky_factorize,
     )
 
 
@@ -1559,8 +1497,8 @@ def _transmission(
   ten_length_in: wp.array2d(dtype=float),
   ten_J_in: wp.array3d(dtype=float),
   # Out:
-  length_out: array2df,
-  moment_out: array3df,
+  length_out: wp.array2d(dtype=float),
+  moment_out: wp.array3d(dtype=float),
 ):
   worldid, actid = wp.tid()
   trntype = actuator_trntype[actid]
@@ -1662,10 +1600,10 @@ def transmission(m: Model, d: Data):
 @wp.kernel
 def solve_LD_sparse_x_acc_up(
   # In:
-  L: array3df,
+  L: wp.array3d(dtype=float),
   qLD_updates_: wp.array(dtype=wp.vec3i),
   # Out:
-  x: array2df,
+  x: wp.array2d(dtype=float),
 ):
   worldid, nodeid = wp.tid()
   update = qLD_updates_[nodeid]
@@ -1676,9 +1614,9 @@ def solve_LD_sparse_x_acc_up(
 @wp.kernel
 def solve_LD_sparse_qLDiag_mul(
   # In:
-  D: array2df,
+  D: wp.array2d(dtype=float),
   # Out:
-  out: array2df,
+  out: wp.array2d(dtype=float),
 ):
   worldid, dofid = wp.tid()
   out[worldid, dofid] *= D[worldid, dofid]
@@ -1687,10 +1625,10 @@ def solve_LD_sparse_qLDiag_mul(
 @wp.kernel
 def solve_LD_sparse_x_acc_down(
   # In:
-  L: array3df,
+  L: wp.array3d(dtype=float),
   qLD_updates_: wp.array(dtype=wp.vec3i),
   # Out:
-  x: array2df,
+  x: wp.array2d(dtype=float),
 ):
   worldid, nodeid = wp.tid()
   update = qLD_updates_[nodeid]
@@ -1698,7 +1636,14 @@ def solve_LD_sparse_x_acc_down(
   wp.atomic_sub(x[worldid], k, L[worldid, 0, Madr_ki] * x[worldid, i])
 
 
-def _solve_LD_sparse(m: Model, d: Data, L: array3df, D: array2df, x: array2df, y: array2df):
+def _solve_LD_sparse(
+  m: Model,
+  d: Data,
+  L: wp.array3d(dtype=float),
+  D: wp.array2d(dtype=float),
+  x: wp.array2d(dtype=float),
+  y: wp.array2d(dtype=float),
+):
   """Computes sparse backsubstitution: x = inv(L'*D*L)*y"""
 
   wp.copy(x, y)
@@ -1711,17 +1656,17 @@ def _solve_LD_sparse(m: Model, d: Data, L: array3df, D: array2df, x: array2df, y
     wp.launch(solve_LD_sparse_x_acc_down, dim=(d.nworld, qLD_updates.size), inputs=[L, qLD_updates], outputs=[x])
 
 
-def _tile_cho_solve(tile: TileSet):
+def _tile_cholesky_solve(tile: TileSet):
   """Returns a kernel for dense Cholesky backsubstitution of a tile."""
 
   @nested_kernel
-  def cho_solve(
+  def cholesky_solve(
     # In:
-    L: array3df,
-    y: array2df,
+    L: wp.array3d(dtype=float),
+    y: wp.array2d(dtype=float),
     adr: wp.array(dtype=int),
     # Out:
-    x: array2df,
+    x: wp.array2d(dtype=float),
   ):
     worldid, nodeid = wp.tid()
     TILE_SIZE = wp.static(tile.size)
@@ -1732,26 +1677,29 @@ def _tile_cho_solve(tile: TileSet):
     x_slice = wp.tile_cholesky_solve(L_tile, y_slice)
     wp.tile_store(x[worldid], x_slice, offset=(dofid,))
 
-  return cho_solve
+  return cholesky_solve
 
 
-def _solve_LD_dense(m: Model, d: Data, L: array3df, x: array2df, y: array2df):
+def _solve_LD_dense(m: Model, d: Data, L: wp.array3d(dtype=float), x: wp.array2d(dtype=float), y: wp.array2d(dtype=float)):
   """Computes dense backsubstitution: x = inv(L'*L)*y"""
-
-  # TODO(team): develop heuristic for block dim, or make configurable
-  block_dim = 32
-
   for tile in m.qM_tiles:
     wp.launch_tiled(
-      _tile_cho_solve(tile),
+      _tile_cholesky_solve(tile),
       dim=(d.nworld, tile.adr.size),
       inputs=[L, y, tile.adr],
       outputs=[x],
-      block_dim=block_dim,
+      block_dim=m.block_dim.cholesky_solve,
     )
 
 
-def solve_LD(m: Model, d: Data, L: array3df, D: array2df, x: array2df, y: array2df):
+def solve_LD(
+  m: Model,
+  d: Data,
+  L: wp.array3d(dtype=float),
+  D: wp.array2d(dtype=float),
+  x: wp.array2d(dtype=float),
+  y: wp.array2d(dtype=float),
+):
   """Computes backsubstitution: x = qLD * y."""
 
   if m.opt.is_sparse:
@@ -1761,22 +1709,22 @@ def solve_LD(m: Model, d: Data, L: array3df, D: array2df, x: array2df, y: array2
 
 
 @event_scope
-def solve_m(m: Model, d: Data, x: array2df, y: array2df):
+def solve_m(m: Model, d: Data, x: wp.array2d(dtype=float), y: wp.array2d(dtype=float)):
   """Computes backsubstitution: x = qLD * y."""
   solve_LD(m, d, d.qLD, d.qLDiagInv, x, y)
 
 
-def _tile_cho_solve_full(tile: TileSet):
+def _tile_cholesky_factorize_solve(tile: TileSet):
   """Returns a kernel for dense Cholesky factorizaton and backsubstitution of a tile."""
 
   @nested_kernel
-  def cholesky(
+  def cholesky_factorize_solve(
     # In:
-    M: array3df,
-    y: array2df,
+    M: wp.array3d(dtype=float),
+    y: wp.array2d(dtype=float),
     adr: wp.array(dtype=int),
     # Out:
-    x: array2df,
+    x: wp.array2d(dtype=float),
   ):
     worldid, nodeid = wp.tid()
     TILE_SIZE = wp.static(tile.size)
@@ -1789,20 +1737,19 @@ def _tile_cho_solve_full(tile: TileSet):
     x_slice = wp.tile_cholesky_solve(L_tile, y_slice)
     wp.tile_store(x[worldid], x_slice, offset=(dofid,))
 
-  return cholesky
+  return cholesky_factorize_solve
 
 
-def _factor_solve_i_dense(m: Model, d: Data, M: array3df, x: array2df, y: array2df):
-  # TODO(team): develop heuristic for block dim, or make configurable
-  block_dim = 32
-
+def _factor_solve_i_dense(
+  m: Model, d: Data, M: wp.array3d(dtype=float), x: wp.array2d(dtype=float), y: wp.array2d(dtype=float)
+):
   for tile in m.qM_tiles:
     wp.launch_tiled(
-      _tile_cho_solve_full(tile),
+      _tile_cholesky_factorize_solve(tile),
       dim=(d.nworld, tile.adr.size),
       inputs=[M, y, tile.adr],
       outputs=[x],
-      block_dim=block_dim,
+      block_dim=m.block_dim.cholesky_factorize_solve,
     )
 
 

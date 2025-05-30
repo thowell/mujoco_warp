@@ -22,6 +22,7 @@ from absl.testing import parameterized
 import mujoco_warp as mjwarp
 
 from . import test_util
+from . import types
 
 
 class CollisionTest(parameterized.TestCase):
@@ -698,6 +699,31 @@ class CollisionTest(parameterized.TestCase):
     np.testing.assert_allclose(d.contact.solref.numpy()[:ncon], np.tile(m.opt.o_solref, (ncon, 1)), err_msg="solref")
     np.testing.assert_allclose(d.contact.solimp.numpy()[:ncon], np.tile(m.opt.o_solimp, (ncon, 1)), err_msg="solimp")
     np.testing.assert_allclose(d.contact.friction.numpy()[:ncon], np.tile(m.opt.o_friction, (ncon, 1)), err_msg="friction")
+
+  def test_hfield_maxconpair(self):
+    _XML = f"""
+    <mujoco>
+      <asset>
+        <hfield name="hfield" nrow="10" ncol="10" size="1e-6 1e-6 1 1"/>
+      </asset>
+      <worldbody>
+        <body>
+          <joint type="slide" axis="0 0 1"/>
+          <geom type="sphere" size=".1"/>
+        </body>
+        <geom type="hfield" hfield="hfield"/>
+      </worldbody>
+      <keyframe>
+        <key qpos=".0999"/>
+      </keyframe>
+    </mujoco>
+    """
+
+    _, _, m, d = test_util.fixture(xml=_XML, keyframe=0)
+
+    mjwarp.collision(m, d)
+
+    np.testing.assert_equal(d.ncon.numpy()[0], types.MJ_MAXCONPAIR)
 
   # TODO(team): test contact parameter mixing
 
