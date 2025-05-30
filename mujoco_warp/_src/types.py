@@ -1362,6 +1362,7 @@ class Data:
     wrap_xpos: Cartesian 3D points in all paths                 (nworld, nwrap, 6)
     wrap_geom_xpos: Cartesian 3D points for geom wrap points    (nworld, <=nwrap, 6)
     sensordata: sensor data array                               (nsensordata,)
+    discrete_acc_mul_m_skip: skip mul_m computation             (nworld,)
     sensor_rangefinder_pnt: points for rangefinder              (nworld, nrangefinder, 3)
     sensor_rangefinder_vec: directions for rangefinder          (nworld, nrangefinder, 3)
     sensor_rangefinder_dist: distances for rangefinder          (nworld, nrangefinder)
@@ -1508,3 +1509,6 @@ class Data:
   ray_bodyexclude: wp.array(dtype=int)  # warp only
   ray_dist: wp.array2d(dtype=float)  # warp only
   ray_geomid: wp.array2d(dtype=int)  # warp only
+
+  # mul_m
+  discrete_acc_mul_m_skip: wp.array(dtype=bool)  # warp only
