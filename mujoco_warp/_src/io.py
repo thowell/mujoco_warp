@@ -884,8 +884,9 @@ def make_data(mjm: mujoco.MjModel, nworld: int = 1, nconmax: int = -1, njmax: in
     ray_bodyexclude=wp.zeros(1, dtype=int),
     ray_dist=wp.zeros((nworld, 1), dtype=float),
     ray_geomid=wp.zeros((nworld, 1), dtype=int),
-    # energy
+    # mul_m
     energy_vel_mul_m_skip=wp.zeros((nworld,), dtype=bool),
+    discrete_acc_mul_m_skip=wp.array((nworld,), dtype=bool),
   )
 
 
@@ -1198,8 +1199,9 @@ def put_data(
     ray_bodyexclude=wp.zeros(1, dtype=int),
     ray_dist=wp.zeros((nworld, 1), dtype=float),
     ray_geomid=wp.zeros((nworld, 1), dtype=int),
-    # energy
+    # mul_m
     energy_vel_mul_m_skip=wp.zeros((nworld,), dtype=bool),
+    discrete_acc_mul_m_skip=wp.zeros((nworld,), dtype=bool),
   )
 
 
