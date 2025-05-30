@@ -447,6 +447,7 @@ def _sensor_pos(
   sensor_pos_adr: wp.array(dtype=int),
   # Data in:
   time_in: wp.array(dtype=float),
+  energy_in: wp.array(dtype=wp.vec2),
   qpos_in: wp.array2d(dtype=float),
   xpos_in: wp.array2d(dtype=wp.vec3),
   xquat_in: wp.array2d(dtype=wp.quat),
@@ -555,6 +556,9 @@ def _sensor_pos(
   elif sensortype == int(SensorType.SUBTREECOM.value):
     vec3 = _subtree_com(subtree_com_in, worldid, objid)
     _write_vector(sensor_datatype, sensor_adr, sensor_cutoff, sensorid, 3, vec3, out)
+  elif sensortype == int(SensorType.E_POTENTIAL.value):
+    val = energy_in[worldid][0]
+    _write_scalar(sensor_datatype, sensor_adr, sensor_cutoff, sensorid, val, out)
   elif sensortype == int(SensorType.CLOCK.value):
     val = _clock(time_in, worldid)
     _write_scalar(sensor_datatype, sensor_adr, sensor_cutoff, sensorid, val, out)
@@ -566,6 +570,9 @@ def sensor_pos(m: Model, d: Data):
 
   if m.opt.disableflags & DisableBit.SENSOR:
     return
+
+  if m.sensor_e_potential:
+    energy_pos(m, d)
 
   wp.launch(
     _sensor_pos,
@@ -594,6 +601,7 @@ def sensor_pos(m: Model, d: Data):
       m.sensor_cutoff,
       m.sensor_pos_adr,
       d.time,
+      d.energy,
       d.qpos,
       d.xpos,
       d.xquat,
@@ -1558,6 +1566,15 @@ def sensor_acc(m: Model, d: Data):
 
 
 @wp.kernel
+def _energy_pos_zero(
+  # Data out:
+  energy_out: wp.array(dtype=wp.vec2),
+):
+  worldid = wp.tid()
+  energy_out[worldid][0] = 0.0
+
+
+@wp.kernel
 def _energy_pos_gravity(
   # Model:
   opt_gravity: wp.vec3,
@@ -1699,6 +1716,7 @@ def _energy_pos_passive_tendon(
 
 def energy_pos(m: Model, d: Data):
   """Position-dependent energy (potential)."""
+  wp.launch(_energy_pos_zero, dim=(d.nworld,), outputs=[d.energy])
 
   # init potential energy: -sum_i(body_i.mass * dot(gravity, body_i.pos))
   if not m.opt.disableflags & DisableBit.GRAVITY:
