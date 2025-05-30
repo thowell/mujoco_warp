@@ -806,7 +806,7 @@ def make_data(mjm: mujoco.MjModel, nworld: int = 1, nconmax: int = -1, njmax: in
     # sensors
     sensordata=wp.zeros((nworld, mjm.nsensordata), dtype=float),
     # mul_m
-    discrete_acc_mul_m=wp.array((nworld,), dtype=bool),
+    discrete_acc_mul_m_skip=wp.array((nworld,), dtype=bool),
   )
 
 
