@@ -73,8 +73,9 @@ def _ray_eliminate(
     return True
 
   # invisible material exclusion
-  if matid >= 0 and mat_rgba[matid][3] == 0.0:
-    return True
+  if matid >= 0:
+    if mat_rgba[matid][3] == 0.0:
+      return True
 
   # static exclusion
   if not flg_static and body_weldid[bodyid] == 0:
