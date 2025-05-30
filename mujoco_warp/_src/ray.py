@@ -569,11 +569,11 @@ def _ray(
         geom_xpos_in,
         geom_xmat_in,
         worldid,
-        pnt[rayid],
-        vec[rayid],
+        pnt[worldid, rayid],
+        vec[worldid, rayid],
         geomgroup,
         flg_static,
-        bodyexclude,
+        bodyexclude[rayid],
         geomid,
       )
     else:
