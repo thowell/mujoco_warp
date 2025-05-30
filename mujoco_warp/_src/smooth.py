@@ -893,7 +893,7 @@ def _qLDiag_div(
 
 def _factor_i_sparse(m: Model, d: Data, M: wp.array3d(dtype=float), L: wp.array3d(dtype=float), D: wp.array2d(dtype=float)):
   """Sparse L'*D*L factorizaton of inertia-like matrix M, assumed spd."""
-  wp.launch(_copy_CSR, dim=(d.nworld, m.nM), inputs=[m.mapM2M, M], outputs=[L])
+  wp.launch(_copy_CSR, dim=(d.nworld, m.nC), inputs=[m.mapM2M, M], outputs=[L])
 
   for i in reversed(range(len(m.qLD_updates))):
     qLD_updates = m.qLD_updates[i]
