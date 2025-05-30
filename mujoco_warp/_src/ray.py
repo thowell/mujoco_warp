@@ -603,7 +603,7 @@ def ray(
   vec: wp.array2d(dtype=wp.vec3),
   geomgroup: vec6 = None,
   flg_static: bool = True,
-  bodyexclude: int = None,
+  bodyexclude: int = -1,
 ) -> Tuple[wp.array2d(dtype=float), wp.array2d(dtype=int)]:
   """Returns the distance at which rays intersect with primitive geoms.
 
@@ -628,10 +628,7 @@ def ray(
   if geomgroup is None:
     geomgroup = vec6(-1, -1, -1, -1, -1, -1)
 
-  if bodyexclude is None:
-    d.ray_bodyexclude.fill_(-1)
-  else:
-    d.ray_bodyexclude.fill_(bodyexclude)
+  d.ray_bodyexclude.fill_(bodyexclude)
 
   rays(m, d, pnt, vec, geomgroup, flg_static, d.ray_bodyexclude, d.ray_dist, d.ray_geomid)
 
