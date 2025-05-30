@@ -19,8 +19,19 @@ import mujoco
 import numpy as np
 import warp as wp
 
-from . import collision_driver
+from . import math
 from . import types
+
+
+def _hfield_geom_pair(mjm: mujoco.MjModel) -> Tuple[int, np.array]:
+  geom1, geom2 = np.triu_indices(mjm.ngeom, k=1)
+  geom_type_hf = mujoco.mjtGeom.mjGEOM_HFIELD
+  has_hfield = (mjm.geom_type[geom1] == geom_type_hf) | (mjm.geom_type[geom2] == geom_type_hf)
+  nhfieldgeompair = np.sum(has_hfield)
+  geompair2hfgeompair = -1 * np.ones(mjm.ngeom * (mjm.ngeom - 1) // 2, dtype=int)
+  geompair2hfgeompair[has_hfield] = np.arange(nhfieldgeompair)
+
+  return nhfieldgeompair, geompair2hfgeompair
 
 
 def put_model(mjm: mujoco.MjModel) -> types.Model:
@@ -109,6 +120,9 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
   qLD_updates, dof_depth = {}, np.zeros(mjm.nv, dtype=int) - 1
 
   for k in range(mjm.nv):
+    # skip diagonal rows
+    if mjd.M_rownnz[k] == 1:
+      continue
     dof_depth[k] = dof_depth[mjm.dof_parentid[k]] + 1
     i = mjm.dof_parentid[k]
     diag_k = mjd.M_rowadr[k] + mjd.M_rownnz[k] - 1
@@ -267,9 +281,9 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
     pair_geom2 = mjm.pair_geom2[i]
 
     if pair_geom2 < pair_geom1:
-      pairid = np.int32(collision_driver._upper_tri_index(mjm.ngeom, int(pair_geom2), int(pair_geom1)))
+      pairid = np.int32(math.upper_tri_index(mjm.ngeom, int(pair_geom2), int(pair_geom1)))
     else:
-      pairid = np.int32(collision_driver._upper_tri_index(mjm.ngeom, int(pair_geom1), int(pair_geom2)))
+      pairid = np.int32(math.upper_tri_index(mjm.ngeom, int(pair_geom1), int(pair_geom2)))
 
     nxn_pairid[pairid] = i
 
@@ -297,16 +311,18 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
     nflexelem=mjm.nflexelem,
     nflexelemdata=mjm.nflexelemdata,
     nexclude=mjm.nexclude,
-    neq=mjm.nM,
+    neq=mjm.neq,
     nmocap=mjm.nmocap,
     ngravcomp=mjm.ngravcomp,
     nM=mjm.nM,
+    nC=mjm.nC,
     ntendon=mjm.ntendon,
     nwrap=mjm.nwrap,
     nsensor=mjm.nsensor,
     nsensordata=mjm.nsensordata,
     nmeshvert=mjm.nmeshvert,
     nmeshface=mjm.nmeshface,
+    nmeshgraph=mjm.nmeshgraph,
     nlsp=nlsp,
     npair=mjm.npair,
     opt=types.Option(
@@ -332,6 +348,7 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
       epa_iterations=12,
       epa_exact_neg_distance=wp.bool(False),
       depth_extension=0.1,
+      graph_conditional=True,
     ),
     stat=types.Statistic(
       meaninertia=mjm.stat.meaninertia,
@@ -476,6 +493,8 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
     mesh_vert=wp.array(mjm.mesh_vert, dtype=wp.vec3),
     mesh_faceadr=wp.array(mjm.mesh_faceadr, dtype=int),
     mesh_face=wp.array(mjm.mesh_face, dtype=wp.vec3i),
+    mesh_graphadr=wp.array(mjm.mesh_graphadr, dtype=int),
+    mesh_graph=wp.array(mjm.mesh_graph, dtype=int),
     nhfield=mjm.nhfield,
     nhfielddata=mjm.nhfielddata,
     hfield_adr=wp.array(mjm.hfield_adr, dtype=int),
@@ -606,6 +625,7 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
       ],
     ).any(),
     mat_rgba=create_nmodel_batched_array(mjm.mat_rgba, dtype=wp.vec4),
+    geompair2hfgeompair=wp.array(_hfield_geom_pair(mjm)[1], dtype=int),
     block_dim=types.BlockDim(),
   )
 
@@ -634,6 +654,7 @@ def make_data(mjm: mujoco.MjModel, nworld: int = 1, nconmax: int = -1, njmax: in
     njmax=njmax,
     solver_niter=wp.zeros(nworld, dtype=int),
     ncon=wp.zeros(1, dtype=int),
+    ncon_hfield=wp.zeros((nworld, _hfield_geom_pair(mjm)[0]), dtype=int),  # warp only
     ne=wp.zeros(1, dtype=int),
     ne_connect=wp.zeros(1, dtype=int),  # warp only
     ne_weld=wp.zeros(1, dtype=int),  # warp only
@@ -642,6 +663,7 @@ def make_data(mjm: mujoco.MjModel, nworld: int = 1, nconmax: int = -1, njmax: in
     nf=wp.zeros(1, dtype=int),
     nl=wp.zeros(1, dtype=int),
     nefc=wp.zeros(1, dtype=int),
+    nsolving=wp.zeros(1, dtype=int),  # warp only
     time=wp.zeros(nworld, dtype=float),
     energy=wp.zeros(nworld, dtype=wp.vec2),
     qpos=wp.zeros((nworld, mjm.nq), dtype=float),
@@ -723,17 +745,21 @@ def make_data(mjm: mujoco.MjModel, nworld: int = 1, nconmax: int = -1, njmax: in
     ),
     efc=types.Constraint(
       worldid=wp.zeros((njmax,), dtype=int),
+      type=wp.zeros((njmax,), dtype=int),
       id=wp.zeros((njmax,), dtype=int),
       J=wp.zeros((njmax, mjm.nv), dtype=float),
       pos=wp.zeros((njmax,), dtype=float),
       margin=wp.zeros((njmax,), dtype=float),
       D=wp.zeros((njmax,), dtype=float),
+      vel=wp.zeros((njmax,), dtype=float),
       aref=wp.zeros((njmax,), dtype=float),
       frictionloss=wp.zeros((njmax,), dtype=float),
       force=wp.zeros((njmax,), dtype=float),
       Jaref=wp.zeros((njmax,), dtype=float),
       Ma=wp.zeros((nworld, mjm.nv), dtype=float),
       grad=wp.zeros((nworld, mjm.nv), dtype=float),
+      cholesky_L_tmp=wp.zeros((nworld, mjm.nv, mjm.nv), dtype=float),
+      cholesky_y_tmp=wp.zeros((nworld, mjm.nv), dtype=float),
       grad_dot=wp.zeros((nworld,), dtype=float),
       Mgrad=wp.zeros((nworld, mjm.nv), dtype=float),
       search=wp.zeros((nworld, mjm.nv), dtype=float),
@@ -934,6 +960,7 @@ def put_data(
     njmax=njmax,
     solver_niter=tile(mjd.solver_niter[0]),
     ncon=arr([mjd.ncon * nworld]),
+    ncon_hfield=wp.zeros((nworld, _hfield_geom_pair(mjm)[0]), dtype=int),  # warp only
     ne=arr([mjd.ne * nworld]),
     ne_connect=arr([3 * nworld * np.sum((mjm.eq_type == mujoco.mjtEq.mjEQ_CONNECT) & mjd.eq_active, dtype=int)]),
     ne_weld=arr([6 * nworld * np.sum((mjm.eq_type == mujoco.mjtEq.mjEQ_WELD) & mjd.eq_active, dtype=int)]),
@@ -942,6 +969,7 @@ def put_data(
     nf=arr([mjd.nf * nworld]),
     nl=arr([mjd.nl * nworld]),
     nefc=arr([mjd.nefc * nworld]),
+    nsolving=arr([nworld]),
     time=arr(mjd.time * np.ones(nworld)),
     energy=tile(mjd.energy, dtype=wp.vec2),
     qpos=tile(mjd.qpos),
@@ -1020,17 +1048,21 @@ def put_data(
     ),
     efc=types.Constraint(
       worldid=arr(efc_worldid),
+      type=padtile(mjd.efc_type, njmax),
       id=padtile(mjd.efc_id, njmax),
       J=padtile(efc_J, njmax),
       pos=padtile(mjd.efc_pos, njmax),
       margin=padtile(mjd.efc_margin, njmax),
       D=padtile(mjd.efc_D, njmax),
+      vel=padtile(mjd.efc_vel, njmax),
       aref=padtile(mjd.efc_aref, njmax),
       frictionloss=padtile(mjd.efc_frictionloss, njmax),
       force=padtile(mjd.efc_force, njmax),
       Jaref=wp.empty(shape=(njmax,), dtype=float),
       Ma=wp.empty(shape=(nworld, mjm.nv), dtype=float),
       grad=wp.empty(shape=(nworld, mjm.nv), dtype=float),
+      cholesky_L_tmp=wp.empty(shape=(nworld, mjm.nv, mjm.nv), dtype=float),
+      cholesky_y_tmp=wp.empty(shape=(nworld, mjm.nv), dtype=float),
       grad_dot=wp.empty(shape=(nworld,), dtype=float),
       Mgrad=wp.empty(shape=(nworld, mjm.nv), dtype=float),
       search=wp.empty(shape=(nworld, mjm.nv), dtype=float),

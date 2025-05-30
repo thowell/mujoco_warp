@@ -21,6 +21,8 @@ from . import math
 from . import smooth
 from . import support
 from . import types
+from .block_cholesky import create_blocked_cholesky_func
+from .block_cholesky import create_blocked_cholesky_solve_func
 from .warp_util import event_scope
 from .warp_util import kernel as nested_kernel
 
@@ -2242,6 +2244,33 @@ def update_gradient_cholesky(tile_size: int):
   return kernel
 
 
+def update_gradient_cholesky_blocked(tile_size: int):
+  @nested_kernel
+  def kernel(
+    # Data in:
+    efc_grad_in: wp.array3d(dtype=float),
+    efc_h_in: wp.array3d(dtype=float),
+    efc_done_in: wp.array(dtype=bool),
+    matrix_size: int,
+    cholesky_L_tmp: wp.array3d(dtype=float),
+    cholesky_y_tmp: wp.array3d(dtype=float),
+    # Data out:
+    efc_Mgrad_out: wp.array3d(dtype=float),
+  ):
+    worldid, tid_block = wp.tid()
+    TILE_SIZE = wp.static(tile_size)
+
+    if efc_done_in[worldid]:
+      return
+
+    wp.static(create_blocked_cholesky_func(TILE_SIZE))(tid_block, efc_h_in[worldid], matrix_size, 0, 0, cholesky_L_tmp[worldid])
+    wp.static(create_blocked_cholesky_solve_func(TILE_SIZE))(
+      cholesky_L_tmp[worldid], efc_grad_in[worldid], cholesky_y_tmp[worldid], matrix_size, 0, 0, efc_Mgrad_out[worldid]
+    )
+
+  return kernel
+
+
 def _update_gradient(m: types.Model, d: types.Data):
   # grad = Ma - qfrc_smooth - qfrc_constraint
   wp.launch(update_gradient_zero_grad_dot, dim=(d.nworld), inputs=[d.efc.done], outputs=[d.efc.grad_dot])
@@ -2347,14 +2376,30 @@ def _update_gradient(m: types.Model, d: types.Data):
         outputs=[d.efc.h],
       )
 
-    # TODO(team): support cholesky on larger nv, using tiles here limits the max matrix size
-    wp.launch_tiled(
-      update_gradient_cholesky(m.nv),
-      dim=(d.nworld,),
-      inputs=[d.efc.grad, d.efc.h, d.efc.done],
-      outputs=[d.efc.Mgrad],
-      block_dim=m.block_dim.update_gradient_cholesky,
-    )
+    # TODO(team): Define good threshold for blocked vs non-blocked cholesky
+    if m.nv < 32:
+      wp.launch_tiled(
+        update_gradient_cholesky(m.nv),
+        dim=(d.nworld,),
+        inputs=[d.efc.grad, d.efc.h, d.efc.done],
+        outputs=[d.efc.Mgrad],
+        block_dim=m.block_dim.update_gradient_cholesky,
+      )
+    else:
+      wp.launch_tiled(
+        update_gradient_cholesky_blocked(32),
+        dim=(d.nworld,),
+        inputs=[
+          d.efc.grad.reshape(shape=(d.nworld, m.nv, 1)),
+          d.efc.h,
+          d.efc.done,
+          m.nv,
+          d.efc.cholesky_L_tmp,
+          d.efc.cholesky_y_tmp.reshape(shape=(d.nworld, m.nv, 1)),
+        ],
+        outputs=[d.efc.Mgrad.reshape(shape=(d.nworld, m.nv, 1))],
+        block_dim=m.block_dim.update_gradient_cholesky,
+      )
   else:
     raise ValueError(f"Unknown solver type: {m.opt.solver}")
 
@@ -2485,6 +2530,7 @@ def solve_done(
   # Model:
   nv: int,
   opt_tolerance: float,
+  opt_iterations: int,
   stat_meaninertia: float,
   # Data in:
   efc_grad_dot_in: wp.array(dtype=float),
@@ -2493,6 +2539,7 @@ def solve_done(
   efc_done_in: wp.array(dtype=bool),
   # Data out:
   solver_niter_out: wp.array(dtype=int),
+  nsolving_out: wp.array(dtype=int),
   efc_done_out: wp.array(dtype=bool),
 ):
   # TODO(team): static m?
@@ -2505,7 +2552,79 @@ def solve_done(
 
   improvement = _rescale(nv, stat_meaninertia, efc_prev_cost_in[worldid] - efc_cost_in[worldid])
   gradient = _rescale(nv, stat_meaninertia, wp.math.sqrt(efc_grad_dot_in[worldid]))
-  efc_done_out[worldid] = (improvement < opt_tolerance) or (gradient < opt_tolerance)
+  done = (improvement < opt_tolerance) or (gradient < opt_tolerance)
+  if done or solver_niter_out[worldid] == opt_iterations:
+    # if the simulation has converged or if the maximum number of iterations has been reached then
+    # marks this world as done and remove it from the number of unconverged worlds in condition_iteration
+    efc_done_out[worldid] = True
+    wp.atomic_add(nsolving_out, 0, -1)
+
+
+@event_scope
+def _solver_iteration(
+  m: types.Model,
+  d: types.Data,
+):
+  _linesearch(m, d)
+
+  if m.opt.solver == types.SolverType.CG:
+    wp.launch(
+      solve_prev_grad_Mgrad,
+      dim=(d.nworld, m.nv),
+      inputs=[d.efc.grad, d.efc.Mgrad, d.efc.done],
+      outputs=[d.efc.prev_grad, d.efc.prev_Mgrad],
+    )
+
+  _update_constraint(m, d)
+  _update_gradient(m, d)
+
+  # polak-ribiere
+  if m.opt.solver == types.SolverType.CG:
+    wp.launch(
+      solve_zero_beta_num_den,
+      dim=(d.nworld),
+      inputs=[d.efc.done],
+      outputs=[d.efc.beta_num, d.efc.beta_den],
+    )
+
+    wp.launch(
+      solve_beta_num_den,
+      dim=(d.nworld, m.nv),
+      inputs=[d.efc.grad, d.efc.Mgrad, d.efc.prev_grad, d.efc.prev_Mgrad, d.efc.done],
+      outputs=[d.efc.beta_num, d.efc.beta_den],
+    )
+
+    wp.launch(
+      solve_beta,
+      dim=(d.nworld,),
+      inputs=[d.efc.beta_num, d.efc.beta_den, d.efc.done],
+      outputs=[d.efc.beta],
+    )
+
+  wp.launch(solve_zero_search_dot, dim=(d.nworld), inputs=[d.efc.done], outputs=[d.efc.search_dot])
+
+  wp.launch(
+    solve_search_update,
+    dim=(d.nworld, m.nv),
+    inputs=[m.opt.solver, d.efc.Mgrad, d.efc.search, d.efc.beta, d.efc.done],
+    outputs=[d.efc.search, d.efc.search_dot],
+  )
+
+  wp.launch(
+    solve_done,
+    dim=(d.nworld,),
+    inputs=[
+      m.nv,
+      m.opt.tolerance,
+      m.opt.iterations,
+      m.stat.meaninertia,
+      d.efc.grad_dot,
+      d.efc.cost,
+      d.efc.prev_cost,
+      d.efc.done,
+    ],
+    outputs=[d.solver_niter, d.nsolving, d.efc.done],
+  )
 
 
 def create_context(m: types.Model, d: types.Data, grad: bool = True):
@@ -2551,65 +2670,26 @@ def solve(m: types.Model, d: types.Data):
     outputs=[d.efc.search, d.efc.search_dot],
   )
 
-  for i in range(m.opt.iterations):
-    _linesearch(m, d)
-
-    if m.opt.solver == types.SolverType.CG:
-      wp.launch(
-        solve_prev_grad_Mgrad,
-        dim=(d.nworld, m.nv),
-        inputs=[d.efc.grad, d.efc.Mgrad, d.efc.done],
-        outputs=[d.efc.prev_grad, d.efc.prev_Mgrad],
-      )
-
-    _update_constraint(m, d)
-    _update_gradient(m, d)
-
-    # polak-ribiere
-    if m.opt.solver == types.SolverType.CG:
-      wp.launch(
-        solve_zero_beta_num_den,
-        dim=(d.nworld),
-        inputs=[d.efc.done],
-        outputs=[d.efc.beta_num, d.efc.beta_den],
-      )
-
-      wp.launch(
-        solve_beta_num_den,
-        dim=(d.nworld, m.nv),
-        inputs=[d.efc.grad, d.efc.Mgrad, d.efc.prev_grad, d.efc.prev_Mgrad, d.efc.done],
-        outputs=[d.efc.beta_num, d.efc.beta_den],
-      )
-
-      wp.launch(
-        solve_beta,
-        dim=(d.nworld,),
-        inputs=[d.efc.beta_num, d.efc.beta_den, d.efc.done],
-        outputs=[d.efc.beta],
-      )
-
-    wp.launch(solve_zero_search_dot, dim=(d.nworld), inputs=[d.efc.done], outputs=[d.efc.search_dot])
-
-    wp.launch(
-      solve_search_update,
-      dim=(d.nworld, m.nv),
-      inputs=[m.opt.solver, d.efc.Mgrad, d.efc.search, d.efc.beta, d.efc.done],
-      outputs=[d.efc.search, d.efc.search_dot],
+  if m.opt.iterations != 0 and m.opt.graph_conditional:
+    # Note: the iteration kernel (indicated by while_body) is repeatedly launched
+    # as long as condition_iteration is not zero.
+    # condition_iteration is a warp array of size 1 and type int, it counts the number
+    # of worlds that are not converged, it becomes 0 when all worlds are converged.
+    # When the number of iterations reaches m.opt.iterations, solver_niter
+    # becomes zero and all worlds are marked as converged to avoid an infinite loop.
+    # note: we only launch the iteration kernel if everything is not done
+    d.nsolving.fill_(d.nworld)
+    wp.capture_while(
+      d.nsolving,
+      while_body=_solver_iteration,
+      m=m,
+      d=d,
     )
-
-    wp.launch(
-      solve_done,
-      dim=(d.nworld,),
-      inputs=[
-        m.nv,
-        m.opt.tolerance,
-        m.stat.meaninertia,
-        d.efc.grad_dot,
-        d.efc.cost,
-        d.efc.prev_cost,
-        d.efc.done,
-      ],
-      outputs=[d.solver_niter, d.efc.done],
-    )
+  else:
+    # This branch is mostly for when JAX is used as it is currently not compatible
+    # with CUDA graph conditional.
+    # It should be removed when JAX becomes compatible.
+    for i in range(m.opt.iterations):
+      _solver_iteration(m, d)
 
   wp.copy(d.qacc_warmstart, d.qacc)

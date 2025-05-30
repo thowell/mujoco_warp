@@ -15,7 +15,6 @@
 
 import mujoco
 import warp as wp
-from packaging import version
 
 from . import math
 from . import support
@@ -840,61 +839,6 @@ def crb(m: Model, d: Data):
 
 
 @wp.kernel
-def _qLD_acc_legacy(
-  # Model:
-  dof_Madr: wp.array(dtype=int),
-  # In:
-  qLD_updates_: wp.array(dtype=wp.vec3i),
-  L_in: wp.array3d(dtype=float),
-  # Out:
-  L_out: wp.array3d(dtype=float),
-):
-  worldid, nodeid = wp.tid()
-  update = qLD_updates_[nodeid]
-  i, k, Madr_ki = update[0], update[1], update[2]
-  Madr_i = dof_Madr[i]
-  # tmp = M(k,i) / M(k,k)
-  tmp = L_in[worldid, 0, Madr_ki] / L_in[worldid, 0, dof_Madr[k]]
-  for j in range(dof_Madr[i + 1] - Madr_i):
-    # M(i,j) -= M(k,j) * tmp
-    wp.atomic_sub(L_out[worldid, 0], Madr_i + j, L_in[worldid, 0, Madr_ki + j] * tmp)
-  # M(k,i) = tmp
-  L_out[worldid, 0, Madr_ki] = tmp
-
-
-@wp.kernel
-def _qLDiag_div_legacy(
-  # Model:
-  dof_Madr: wp.array(dtype=int),
-  # In:
-  L_in: wp.array3d(dtype=float),
-  # Out:
-  D_out: wp.array2d(dtype=float),
-):
-  worldid, dofid = wp.tid()
-  D_out[worldid, dofid] = 1.0 / L_in[worldid, 0, dof_Madr[dofid]]
-
-
-def _factor_i_sparse_legacy(
-  m: Model, d: Data, M: wp.array3d(dtype=float), L: wp.array3d(dtype=float), D: wp.array2d(dtype=float)
-):
-  """Sparse L'*D*L factorizaton of inertia-like matrix M, assumed spd."""
-
-  wp.copy(L, M)
-
-  for i in reversed(range(len(m.qLD_updates))):
-    qlD_updates = m.qLD_updates[i]
-    wp.launch(
-      _qLD_acc_legacy,
-      dim=(d.nworld, qlD_updates.size),
-      inputs=[m.dof_Madr, qlD_updates, L],
-      outputs=[L],
-    )
-
-  wp.launch(_qLDiag_div_legacy, dim=(d.nworld, m.nv), inputs=[m.dof_Madr, L], outputs=[D])
-
-
-@wp.kernel
 def _copy_CSR(
   # Model:
   mapM2M: wp.array(dtype=int),
@@ -949,10 +893,7 @@ def _qLDiag_div(
 
 def _factor_i_sparse(m: Model, d: Data, M: wp.array3d(dtype=float), L: wp.array3d(dtype=float), D: wp.array2d(dtype=float)):
   """Sparse L'*D*L factorizaton of inertia-like matrix M, assumed spd."""
-  if version.parse(mujoco.__version__) <= version.parse("3.2.7"):
-    return _factor_i_sparse_legacy(m, d, M, L, D)
-
-  wp.launch(_copy_CSR, dim=(d.nworld, m.nM), inputs=[m.mapM2M, M], outputs=[L])
+  wp.launch(_copy_CSR, dim=(d.nworld, m.nC), inputs=[m.mapM2M, M], outputs=[L])
 
   for i in reversed(range(len(m.qLD_updates))):
     qLD_updates = m.qLD_updates[i]
