@@ -329,6 +329,7 @@ class SensorType(enum.IntEnum):
     FRAMEZAXIS: frame z-axis
     FRAMEQUAT: frame orientation, represented as quaternion
     SUBTREECOM: subtree center of mass
+    E_POTENTIAL: potential energy
     CLOCK: simulation time
     VELOCIMETER: 3D linear velocity, in local frame
     GYRO: 3D angular velocity, in local frame
@@ -365,6 +366,7 @@ class SensorType(enum.IntEnum):
   FRAMEZAXIS = mujoco.mjtSensor.mjSENS_FRAMEZAXIS
   FRAMEQUAT = mujoco.mjtSensor.mjSENS_FRAMEQUAT
   SUBTREECOM = mujoco.mjtSensor.mjSENS_SUBTREECOM
+  E_POTENTIAL = mujoco.mjtSensor.mjSENS_E_POTENTIAL
   CLOCK = mujoco.mjtSensor.mjSENS_CLOCK
   VELOCIMETER = mujoco.mjtSensor.mjSENS_VELOCIMETER
   GYRO = mujoco.mjtSensor.mjSENS_GYRO
@@ -919,6 +921,7 @@ class Model:
     rangefinder_sensor_adr: map sensor id to rangefinder id  (<=nsensor,)
                     (excluding touch sensors)
     sensor_touch_adr: addresses for touch sensors            (<=nsensor,)
+    sensor_e_potential: evaluate energy_pos
     sensor_subtree_vel: evaluate subtree_vel
     sensor_rne_postconstraint: evaluate rne_postconstraint
     sensor_rangefinder_bodyid: bodyid for rangefinder        (nrangefinder,)
@@ -1194,6 +1197,7 @@ class Model:
   sensor_rangefinder_adr: wp.array(dtype=int)  # warp only
   rangefinder_sensor_adr: wp.array(dtype=int)  # warp only
   sensor_touch_adr: wp.array(dtype=int)  # warp only
+  sensor_e_potential: bool  # warp only
   sensor_subtree_vel: bool  # warp only
   sensor_rne_postconstraint: bool  # warp only
   sensor_rangefinder_bodyid: wp.array(dtype=int)  # warp only
