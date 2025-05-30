@@ -4,6 +4,16 @@
 MUJOCO_LOG.TXT
 
 
+## Cloned repositories
+## -------------------
+
+mujoco_warp/test_data/mujoco_menagerie
+
+## Created directories
+## --------------------
+
+mujoco_warp/test_data/kitchen/combined_assets/
+
 # Language-specific files
 # =======================
 

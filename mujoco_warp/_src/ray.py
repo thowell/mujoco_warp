@@ -656,6 +656,6 @@ def ray(
       d.ray_dist,
       d.ray_geomid,
     ],
-    block_dim=64,
+    block_dim=m.block_dim.ray,
   )
   return d.ray_dist, d.ray_geomid
