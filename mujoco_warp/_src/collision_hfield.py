@@ -316,7 +316,6 @@ def _hfield_midphase(
   ncol = hfield_ncol[dataid]
 
   # loop through grid cells and add pairs for all triangles
-  # TODO(vreutskyy): propose a way to limit the number of contacts between a hfield and the other geom
   for j in range(min_j, max_j + 1):
     for i in range(min_i, max_i + 1):
       # each grid cell contains two triangles

@@ -22,6 +22,7 @@ MJ_MINVAL = mujoco.mjMINVAL
 MJ_MAXVAL = mujoco.mjMAXVAL
 MJ_MINIMP = mujoco.mjMINIMP  # minimum constraint impedance
 MJ_MAXIMP = mujoco.mjMAXIMP  # maximum constraint impedance
+MJ_MAXCONPAIR = mujoco.mjMAXCONPAIR
 MJ_NREF = mujoco.mjNREF
 MJ_NIMP = mujoco.mjNIMP
 
@@ -254,6 +255,30 @@ class SolverType(enum.IntEnum):
   # unsupported: PGS
 
 
+class ConstraintType(enum.IntEnum):
+  """Type of constraint.
+
+  Members:
+    EQUALITY: equality constraint
+    FRICTION_DOF: dof friction
+    FRICTION_TENDON: tendon friction
+    LIMIT_JOINT: joint limit
+    LIMIT_TENDON: tendon limit
+    CONTACT_FRICTIONLESS: frictionless contact
+    CONTACT_PYRAMIDAL: frictional contact, pyramidal friction cone
+    CONTACT_ELLIPTIC: frictional contact, elliptic friction cone
+  """
+
+  EQUALITY = mujoco.mjtConstraint.mjCNSTR_EQUALITY
+  FRICTION_DOF = mujoco.mjtConstraint.mjCNSTR_FRICTION_DOF
+  FRICTION_TENDON = mujoco.mjtConstraint.mjCNSTR_FRICTION_TENDON
+  LIMIT_JOINT = mujoco.mjtConstraint.mjCNSTR_LIMIT_JOINT
+  LIMIT_TENDON = mujoco.mjtConstraint.mjCNSTR_LIMIT_TENDON
+  CONTACT_FRICTIONLESS = mujoco.mjtConstraint.mjCNSTR_CONTACT_FRICTIONLESS
+  CONTACT_PYRAMIDAL = mujoco.mjtConstraint.mjCNSTR_CONTACT_PYRAMIDAL
+  CONTACT_ELLIPTIC = mujoco.mjtConstraint.mjCNSTR_CONTACT_ELLIPTIC
+
+
 class SensorType(enum.IntEnum):
   """Type of sensor.
 
@@ -427,6 +452,7 @@ class Option:
     wind: wind (for lift, drag, and viscosity)
     density: density of medium
     viscosity: viscosity of medium
+    graph_conditional: flag to use cuda graph conditional, should be False when JAX is used
   """
 
   timestep: float
@@ -451,6 +477,7 @@ class Option:
   wind: wp.vec3
   density: float
   viscosity: float
+  graph_conditional: bool  # warp only
 
 
 @dataclasses.dataclass
@@ -470,11 +497,13 @@ class Constraint:
 
   Attributes:
     worldid: world id                                 (njmax,)
+    type: constraint type (mjtConstraint)             (njmax,)
     id: id of object of specific type                 (njmax,)
     J: constraint Jacobian                            (njmax, nv)
     pos: constraint position (equality, contact)      (njmax,)
     margin: inclusion margin (contact)                (njmax,)
     D: constraint mass                                (njmax,)
+    vel: velocity in constraint space: J*qvel         (njmax,)
     aref: reference pseudo-acceleration               (njmax,)
     frictionloss: frictionloss (friction)             (njmax,)
     force: constraint force in constraint space       (njmax,)
@@ -524,17 +553,21 @@ class Constraint:
   """
 
   worldid: wp.array(dtype=int)
+  type: wp.array(dtype=int)
   id: wp.array(dtype=int)
   J: wp.array2d(dtype=float)
   pos: wp.array(dtype=float)
   margin: wp.array(dtype=float)
   D: wp.array(dtype=float)
+  vel: wp.array(dtype=float)
   aref: wp.array(dtype=float)
   frictionloss: wp.array(dtype=float)
   force: wp.array(dtype=float)
   Jaref: wp.array(dtype=float)
   Ma: wp.array2d(dtype=float)
   grad: wp.array2d(dtype=float)
+  cholesky_L_tmp: wp.array3d(dtype=float)
+  cholesky_y_tmp: wp.array2d(dtype=float)
   grad_dot: wp.array(dtype=float)
   Mgrad: wp.array2d(dtype=float)
   search: wp.array2d(dtype=float)
@@ -617,12 +650,14 @@ class Model:
     nmocap: number of mocap bodies                           ()
     ngravcomp: number of bodies with nonzero gravcomp        ()
     nM: number of non-zeros in sparse inertia matrix         ()
+    nC: number of non-zeros in sparse reduced dof-dof matrix ()
     ntendon: number of tendons                               ()
     nwrap: number of wrap objects in all tendon paths        ()
     nsensor: number of sensors                               ()
     nsensordata: number of elements in sensor data vector    ()
     nmeshvert: number of vertices for all meshes             ()
     nmeshface: number of faces for all meshes                ()
+    nmeshgraph: number of ints in mesh auxiliary data        ()
     nlsp: number of step sizes for parallel linsearch        ()
     npair: number of predefined geom pairs                   ()
     nhfield: number of heightfields                          ()
@@ -641,7 +676,7 @@ class Model:
     M_rownnz: number of non-zeros in each row of qM             (nv,)
     M_rowadr: index of each row in qM                           (nv,)
     M_colind: column indices of non-zeros in qM                 (nM,)
-    mapM2M: index mapping from M (legacy) to M (CSR)            (nM)
+    mapM2M: index mapping from M (legacy) to M (CSR)            (nC)
     qM_tiles: tiling configuration
     body_tree: list of body ids by tree level
     body_parentid: id of body's parent                       (nbody,)
@@ -750,6 +785,8 @@ class Model:
     mesh_vert: vertex positions for all meshes               (nmeshvert, 3)
     mesh_faceadr: first face address                         (nmesh,)
     mesh_face: face indices for all meshes                   (nface, 3)
+    mesh_graphadr: graph data address; -1: no graph          (nmesh, 1)
+    mesh_graph: convex graph data                            (nmeshgraph, 1)
     eq_type: constraint type (mjtEq)                         (neq,)
     eq_obj1id: id of object 1                                (neq,)
     eq_obj2id: id of object 2                                (neq,)
@@ -846,6 +883,8 @@ class Model:
     sensor_rne_postconstraint: evaluate rne_postconstraint
     mocap_bodyid: id of body for mocap                       (nmocap,)
     mat_rgba: rgba                                           (nworld, nmat, 4)
+    geompair2hfgeompair: geom pair to geom pair with         (ngeom * (ngeom - 1) // 2,)
+                         height field mapping
   """
 
   nq: int
@@ -868,12 +907,14 @@ class Model:
   nmocap: int
   ngravcomp: int
   nM: int
+  nC: int
   ntendon: int
   nwrap: int
   nsensor: int
   nsensordata: int
   nmeshvert: int
   nmeshface: int
+  nmeshgraph: int
   nlsp: int  # warp only
   npair: int
   nhfield: int
@@ -1003,16 +1044,20 @@ class Model:
   flex_elemedgeadr: wp.array(dtype=int)
   flex_vertbodyid: wp.array(dtype=int)
   flex_edge: wp.array(dtype=wp.vec2i)
+  flex_edgeflap: wp.array(dtype=wp.vec2i)
   flex_elem: wp.array(dtype=int)
   flex_elemedge: wp.array(dtype=int)
   flexedge_length0: wp.array(dtype=float)
   flex_stiffness: wp.array(dtype=float)
+  flex_bending: wp.array(dtype=wp.mat44f)
   flex_damping: wp.array(dtype=float)
   mesh_vertadr: wp.array(dtype=int)
   mesh_vertnum: wp.array(dtype=int)
   mesh_vert: wp.array(dtype=wp.vec3)
   mesh_faceadr: wp.array(dtype=int)
   mesh_face: wp.array(dtype=wp.vec3i)
+  mesh_graphadr: wp.array(dtype=int)
+  mesh_graph: wp.array(dtype=int)
   eq_type: wp.array(dtype=int)
   eq_obj1id: wp.array(dtype=int)
   eq_obj2id: wp.array(dtype=int)
@@ -1108,6 +1153,7 @@ class Model:
   sensor_rne_postconstraint: bool  # warp only
   mocap_bodyid: wp.array(dtype=int)  # warp only
   mat_rgba: wp.array2d(dtype=wp.vec4)
+  geompair2hfgeompair: wp.array(dtype=int)  # warp only
 
 
 @dataclasses.dataclass
@@ -1153,6 +1199,7 @@ class Data:
     njmax: maximum number of constraints                        ()
     solver_niter: number of solver iterations                   (nworld,)
     ncon: number of detected contacts                           ()
+    ncon_hfield: number of contacts per geom pair with hfield   (nworld, nhfieldgeompair)
     ne: number of equality constraints                          ()
     ne_connect: number of equality connect constraints          ()
     ne_weld: number of equality weld constraints                ()
@@ -1161,6 +1208,7 @@ class Data:
     nf: number of friction constraints                          ()
     nl: number of limit constraints                             ()
     nefc: number of constraints                                 (1,)
+    nsolving: number of unconverged worlds                      (1,)
     time: simulation time                                       (nworld,)
     energy: potential, kinetic energy                           (nworld, 2)
     qpos: position                                              (nworld, nq)
@@ -1268,6 +1316,7 @@ class Data:
   njmax: int  # warp only
   solver_niter: wp.array(dtype=int)
   ncon: wp.array(dtype=int)
+  ncon_hfield: wp.array2d(dtype=int)  # warp only
   ne: wp.array(dtype=int)
   ne_connect: wp.array(dtype=int)  # warp only
   ne_weld: wp.array(dtype=int)  # warp only
@@ -1276,6 +1325,7 @@ class Data:
   nf: wp.array(dtype=int)
   nl: wp.array(dtype=int)
   nefc: wp.array(dtype=int)
+  nsolving: wp.array(dtype=int)  # warp only
   time: wp.array(dtype=float)
   energy: wp.array(dtype=wp.vec2)
   qpos: wp.array2d(dtype=float)
