@@ -1693,5 +1693,5 @@ def energy_vel(m: Model, d: Data):
     dim=(d.nworld,),
     inputs=[d.qvel, d.efc.mv],
     outputs=[d.energy],
-    block_dim=32,
+    block_dim=m.block_dim.energy_vel_kinetic,
   )

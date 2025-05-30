@@ -2383,7 +2383,7 @@ def _update_gradient(m: types.Model, d: types.Data):
         dim=(d.nworld,),
         inputs=[d.efc.grad, d.efc.h, d.efc.done],
         outputs=[d.efc.Mgrad],
-        block_dim=32,
+        block_dim=m.block_dim.update_gradient_cholesky,
       )
     else:
       wp.launch_tiled(
@@ -2398,7 +2398,7 @@ def _update_gradient(m: types.Model, d: types.Data):
           d.efc.cholesky_y_tmp.reshape(shape=(d.nworld, m.nv, 1)),
         ],
         outputs=[d.efc.Mgrad.reshape(shape=(d.nworld, m.nv, 1))],
-        block_dim=32,
+        block_dim=m.block_dim.update_gradient_cholesky,
       )
   else:
     raise ValueError(f"Unknown solver type: {m.opt.solver}")

@@ -27,6 +27,37 @@ MJ_NREF = mujoco.mjNREF
 MJ_NIMP = mujoco.mjNIMP
 
 
+# TODO(team): add check that all wp.launch_tiled 'block_dim' settings are configurable
+class BlockDim:
+  """
+  Block dimension 'block_dim' settings for wp.launch_tiled.
+
+  TODO(team): experimental and may be removed
+  """
+
+  # collision_box
+  box_box: int = 32
+  # forward
+  euler_dense: int = 32
+  implicit_actuator_qderiv: wp.vec2i = wp.vec2i(64, 256)
+  actuator_velocity_sparse: int = 32
+  actuator_velocity_dense: int = 32
+  tendon_velocity: int = 32
+  qfrc_actuator: int = 32
+  # ray
+  ray: int = 64
+  # sensor
+  energy_vel_kinetic: int = 32
+  # smooth
+  cholesky_factorize: int = 32
+  cholesky_solve: int = 32
+  cholesky_factorize_solve: int = 32
+  # solver
+  update_gradient_cholesky: int = 32
+  # support
+  mul_m_dense: int = 32
+
+
 class CamLightType(enum.IntEnum):
   """Type of camera light.
 
@@ -885,6 +916,7 @@ class Model:
     mat_rgba: rgba                                           (nworld, nmat, 4)
     geompair2hfgeompair: geom pair to geom pair with         (ngeom * (ngeom - 1) // 2,)
                          height field mapping
+    block_dim: BlockDim
   """
 
   nq: int
@@ -1154,6 +1186,7 @@ class Model:
   mocap_bodyid: wp.array(dtype=int)  # warp only
   mat_rgba: wp.array2d(dtype=wp.vec4)
   geompair2hfgeompair: wp.array(dtype=int)  # warp only
+  block_dim: BlockDim  # warp only
 
 
 @dataclasses.dataclass
