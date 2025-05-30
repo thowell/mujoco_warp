@@ -614,13 +614,12 @@ def sensor_pos(m: Model, d: Data):
     )
 
     # get distances
-    ray._ray(
+    ray.rays(
       m,
       d,
       d.sensor_rangefinder_pnt,
       d.sensor_rangefinder_vec,
       vec6(0, 0, 0, 0, 0, 0),
-      False,
       True,
       m.sensor_rangefinder_bodyid,
       d.sensor_rangefinder_dist,
