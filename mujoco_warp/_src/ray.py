@@ -629,10 +629,11 @@ def ray(
     geomgroup = vec6(-1, -1, -1, -1, -1, -1)
 
   if bodyexclude is None:
-    bodyexclude = wp.zeros(1, dtype=int)
-    bodyexclude.fill_(-1)
+    d.ray_bodyexclude.fill_(-1)
+  else:
+    d.ray_bodyexclude.fill_(bodyexclude)
 
-  rays(m, d, pnt, vec, geomgroup, flg_static, bodyexclude, d.ray_dist, d.ray_geomid)
+  rays(m, d, pnt, vec, geomgroup, flg_static, d.ray_bodyexclude, d.ray_dist, d.ray_geomid)
 
   return d.ray_dist, d.ray_geomid
 

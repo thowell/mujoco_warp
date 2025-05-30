@@ -256,7 +256,7 @@ class RayTest(absltest.TestCase):
     # nothing hit with bodyexclude = 0 (world body)
     pnt = wp.array([wp.vec3(2.0, 1.0, 3.0)], dtype=wp.vec3).reshape((1, 1))
     vec = wp.array([wp.normalize(wp.vec3(0.1, 0.2, -1.0))], dtype=wp.vec3).reshape((1, 1))
-    dist, geomid = mjwarp.ray(m, d, pnt, vec, bodyexclude=wp.zeros(1, dtype=int))
+    dist, geomid = mjwarp.ray(m, d, pnt, vec, bodyexclude=0)
     wp.synchronize()
     geomid_np = geomid.numpy()[0, 0]
     dist_np = dist.numpy()[0, 0]
