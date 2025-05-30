@@ -289,10 +289,15 @@ class SmoothTest(parameterized.TestCase):
     _assert_eq(d.subtree_angmom.numpy()[0], mjd.subtree_angmom, "subtree_angmom")
 
   @parameterized.parameters(
-    ("tendon/fixed.xml"),
-    ("tendon/site.xml"),
-    ("tendon/fixed_site.xml"),
-    ("tendon/site_fixed.xml"),
+    "tendon/fixed.xml",
+    "tendon/site.xml",
+    "tendon/pulley_site.xml",
+    "tendon/fixed_site.xml",
+    "tendon/pulley_fixed_site.xml",
+    "tendon/site_fixed.xml",
+    "tendon/pulley_site_fixed.xml",
+    "tendon/wrap.xml",
+    "tendon/pulley_wrap.xml",
   )
   def test_tendon(self, xml):
     """Tests tendon."""
@@ -322,6 +327,31 @@ class SmoothTest(parameterized.TestCase):
     _assert_eq(d.actuator_moment.numpy()[0], actuator_moment, "actuator_moment")
 
   # TODO(team): test factor_solve_i
+
+  def test_solve_LD_sparse(self):
+    mjm, mjd, m, d = test_util.fixture(
+      xml="""
+    <mujoco>
+      <option jacobian="sparse"/>
+      <worldbody>
+        <body>
+          <geom type="sphere" size=".1"/>
+          <freejoint/>
+        </body>
+      </worldbody>
+    </mujoco>
+    """
+    )
+
+    qM = np.zeros((mjm.nv, mjm.nv))
+    mujoco.mj_fullM(mjm, qM, mjd.qM)
+
+    res = wp.zeros((1, mjm.nv), dtype=float)
+    vec = wp.ones((1, mjm.nv), dtype=float)
+
+    mjwarp._src.smooth.solve_LD(m, d, d.qLD, d.qLDiagInv, res, vec)
+
+    _assert_eq(res.numpy()[0], np.linalg.solve(qM, vec.numpy()[0]), "qM \\ 1")
 
 
 if __name__ == "__main__":
