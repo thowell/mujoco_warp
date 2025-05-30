@@ -199,12 +199,13 @@ def _ball_quat(jnt_qposadr: wp.array(dtype=int), qpos_in: wp.array2d(dtype=float
 @wp.kernel
 def _limit_pos_zero(
   # Model:
+  sensor_adr: wp.array(dtype=int),
   sensor_limitpos_adr: wp.array(dtype=int),
   # Data out:
   sensordata_out: wp.array2d(dtype=float),
 ):
   worldid, limitposid = wp.tid()
-  sensordata_out[worldid, sensor_limitpos_adr[limitposid]] = 0.0
+  sensordata_out[worldid, sensor_adr[sensor_limitpos_adr[limitposid]]] = 0.0
 
 
 @wp.kernel
@@ -615,8 +616,8 @@ def sensor_pos(m: Model, d: Data):
   # jointlimitpos and tendonlimitpos
   wp.launch(
     _limit_pos_zero,
-    dim=(d.nworld, m.sensor_datatype.size),
-    inputs=[m.sensor_limitpos_adr],
+    dim=(d.nworld, m.sensor_limitpos_adr.size),
+    inputs=[m.sensor_adr, m.sensor_limitpos_adr],
     outputs=[d.sensordata],
   )
 
