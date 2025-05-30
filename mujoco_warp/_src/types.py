@@ -428,6 +428,7 @@ class Option:
     wind: wind (for lift, drag, and viscosity)
     density: density of medium
     viscosity: viscosity of medium
+    graph_conditional: flag to use cuda graph conditional, should be False when JAX is used
   """
 
   timestep: float
@@ -452,6 +453,7 @@ class Option:
   wind: wp.vec3
   density: float
   viscosity: float
+  graph_conditional: bool  # warp only
 
 
 @dataclasses.dataclass
@@ -1178,6 +1180,7 @@ class Data:
     nf: number of friction constraints                          ()
     nl: number of limit constraints                             ()
     nefc: number of constraints                                 (1,)
+    nsolving: number of unconverged worlds                      (1,)
     time: simulation time                                       (nworld,)
     energy: potential, kinetic energy                           (nworld, 2)
     qpos: position                                              (nworld, nq)
@@ -1294,6 +1297,7 @@ class Data:
   nf: wp.array(dtype=int)
   nl: wp.array(dtype=int)
   nefc: wp.array(dtype=int)
+  nsolving: wp.array(dtype=int)  # warp only
   time: wp.array(dtype=float)
   energy: wp.array(dtype=wp.vec2)
   qpos: wp.array2d(dtype=float)
