@@ -26,6 +26,7 @@ MJ_NREF = mujoco.mjNREF
 MJ_NIMP = mujoco.mjNIMP
 
 
+# TODO(team): add check that all wp.launch_tiled 'block_dim' settings are configurable
 class BlockDim:
   """
   Block dimension 'block_dim' settings for wp.launch_tiled.
