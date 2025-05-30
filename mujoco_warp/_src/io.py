@@ -595,7 +595,17 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
     sensor_adr=wp.array(mjm.sensor_adr, dtype=int),
     sensor_cutoff=wp.array(mjm.sensor_cutoff, dtype=float),
     sensor_pos_adr=wp.array(
-      np.nonzero(mjm.sensor_needstage == mujoco.mjtStage.mjSTAGE_POS)[0],
+      np.nonzero(
+        (mjm.sensor_needstage == mujoco.mjtStage.mjSTAGE_POS)
+        & (mjm.sensor_type != mujoco.mjtSensor.mjSENS_JOINTLIMITPOS)
+        & (mjm.sensor_type != mujoco.mjtSensor.mjSENS_TENDONLIMITPOS)
+      )[0],
+      dtype=int,
+    ),
+    sensor_limitpos_adr=wp.array(
+      np.nonzero(
+        (mjm.sensor_type == mujoco.mjtSensor.mjSENS_JOINTLIMITPOS) | (mjm.sensor_type == mujoco.mjtSensor.mjSENS_TENDONLIMITPOS)
+      )[0],
       dtype=int,
     ),
     sensor_vel_adr=wp.array(

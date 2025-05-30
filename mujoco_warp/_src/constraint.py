@@ -864,7 +864,7 @@ def _efc_limit_slide_hinge(
       Jqvel,
       0.0,
       ConstraintType.LIMIT_JOINT.value,
-      dofadr,
+      jntid,
       efc_type_out,
       efc_id_out,
       efc_pos_out,
