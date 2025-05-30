@@ -332,6 +332,7 @@ class SensorType(enum.IntEnum):
     FRAMEQUAT: frame orientation, represented as quaternion
     SUBTREECOM: subtree center of mass
     E_POTENTIAL: potential energy
+    E_KINETIC: kinetic energy
     CLOCK: simulation time
     VELOCIMETER: 3D linear velocity, in local frame
     GYRO: 3D angular velocity, in local frame
@@ -369,6 +370,7 @@ class SensorType(enum.IntEnum):
   FRAMEQUAT = mujoco.mjtSensor.mjSENS_FRAMEQUAT
   SUBTREECOM = mujoco.mjtSensor.mjSENS_SUBTREECOM
   E_POTENTIAL = mujoco.mjtSensor.mjSENS_E_POTENTIAL
+  E_KINETIC = mujoco.mjtSensor.mjSENS_E_KINETIC
   CLOCK = mujoco.mjtSensor.mjSENS_CLOCK
   VELOCIMETER = mujoco.mjtSensor.mjSENS_VELOCIMETER
   GYRO = mujoco.mjtSensor.mjSENS_GYRO
@@ -924,6 +926,7 @@ class Model:
                     (excluding touch sensors)
     sensor_touch_adr: addresses for touch sensors            (<=nsensor,)
     sensor_e_potential: evaluate energy_pos
+    sensor_e_kinetic: evaluate energy_vel
     sensor_subtree_vel: evaluate subtree_vel
     sensor_rne_postconstraint: evaluate rne_postconstraint
     sensor_rangefinder_bodyid: bodyid for rangefinder        (nrangefinder,)
@@ -1200,6 +1203,7 @@ class Model:
   rangefinder_sensor_adr: wp.array(dtype=int)  # warp only
   sensor_touch_adr: wp.array(dtype=int)  # warp only
   sensor_e_potential: bool  # warp only
+  sensor_e_kinetic: bool  # warp only
   sensor_subtree_vel: bool  # warp only
   sensor_rne_postconstraint: bool  # warp only
   sensor_rangefinder_bodyid: wp.array(dtype=int)  # warp only
@@ -1370,6 +1374,7 @@ class Data:
     ray_bodyexclude: id of body to exclude from ray computation ()
     ray_dist: ray distance to nearest geom                      (nworld, 1)
     ray_geomid: id of geom that intersects with ray             (nworld, 1)
+    energy_vel_mul_m_skip: skip mul_m computation               (nworld,)
   """
 
   nworld: int  # warp only
@@ -1511,4 +1516,5 @@ class Data:
   ray_geomid: wp.array2d(dtype=int)  # warp only
 
   # mul_m
+  energy_vel_mul_m_skip: wp.array(dtype=bool)
   discrete_acc_mul_m_skip: wp.array(dtype=bool)  # warp only

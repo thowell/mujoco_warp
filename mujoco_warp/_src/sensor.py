@@ -587,6 +587,9 @@ def _sensor_pos(
   elif sensortype == int(SensorType.E_POTENTIAL.value):
     val = energy_in[worldid][0]
     _write_scalar(sensor_datatype, sensor_adr, sensor_cutoff, sensorid, val, out)
+  elif sensortype == int(SensorType.E_KINETIC.value):
+    val = energy_in[worldid][1]
+    _write_scalar(sensor_datatype, sensor_adr, sensor_cutoff, sensorid, val, out)
   elif sensortype == int(SensorType.CLOCK.value):
     val = _clock(time_in, worldid)
     _write_scalar(sensor_datatype, sensor_adr, sensor_cutoff, sensorid, val, out)
@@ -632,6 +635,9 @@ def sensor_pos(m: Model, d: Data):
 
   if m.sensor_e_potential:
     energy_pos(m, d)
+
+  if m.sensor_e_kinetic:
+    energy_vel(m, d)
 
   wp.launch(
     _sensor_pos,

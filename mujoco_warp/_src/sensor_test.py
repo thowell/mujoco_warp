@@ -196,6 +196,8 @@ class SensorTest(parameterized.TestCase):
           <subtreecom body="body3" cutoff=".001"/>
           <e_potential/>
           <e_potential cutoff=".001"/>
+          <e_kinetic/>
+          <e_kinetic cutoff=".001"/>
           <clock/>
           <clock cutoff=".001"/>
           <velocimeter site="site2"/> 
