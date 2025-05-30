@@ -784,6 +784,55 @@ def _ball_ang_vel(jnt_dofadr: wp.array(dtype=int), qvel_in: wp.array2d(dtype=flo
   return wp.vec3(qvel_in[worldid, adr + 0], qvel_in[worldid, adr + 1], qvel_in[worldid, adr + 2])
 
 
+@wp.kernel
+def _limit_vel_zero(
+  # Model:
+  sensor_adr: wp.array(dtype=int),
+  sensor_limitvel_adr: wp.array(dtype=int),
+  # Data out:
+  sensordata_out: wp.array2d(dtype=float),
+):
+  worldid, limitvelid = wp.tid()
+  sensordata_out[worldid, sensor_adr[sensor_limitvel_adr[limitvelid]]] = 0.0
+
+
+@wp.kernel
+def _limit_vel(
+  # Model:
+  sensor_datatype: wp.array(dtype=int),
+  sensor_objid: wp.array(dtype=int),
+  sensor_adr: wp.array(dtype=int),
+  sensor_cutoff: wp.array(dtype=float),
+  sensor_limitvel_adr: wp.array(dtype=int),
+  # Data in:
+  ne_in: wp.array(dtype=int),
+  nf_in: wp.array(dtype=int),
+  nl_in: wp.array(dtype=int),
+  efc_worldid_in: wp.array(dtype=int),
+  efc_type_in: wp.array(dtype=int),
+  efc_id_in: wp.array(dtype=int),
+  efc_vel_in: wp.array(dtype=float),
+  # Data out:
+  sensordata_out: wp.array2d(dtype=float),
+):
+  efcid, limitvelid = wp.tid()
+
+  ne = ne_in[0]
+  nf = nf_in[0]
+  nl = nl_in[0]
+
+  # skip if not limit
+  if efcid < ne + nf or efcid >= ne + nf + nl:
+    return
+
+  sensorid = sensor_limitvel_adr[limitvelid]
+  if efc_id_in[efcid] == sensor_objid[sensorid]:
+    efc_type = efc_type_in[efcid]
+    if efc_type == int(ConstraintType.LIMIT_JOINT.value) or efc_type == int(ConstraintType.LIMIT_TENDON.value):
+      worldid = efc_worldid_in[efcid]
+      _write_scalar(sensor_datatype, sensor_adr, sensor_cutoff, sensorid, efc_vel_in[efcid], sensordata_out[worldid])
+
+
 @wp.func
 def _cvel_offset(
   # Model:
@@ -1154,7 +1203,7 @@ def _sensor_vel(
 def sensor_vel(m: Model, d: Data):
   """Compute velocity-dependent sensor values."""
 
-  if (m.sensor_vel_adr.size == 0) or (m.opt.disableflags & DisableBit.SENSOR):
+  if m.opt.disableflags & DisableBit.SENSOR:
     return
 
   if m.sensor_subtree_vel:
@@ -1197,6 +1246,35 @@ def sensor_vel(m: Model, d: Data):
       d.subtree_angmom,
     ],
     outputs=[d.sensordata],
+  )
+
+  wp.launch(
+    _limit_vel_zero,
+    dim=(d.nworld, m.sensor_limitvel_adr.size),
+    inputs=[m.sensor_adr, m.sensor_limitvel_adr],
+    outputs=[d.sensordata],
+  )
+
+  wp.launch(
+    _limit_vel,
+    dim=(d.njmax, m.sensor_limitvel_adr.size),
+    inputs=[
+      m.sensor_datatype,
+      m.sensor_objid,
+      m.sensor_adr,
+      m.sensor_cutoff,
+      m.sensor_limitvel_adr,
+      d.ne,
+      d.nf,
+      d.nl,
+      d.efc.worldid,
+      d.efc.type,
+      d.efc.id,
+      d.efc.vel,
+    ],
+    outputs=[
+      d.sensordata,
+    ],
   )
 
 
