@@ -1113,6 +1113,18 @@ def _joint_actuator_force(
 
 
 @wp.kernel
+def _limit_frc_zero(
+  # Model:
+  sensor_adr: wp.array(dtype=int),
+  sensor_limitfrc_adr: wp.array(dtype=int),
+  # Data out:
+  sensordata_out: wp.array2d(dtype=float),
+):
+  worldid, limitfrcid = wp.tid()
+  sensordata_out[worldid, sensor_adr[sensor_limitfrc_adr[limitfrcid]]] = 0.0
+
+
+@wp.kernel
 def _limit_frc(
   # Model:
   sensor_datatype: wp.array(dtype=int),
@@ -1488,6 +1500,13 @@ def sensor_acc(m: Model, d: Data):
       d.cacc,
       d.cfrc_int,
     ],
+    outputs=[d.sensordata],
+  )
+
+  wp.launch(
+    _limit_frc_zero,
+    dim=(d.nworld, m.sensor_limitfrc_adr.size),
+    inputs=[m.sensor_adr, m.sensor_limitfrc_adr],
     outputs=[d.sensordata],
   )
 
