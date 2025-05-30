@@ -609,6 +609,18 @@ def _ball_ang_vel(jnt_dofadr: wp.array(dtype=int), qvel_in: wp.array2d(dtype=flo
 
 
 @wp.kernel
+def _limit_vel_zero(
+  # Model:
+  sensor_adr: wp.array(dtype=int),
+  sensor_limitvel_adr: wp.array(dtype=int),
+  # Data out:
+  sensordata_out: wp.array2d(dtype=float),
+):
+  worldid, limitvelid = wp.tid()
+  sensordata_out[worldid, sensor_adr[sensor_limitvel_adr[limitvelid]]] = 0.0
+
+
+@wp.kernel
 def _limit_vel(
   # Model:
   sensor_datatype: wp.array(dtype=int),
@@ -1057,6 +1069,13 @@ def sensor_vel(m: Model, d: Data):
       d.subtree_linvel,
       d.subtree_angmom,
     ],
+    outputs=[d.sensordata],
+  )
+
+  wp.launch(
+    _limit_vel_zero,
+    dim=(d.nworld, m.sensor_limitvel_adr.size),
+    inputs=[m.sensor_adr, m.sensor_limitvel_adr],
     outputs=[d.sensordata],
   )
 
