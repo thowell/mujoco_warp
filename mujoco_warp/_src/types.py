@@ -27,6 +27,12 @@ MJ_NIMP = mujoco.mjNIMP
 
 
 class BlockDim:
+  """
+  Block dimension 'block_dim' settings for wp.launch_tiled.
+
+  TODO(team): experimental and may be removed
+  """
+
   # collision_box
   box_box: int = 32
   # forward
