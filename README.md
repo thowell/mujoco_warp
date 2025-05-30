@@ -50,7 +50,7 @@ The following features are implemented:
 | Category          | Feature                                                                                                  |
 | ----------------- | ---------------------------------------------------------------------------------------------------------|
 | Dynamics          | Forward only                                                                                             |
-| Transmission      | `JOINT`, `JOINTINPARENT`, `TENDON`                                                                       |
+| Transmission      | `JOINT`, `JOINTINPARENT`, `TENDON`, `SITE`                                                               |
 | Actuator Dynamics | `NONE`, `INTEGRATOR`, `FILTER`, `FILTEREXACT`, `MUSCLE`                                                  |
 | Actuator Gain     | `FIXED`, `AFFINE`, `MUSCLE`                                                                              |
 | Actuator Bias     | `NONE`, `AFFINE`, `MUSCLE`                                                                               |

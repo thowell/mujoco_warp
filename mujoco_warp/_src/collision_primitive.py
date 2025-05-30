@@ -15,7 +15,7 @@
 
 import warp as wp
 
-from .collision_hfield import get_hfield_triangle_prism
+from .collision_hfield import hfield_triangle_prism
 from .math import closest_segment_point
 from .math import closest_segment_to_segment_points
 from .math import make_frame
@@ -51,6 +51,8 @@ class Geom:
   vertadr: int
   vertnum: int
   vert: wp.array(dtype=wp.vec3)
+  graphadr: int
+  graph: wp.array(dtype=int)
 
 
 @wp.func
@@ -67,6 +69,8 @@ def _geom(
   mesh_vertadr: wp.array(dtype=int),
   mesh_vertnum: wp.array(dtype=int),
   mesh_vert: wp.array(dtype=wp.vec3),
+  mesh_graphadr: wp.array(dtype=int),
+  mesh_graph: wp.array(dtype=int),
   # Data in:
   geom_xpos_in: wp.array2d(dtype=wp.vec3),
   geom_xmat_in: wp.array2d(dtype=wp.mat33),
@@ -87,16 +91,19 @@ def _geom(
   if dataid >= 0 and geom_type[gid] == int(GeomType.MESH.value):
     geom.vertadr = mesh_vertadr[dataid]
     geom.vertnum = mesh_vertnum[dataid]
+    geom.graphadr = mesh_graphadr[dataid]
   else:
     geom.vertadr = -1
     geom.vertnum = -1
+    geom.graphadr = -1
 
   if geom_type[gid] == int(GeomType.MESH.value):
     geom.vert = mesh_vert
+    geom.graph = mesh_graph
 
   # If geom is HFIELD triangle, compute triangle prism verts
   if geom_type[gid] == int(GeomType.HFIELD.value):
-    geom.hfprism = get_hfield_triangle_prism(
+    geom.hfprism = hfield_triangle_prism(
       geom_dataid, hfield_adr, hfield_nrow, hfield_ncol, hfield_size, hfield_data, gid, hftri_index
     )
 
@@ -2412,6 +2419,8 @@ def _primitive_narrowphase(
   mesh_vertadr: wp.array(dtype=int),
   mesh_vertnum: wp.array(dtype=int),
   mesh_vert: wp.array(dtype=wp.vec3),
+  mesh_graphadr: wp.array(dtype=int),
+  mesh_graph: wp.array(dtype=int),
   pair_dim: wp.array(dtype=int),
   pair_solref: wp.array2d(dtype=wp.vec2),
   pair_solreffriction: wp.array2d(dtype=wp.vec2),
@@ -2487,6 +2496,8 @@ def _primitive_narrowphase(
     mesh_vertadr,
     mesh_vertnum,
     mesh_vert,
+    mesh_graphadr,
+    mesh_graph,
     geom_xpos_in,
     geom_xmat_in,
     worldid,
@@ -2505,6 +2516,8 @@ def _primitive_narrowphase(
     mesh_vertadr,
     mesh_vertnum,
     mesh_vert,
+    mesh_graphadr,
+    mesh_graph,
     geom_xpos_in,
     geom_xmat_in,
     worldid,
@@ -2868,6 +2881,8 @@ def primitive_narrowphase(m: Model, d: Data):
       m.mesh_vertadr,
       m.mesh_vertnum,
       m.mesh_vert,
+      m.mesh_graphadr,
+      m.mesh_graph,
       m.pair_dim,
       m.pair_solref,
       m.pair_solreffriction,

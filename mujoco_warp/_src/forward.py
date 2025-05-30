@@ -364,7 +364,7 @@ def euler(m: Model, d: Data):
           dim=(d.nworld, tile.adr.size),
           inputs=[m.dof_damping, m.opt.timestep, d.qM, d.qfrc_smooth, d.qfrc_constraint, tile.adr],
           outputs=[d.qacc_integration],
-          block_dim=32,
+          block_dim=m.block_dim.euler_dense,
         )
 
     _advance(m, d, d.qacc_integration)
@@ -482,8 +482,6 @@ def rungekutta4(m: Model, d: Data):
 def implicit(m: Model, d: Data):
   """Integrates fully implicit in velocity."""
 
-  # assumptions
-  assert not m.opt.is_sparse  # unsupported
   # TODO(team): add sparse version
 
   # compile-time constants
@@ -518,7 +516,7 @@ def _actuator_velocity_sparse(m: Model, d: Data):
   NV = m.nv
 
   @kernel
-  def actuator_velocity(
+  def actuator_velocity_sparse(
     # Data in:
     qvel_in: wp.array2d(dtype=float),
     actuator_moment_in: wp.array3d(dtype=float),
@@ -533,7 +531,7 @@ def _actuator_velocity_sparse(m: Model, d: Data):
     wp.tile_store(actuator_velocity_out[worldid], actuator_velocity_tile)
 
   wp.launch_tiled(
-    actuator_velocity,
+    actuator_velocity_sparse,
     dim=(d.nworld, m.nu),
     inputs=[
       d.qvel,
@@ -542,16 +540,16 @@ def _actuator_velocity_sparse(m: Model, d: Data):
     outputs=[
       d.actuator_velocity,
     ],
-    block_dim=32,
+    block_dim=m.block_dim.actuator_velocity_sparse,
   )
 
 
-def _tile_actuator_velocity(
+def _tile_actuator_velocity_dense(
   tile_nu: TileSet,
   tile_nv: TileSet,
 ):
   @nested_kernel
-  def actuator_velocity(
+  def actuator_velocity_dense(
     # Data in:
     qvel_in: wp.array3d(dtype=float),
     actuator_moment_in: wp.array3d(dtype=float),
@@ -579,7 +577,7 @@ def _tile_actuator_velocity(
 
     wp.tile_store(actuator_velocity_out[worldid], velocity_tile, offset=(offset_nu, 0))
 
-  return actuator_velocity
+  return actuator_velocity_dense
 
 
 def _tendon_velocity(m: Model, d: Data):
@@ -610,7 +608,7 @@ def _tendon_velocity(m: Model, d: Data):
     outputs=[
       d.ten_velocity,
     ],
-    block_dim=32,
+    block_dim=m.block_dim.tendon_velocity,
   )
 
 
@@ -626,11 +624,11 @@ def fwd_velocity(m: Model, d: Data):
       if tile_nu.size == 0 or tile_nv.size == 0:
         continue
       wp.launch_tiled(
-        _tile_actuator_velocity(tile_nu, tile_nv),
+        _tile_actuator_velocity_dense(tile_nu, tile_nv),
         dim=(d.nworld, tile_nu.adr.size, tile_nv.adr.size),
         inputs=[d.qvel.reshape(d.qvel.shape + (1,)), d.actuator_moment, tile_nu.adr, tile_nv.adr],
         outputs=[d.actuator_velocity.reshape(d.actuator_velocity.shape + (1,))],
-        block_dim=32,
+        block_dim=m.block_dim.actuator_velocity_dense,
       )
 
   if m.ntendon > 0:
@@ -982,7 +980,7 @@ def fwd_actuation(m: Model, d: Data):
         outputs=[
           d.qfrc_actuator.reshape(d.qfrc_actuator.shape + (1,)),
         ],
-        block_dim=32,
+        block_dim=m.block_dim.qfrc_actuator,
       )
 
     wp.launch(
