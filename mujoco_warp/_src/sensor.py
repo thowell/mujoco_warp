@@ -1018,71 +1018,69 @@ def sensor_vel(m: Model, d: Data):
   if m.opt.disableflags & DisableBit.SENSOR:
     return
 
-  if m.sensor_vel_adr.size > 0:
-    if m.sensor_subtree_vel:
-      smooth.subtree_vel(m, d)
+  if m.sensor_subtree_vel:
+    smooth.subtree_vel(m, d)
 
-    wp.launch(
-      _sensor_vel,
-      dim=(d.nworld, m.sensor_vel_adr.size),
-      inputs=[
-        m.body_rootid,
-        m.jnt_dofadr,
-        m.geom_bodyid,
-        m.site_bodyid,
-        m.cam_bodyid,
-        m.sensor_type,
-        m.sensor_datatype,
-        m.sensor_objtype,
-        m.sensor_objid,
-        m.sensor_reftype,
-        m.sensor_refid,
-        m.sensor_adr,
-        m.sensor_cutoff,
-        m.sensor_vel_adr,
-        d.qvel,
-        d.xpos,
-        d.xmat,
-        d.xipos,
-        d.ximat,
-        d.geom_xpos,
-        d.geom_xmat,
-        d.site_xpos,
-        d.site_xmat,
-        d.cam_xpos,
-        d.cam_xmat,
-        d.subtree_com,
-        d.ten_velocity,
-        d.actuator_velocity,
-        d.cvel,
-        d.subtree_linvel,
-        d.subtree_angmom,
-      ],
-      outputs=[d.sensordata],
-    )
+  wp.launch(
+    _sensor_vel,
+    dim=(d.nworld, m.sensor_vel_adr.size),
+    inputs=[
+      m.body_rootid,
+      m.jnt_dofadr,
+      m.geom_bodyid,
+      m.site_bodyid,
+      m.cam_bodyid,
+      m.sensor_type,
+      m.sensor_datatype,
+      m.sensor_objtype,
+      m.sensor_objid,
+      m.sensor_reftype,
+      m.sensor_refid,
+      m.sensor_adr,
+      m.sensor_cutoff,
+      m.sensor_vel_adr,
+      d.qvel,
+      d.xpos,
+      d.xmat,
+      d.xipos,
+      d.ximat,
+      d.geom_xpos,
+      d.geom_xmat,
+      d.site_xpos,
+      d.site_xmat,
+      d.cam_xpos,
+      d.cam_xmat,
+      d.subtree_com,
+      d.ten_velocity,
+      d.actuator_velocity,
+      d.cvel,
+      d.subtree_linvel,
+      d.subtree_angmom,
+    ],
+    outputs=[d.sensordata],
+  )
 
-  if m.sensor_limitvel_adr.size > 0:
-    wp.launch(
-      _limit_vel,
-      dim=(d.njmax, m.sensor_limitvel_adr.size),
-      inputs=[
-        m.sensor_datatype,
-        m.sensor_objid,
-        m.sensor_adr,
-        m.sensor_cutoff,
-        m.sensor_limitvel_adr,
-        d.ne,
-        d.nf,
-        d.nl,
-        d.efc.worldid,
-        d.efc.type,
-        d.efc.id,
-        d.efc.vel,
-      ],
-      outputs=[
-        d.sensordata,
-      ],
-    )
+  wp.launch(
+    _limit_vel,
+    dim=(d.njmax, m.sensor_limitvel_adr.size),
+    inputs=[
+      m.sensor_datatype,
+      m.sensor_objid,
+      m.sensor_adr,
+      m.sensor_cutoff,
+      m.sensor_limitvel_adr,
+      d.ne,
+      d.nf,
+      d.nl,
+      d.efc.worldid,
+      d.efc.type,
+      d.efc.id,
+      d.efc.vel,
+    ],
+    outputs=[
+      d.sensordata,
+    ],
+  )
 
 
 @wp.func
