@@ -1288,6 +1288,55 @@ def _joint_actuator_force(
   return qfrc_actuator_in[worldid, jnt_dofadr[objid]]
 
 
+@wp.kernel
+def _limit_frc_zero(
+  # Model:
+  sensor_adr: wp.array(dtype=int),
+  sensor_limitfrc_adr: wp.array(dtype=int),
+  # Data out:
+  sensordata_out: wp.array2d(dtype=float),
+):
+  worldid, limitfrcid = wp.tid()
+  sensordata_out[worldid, sensor_adr[sensor_limitfrc_adr[limitfrcid]]] = 0.0
+
+
+@wp.kernel
+def _limit_frc(
+  # Model:
+  sensor_datatype: wp.array(dtype=int),
+  sensor_objid: wp.array(dtype=int),
+  sensor_adr: wp.array(dtype=int),
+  sensor_cutoff: wp.array(dtype=float),
+  sensor_limitfrc_adr: wp.array(dtype=int),
+  # Data in:
+  ne_in: wp.array(dtype=int),
+  nf_in: wp.array(dtype=int),
+  nl_in: wp.array(dtype=int),
+  efc_worldid_in: wp.array(dtype=int),
+  efc_type_in: wp.array(dtype=int),
+  efc_id_in: wp.array(dtype=int),
+  efc_force_in: wp.array(dtype=float),
+  # Data out:
+  sensordata_out: wp.array2d(dtype=float),
+):
+  efcid, limitfrcid = wp.tid()
+
+  ne = ne_in[0]
+  nf = nf_in[0]
+  nl = nl_in[0]
+
+  # skip if not limit
+  if efcid < ne + nf or efcid >= ne + nf + nl:
+    return
+
+  sensorid = sensor_limitfrc_adr[limitfrcid]
+  if efc_id_in[efcid] == sensor_objid[sensorid]:
+    efc_type = efc_type_in[efcid]
+    if efc_type == int(ConstraintType.LIMIT_JOINT.value) or efc_type == int(ConstraintType.LIMIT_TENDON.value):
+      worldid = efc_worldid_in[efcid]
+      _write_scalar(sensor_datatype, sensor_adr, sensor_cutoff, sensorid, efc_force_in[efcid], sensordata_out[worldid])
+
+
 @wp.func
 def _framelinacc(
   # Model:
@@ -1555,81 +1604,109 @@ def sensor_acc(m: Model, d: Data):
   if m.opt.disableflags & DisableBit.SENSOR:
     return
 
-  if m.sensor_touch_adr.size > 0:
-    wp.launch(
-      _sensor_touch_zero,
-      dim=(d.nworld, m.sensor_touch_adr.size),
-      inputs=[
-        m.sensor_adr,
-        m.sensor_touch_adr,
-      ],
-      outputs=[
-        d.sensordata,
-      ],
-    )
-    wp.launch(
-      _sensor_touch,
-      dim=(d.nconmax, m.sensor_touch_adr.size),
-      inputs=[
-        m.opt.cone,
-        m.geom_bodyid,
-        m.site_type,
-        m.site_bodyid,
-        m.site_size,
-        m.sensor_objid,
-        m.sensor_adr,
-        m.sensor_touch_adr,
-        d.ncon,
-        d.site_xpos,
-        d.site_xmat,
-        d.contact.pos,
-        d.contact.frame,
-        d.contact.dim,
-        d.contact.geom,
-        d.contact.efc_address,
-        d.contact.worldid,
-        d.efc.force,
-      ],
-      outputs=[
-        d.sensordata,
-      ],
-    )
+  wp.launch(
+    _sensor_touch_zero,
+    dim=(d.nworld, m.sensor_touch_adr.size),
+    inputs=[
+      m.sensor_adr,
+      m.sensor_touch_adr,
+    ],
+    outputs=[
+      d.sensordata,
+    ],
+  )
 
-  if m.sensor_acc_adr.size > 0:
-    if m.sensor_rne_postconstraint:
-      smooth.rne_postconstraint(m, d)
+  wp.launch(
+    _sensor_touch,
+    dim=(d.nconmax, m.sensor_touch_adr.size),
+    inputs=[
+      m.opt.cone,
+      m.geom_bodyid,
+      m.site_type,
+      m.site_bodyid,
+      m.site_size,
+      m.sensor_objid,
+      m.sensor_adr,
+      m.sensor_touch_adr,
+      d.ncon,
+      d.site_xpos,
+      d.site_xmat,
+      d.contact.pos,
+      d.contact.frame,
+      d.contact.dim,
+      d.contact.geom,
+      d.contact.efc_address,
+      d.contact.worldid,
+      d.efc.force,
+    ],
+    outputs=[
+      d.sensordata,
+    ],
+  )
 
-    wp.launch(
-      _sensor_acc,
-      dim=(d.nworld, m.sensor_acc_adr.size),
-      inputs=[
-        m.body_rootid,
-        m.jnt_dofadr,
-        m.geom_bodyid,
-        m.site_bodyid,
-        m.cam_bodyid,
-        m.sensor_type,
-        m.sensor_datatype,
-        m.sensor_objtype,
-        m.sensor_objid,
-        m.sensor_adr,
-        m.sensor_cutoff,
-        m.sensor_acc_adr,
-        d.xpos,
-        d.xipos,
-        d.geom_xpos,
-        d.site_xpos,
-        d.site_xmat,
-        d.cam_xpos,
-        d.subtree_com,
-        d.cvel,
-        d.actuator_force,
-        d.qfrc_actuator,
-        d.cacc,
-        d.cfrc_int,
-      ],
-      outputs=[d.sensordata],
-    )
+  if m.sensor_rne_postconstraint:
+    smooth.rne_postconstraint(m, d)
+
+  wp.launch(
+    _sensor_acc,
+    dim=(d.nworld, m.sensor_acc_adr.size),
+    inputs=[
+      m.body_rootid,
+      m.jnt_dofadr,
+      m.geom_bodyid,
+      m.site_bodyid,
+      m.cam_bodyid,
+      m.sensor_type,
+      m.sensor_datatype,
+      m.sensor_objtype,
+      m.sensor_objid,
+      m.sensor_adr,
+      m.sensor_cutoff,
+      m.sensor_acc_adr,
+      d.xpos,
+      d.xipos,
+      d.geom_xpos,
+      d.site_xpos,
+      d.site_xmat,
+      d.cam_xpos,
+      d.subtree_com,
+      d.cvel,
+      d.actuator_force,
+      d.qfrc_actuator,
+      d.cacc,
+      d.cfrc_int,
+    ],
+    outputs=[d.sensordata],
+  )
+
+  wp.launch(
+    _limit_frc_zero,
+    dim=(d.nworld, m.sensor_limitfrc_adr.size),
+    inputs=[m.sensor_adr, m.sensor_limitfrc_adr],
+    outputs=[d.sensordata],
+  )
+
+  wp.launch(
+    _limit_frc,
+    dim=(d.njmax, m.sensor_limitfrc_adr.size),
+    inputs=[
+      m.sensor_datatype,
+      m.sensor_objid,
+      m.sensor_adr,
+      m.sensor_cutoff,
+      m.sensor_limitfrc_adr,
+      d.ne,
+      d.nf,
+      d.nl,
+      d.efc.worldid,
+      d.efc.type,
+      d.efc.id,
+      d.efc.force,
+    ],
+    outputs=[
+      d.sensordata,
+    ],
+  )
 
 
 @wp.kernel

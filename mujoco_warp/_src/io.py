@@ -625,13 +625,26 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
       dtype=int,
     ),
     sensor_acc_adr=wp.array(
-      np.nonzero((mjm.sensor_needstage == mujoco.mjtStage.mjSTAGE_ACC) & (mjm.sensor_type != mujoco.mjtSensor.mjSENS_TOUCH))[0],
+      np.nonzero(
+        (mjm.sensor_needstage == mujoco.mjtStage.mjSTAGE_ACC)
+        & (
+          (mjm.sensor_type != mujoco.mjtSensor.mjSENS_TOUCH)
+          | (mjm.sensor_type != mujoco.mjtSensor.mjSENS_JOINTLIMITFRC)
+          | (mjm.sensor_type != mujoco.mjtSensor.mjSENS_TENDONLIMITFRC)
+        )
+      )[0],
       dtype=int,
     ),
     sensor_rangefinder_adr=wp.array(sensor_rangefinder_adr, dtype=int),
     rangefinder_sensor_adr=wp.array(rangefinder_sensor_adr, dtype=int),
     sensor_touch_adr=wp.array(
       np.nonzero(mjm.sensor_type == mujoco.mjtSensor.mjSENS_TOUCH)[0],
+      dtype=int,
+    ),
+    sensor_limitfrc_adr=wp.array(
+      np.nonzero(
+        (mjm.sensor_type == mujoco.mjtSensor.mjSENS_JOINTLIMITFRC) | (mjm.sensor_type == mujoco.mjtSensor.mjSENS_TENDONLIMITFRC)
+      )[0],
       dtype=int,
     ),
     sensor_e_potential=(mjm.sensor_type == mujoco.mjtSensor.mjSENS_E_POTENTIAL).any(),
