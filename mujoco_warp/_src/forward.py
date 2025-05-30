@@ -19,11 +19,13 @@ import warp as wp
 
 from . import collision_driver
 from . import constraint
+from . import derivative
 from . import math
 from . import passive
 from . import sensor
 from . import smooth
 from . import solver
+from . import util_misc
 from .support import xfrc_accumulate
 from .types import MJ_MINVAL
 from .types import BiasType
@@ -36,6 +38,7 @@ from .types import IntegratorType
 from .types import JointType
 from .types import Model
 from .types import TileSet
+from .types import TrnType
 from .types import vec10f
 from .warp_util import event_scope
 from .warp_util import kernel
@@ -362,7 +365,7 @@ def euler(m: Model, d: Data):
           dim=(d.nworld, tile.adr.size),
           inputs=[m.dof_damping, m.opt.timestep, d.qM, d.qfrc_smooth, d.qfrc_constraint, tile.adr],
           outputs=[d.qacc_integration],
-          block_dim=32,
+          block_dim=m.block_dim.euler_dense,
         )
 
     _advance(m, d, d.qacc_integration)
@@ -476,135 +479,10 @@ def rungekutta4(m: Model, d: Data):
   _advance(m, d, d.qacc_rk, d.qvel_rk)
 
 
-@wp.kernel
-def _implicit_actuator_bias_gain_vel(
-  # Model:
-  actuator_dyntype: wp.array(dtype=int),
-  actuator_gaintype: wp.array(dtype=int),
-  actuator_biastype: wp.array(dtype=int),
-  actuator_gainprm: wp.array2d(dtype=vec10f),
-  actuator_biasprm: wp.array2d(dtype=vec10f),
-  # Data in:
-  act_in: wp.array2d(dtype=float),
-  ctrl_in: wp.array2d(dtype=float),
-  # Data out:
-  act_vel_integration_out: wp.array2d(dtype=float),
-):
-  worldid, actid = wp.tid()
-
-  if actuator_biastype[actid] == wp.static(BiasType.AFFINE.value):
-    bias_vel = actuator_biasprm[worldid, actid][2]
-  else:
-    bias_vel = 0.0
-
-  if actuator_gaintype[actid] == wp.static(GainType.AFFINE.value):
-    gain_vel = actuator_gainprm[worldid, actid][2]
-  else:
-    gain_vel = 0.0
-
-  if actuator_dyntype[actid] != wp.static(DynType.NONE.value):
-    ctrl = act_in[worldid, actid]
-  else:
-    ctrl = ctrl_in[worldid, actid]
-
-  act_vel_integration_out[worldid, actid] = bias_vel + gain_vel * ctrl
-
-
-def _tile_implicit_actuator_qderiv(
-  tile_nu: TileSet,
-  tile_nv: TileSet,
-  opt_timestep: float,
-  actuation_enabled: bool,
-  passive_enabled: bool,
-):
-  @wp.func
-  def subtract_multiply(x: float, y: float):
-    return x - y * wp.static(opt_timestep)
-
-  @nested_kernel
-  def implicit_actuator_qderiv(
-    # Model:
-    dof_damping: wp.array2d(dtype=float),
-    # Data in:
-    actuator_moment_in: wp.array3d(dtype=float),
-    qM_in: wp.array3d(dtype=float),
-    qfrc_smooth_in: wp.array2d(dtype=float),
-    qfrc_constraint_in: wp.array2d(dtype=float),
-    act_vel_integration_in: wp.array2d(dtype=float),
-    qM_integration_in: wp.array3d(dtype=float),
-    # In:
-    tile_nu_adr: wp.array(dtype=int),
-    tile_nv_adr: wp.array(dtype=int),
-    # Data out:
-    qfrc_integration_out: wp.array2d(dtype=float),
-  ):
-    worldid, nodeid = wp.tid()
-
-    TILE_NU_SIZE = wp.static(int(tile_nu.size))
-    TILE_NV_SIZE = wp.static(int(tile_nv.size))
-
-    offset_nv = tile_nv_adr[nodeid]
-
-    # skip tree with no actuators.
-    if wp.static(actuation_enabled and TILE_NU_SIZE != 0):
-      offset_nu = tile_nu_adr[nodeid]
-      actuator_moment_tile = wp.tile_load(
-        actuator_moment_in[worldid],
-        shape=(TILE_NU_SIZE, TILE_NV_SIZE),
-        offset=(offset_nu, offset_nv),
-      )
-      zeros = wp.tile_zeros(shape=(TILE_NU_SIZE, TILE_NU_SIZE), dtype=wp.float32)
-      vel_tile = wp.tile_load(act_vel_integration_in[worldid], shape=(TILE_NU_SIZE), offset=offset_nu)
-      diag = wp.tile_diag_add(zeros, vel_tile)
-      actuator_moment_T = wp.tile_transpose(actuator_moment_tile)
-      amTVel = wp.tile_matmul(actuator_moment_T, diag)
-      qderiv_tile = wp.tile_matmul(amTVel, actuator_moment_tile)
-    else:
-      qderiv_tile = wp.tile_zeros(shape=(TILE_NV_SIZE, TILE_NV_SIZE), dtype=wp.float32)
-
-    if wp.static(passive_enabled):
-      dof_damping_tile = wp.tile_load(dof_damping[worldid], shape=TILE_NV_SIZE, offset=offset_nv)
-      negative = wp.neg(dof_damping_tile)
-      qderiv_tile = wp.tile_diag_add(qderiv_tile, negative)
-
-    # add to qM
-    qM_tile = wp.tile_load(qM_in[worldid], shape=(TILE_NV_SIZE, TILE_NV_SIZE), offset=(offset_nv, offset_nv))
-    qderiv_tile = wp.tile_map(subtract_multiply, qM_tile, qderiv_tile)
-    wp.tile_store(qM_integration_in[worldid], qderiv_tile, offset=(offset_nv, offset_nv))
-
-    # sum qfrc
-    qfrc_smooth_tile = wp.tile_load(qfrc_smooth_in[worldid], shape=TILE_NV_SIZE, offset=offset_nv)
-    qfrc_constraint_tile = wp.tile_load(qfrc_constraint_in[worldid], shape=TILE_NV_SIZE, offset=offset_nv)
-    qfrc_combined = wp.add(qfrc_smooth_tile, qfrc_constraint_tile)
-    wp.tile_store(qfrc_integration_out[worldid], qfrc_combined, offset=offset_nv)
-
-  return implicit_actuator_qderiv
-
-
 @event_scope
 def implicit(m: Model, d: Data):
   """Integrates fully implicit in velocity."""
 
-  # optimization comments (AD)
-  # I went from small kernels for every step to a relatively big single
-  # kernel using tile API because it kept improving performance -
-  # 30M to 50M FPS on an A6000.
-  #
-  # The main benefit is reduced global memory roundtrips, but I assume
-  # there is also some benefit to loading data as early as possible.
-  #
-  # I further tried fusing in the cholesky factor/solve but the high
-  # storage requirements led to low occupancy and thus worse performance.
-  #
-  # The _implicit_actuator_bias_gain_vel kernel could theoretically be fused in as well,
-  # but it's pretty clean straight-line code that loads a lot of data but
-  # only stores one array, so I think the benefit of keeping that one on-chip
-  # is likely not worth it compared to the compromises we're making with tile API.
-  # It would also need a different data layout for the biasprm/gainprm arrays
-  # to be tileable.
-
-  # assumptions
-  assert not m.opt.is_sparse  # unsupported
   # TODO(team): add sparse version
 
   # compile-time constants
@@ -612,53 +490,8 @@ def implicit(m: Model, d: Data):
   actuation_enabled = (not m.opt.disableflags & DisableBit.ACTUATION.value) and m.actuator_affine_bias_gain
 
   if passive_enabled or actuation_enabled:
-    if actuation_enabled:
-      wp.launch(
-        _implicit_actuator_bias_gain_vel,
-        dim=(d.nworld, m.nu),
-        inputs=[
-          m.actuator_dyntype,
-          m.actuator_gaintype,
-          m.actuator_biastype,
-          m.actuator_gainprm,
-          m.actuator_biasprm,
-          d.act,
-          d.ctrl,
-        ],
-        outputs=[
-          d.act_vel_integration,
-        ],
-      )
-
-    for tile_nu, tile_nv in zip(m.actuator_moment_tiles_nu, m.actuator_moment_tiles_nv):
-      wp.launch_tiled(
-        _tile_implicit_actuator_qderiv(
-          tile_nu,
-          tile_nv,
-          m.opt.timestep,
-          actuation_enabled,
-          passive_enabled,
-        ),
-        dim=(d.nworld, tile_nu.adr.size, tile_nv.adr.size),
-        inputs=[
-          m.dof_damping,
-          d.actuator_moment,
-          d.qM,
-          d.qfrc_smooth,
-          d.qfrc_constraint,
-          d.act_vel_integration,
-          d.qM_integration,
-          tile_nu.adr,
-          tile_nv.adr,
-        ],
-        outputs=[
-          d.qfrc_integration,
-        ],
-        block_dim=64 if actuation_enabled else 256,
-      )
-
+    derivative.deriv_smooth_vel(m, d)
     smooth._factor_solve_i_dense(m, d, d.qM_integration, d.qacc_integration, d.qfrc_integration)
-
     _advance(m, d, d.qacc_integration)
   else:
     _advance(m, d, d.qacc)
@@ -684,7 +517,7 @@ def _actuator_velocity_sparse(m: Model, d: Data):
   NV = m.nv
 
   @kernel
-  def actuator_velocity(
+  def actuator_velocity_sparse(
     # Data in:
     qvel_in: wp.array2d(dtype=float),
     actuator_moment_in: wp.array3d(dtype=float),
@@ -699,7 +532,7 @@ def _actuator_velocity_sparse(m: Model, d: Data):
     wp.tile_store(actuator_velocity_out[worldid], actuator_velocity_tile)
 
   wp.launch_tiled(
-    actuator_velocity,
+    actuator_velocity_sparse,
     dim=(d.nworld, m.nu),
     inputs=[
       d.qvel,
@@ -708,16 +541,16 @@ def _actuator_velocity_sparse(m: Model, d: Data):
     outputs=[
       d.actuator_velocity,
     ],
-    block_dim=32,
+    block_dim=m.block_dim.actuator_velocity_sparse,
   )
 
 
-def _tile_actuator_velocity(
+def _tile_actuator_velocity_dense(
   tile_nu: TileSet,
   tile_nv: TileSet,
 ):
   @nested_kernel
-  def actuator_velocity(
+  def actuator_velocity_dense(
     # Data in:
     qvel_in: wp.array3d(dtype=float),
     actuator_moment_in: wp.array3d(dtype=float),
@@ -745,7 +578,7 @@ def _tile_actuator_velocity(
 
     wp.tile_store(actuator_velocity_out[worldid], velocity_tile, offset=(offset_nu, 0))
 
-  return actuator_velocity
+  return actuator_velocity_dense
 
 
 def _tendon_velocity(m: Model, d: Data):
@@ -776,7 +609,7 @@ def _tendon_velocity(m: Model, d: Data):
     outputs=[
       d.ten_velocity,
     ],
-    block_dim=32,
+    block_dim=m.block_dim.tendon_velocity,
   )
 
 
@@ -792,11 +625,11 @@ def fwd_velocity(m: Model, d: Data):
       if tile_nu.size == 0 or tile_nv.size == 0:
         continue
       wp.launch_tiled(
-        _tile_actuator_velocity(tile_nu, tile_nv),
+        _tile_actuator_velocity_dense(tile_nu, tile_nv),
         dim=(d.nworld, tile_nu.adr.size, tile_nv.adr.size),
         inputs=[d.qvel.reshape(d.qvel.shape + (1,)), d.actuator_moment, tile_nu.adr, tile_nv.adr],
         outputs=[d.actuator_velocity.reshape(d.actuator_velocity.shape + (1,))],
-        block_dim=32,
+        block_dim=m.block_dim.actuator_velocity_dense,
       )
 
   if m.ntendon > 0:
@@ -824,6 +657,8 @@ def _actuator_force(
   actuator_biasprm: wp.array2d(dtype=vec10f),
   actuator_ctrlrange: wp.array2d(dtype=wp.vec2),
   actuator_forcerange: wp.array2d(dtype=wp.vec2),
+  actuator_acc0: wp.array(dtype=float),
+  actuator_lengthrange: wp.array(dtype=wp.vec2),
   # Data in:
   act_in: wp.array2d(dtype=float),
   ctrl_in: wp.array2d(dtype=float),
@@ -845,16 +680,21 @@ def _actuator_force(
 
   if na:
     dyntype = actuator_dyntype[uid]
+    actadr = actuator_actadr[uid]
 
+    act_dot = 0.0
     if dyntype == int(DynType.INTEGRATOR.value):
-      act_dot_out[worldid, actuator_actadr[uid]] = ctrl
+      act_dot = ctrl
     elif dyntype == int(DynType.FILTER.value) or dyntype == int(DynType.FILTEREXACT.value):
       dynprm = actuator_dynprm[worldid, uid]
-      actadr = actuator_actadr[uid]
       act = act_in[worldid, actadr]
-      act_dot_out[worldid, actadr] = (ctrl - act) / wp.max(dynprm[0], MJ_MINVAL)
+      act_dot = (ctrl - act) / wp.max(dynprm[0], MJ_MINVAL)
+    elif dyntype == int(DynType.MUSCLE.value):
+      dynprm = actuator_dynprm[worldid, uid]
+      act = act_in[worldid, actadr]
+      act_dot = util_misc.muscle_dynamics(ctrl, act, dynprm)
 
-    # TODO(team): DynType.MUSCLE
+    act_dot_out[worldid, actadr] = act_dot
 
   ctrl_act = ctrl
   if na:
@@ -875,8 +715,10 @@ def _actuator_force(
     gain = gainprm[0]
   elif gaintype == int(GainType.AFFINE.value):
     gain = gainprm[0] + gainprm[1] * length + gainprm[2] * velocity
-
-  # TODO(team): GainType.MUSCLE
+  elif gaintype == int(GainType.MUSCLE.value):
+    acc0 = actuator_acc0[uid]
+    lengthrange = actuator_lengthrange[uid]
+    gain = util_misc.muscle_gain(length, velocity, lengthrange, acc0, gainprm)
 
   # bias
   biastype = actuator_biastype[uid]
@@ -885,8 +727,10 @@ def _actuator_force(
   bias = 0.0  # BiasType.NONE
   if biastype == int(BiasType.AFFINE.value):
     bias = biasprm[0] + biasprm[1] * length + biasprm[2] * velocity
-
-  # TODO(team): BiasType.MUSCLE
+  elif biastype == int(BiasType.MUSCLE.value):
+    acc0 = actuator_acc0[uid]
+    lengthrange = actuator_lengthrange[uid]
+    bias = util_misc.muscle_bias(length, lengthrange, acc0, biasprm)
 
   force = gain * ctrl_act + bias
 
@@ -897,6 +741,50 @@ def _actuator_force(
     force = wp.clamp(force, forcerange[0], forcerange[1])
 
   actuator_force_out[worldid, uid] = force
+
+
+@wp.kernel
+def _tendon_actuator_force(
+  # Model:
+  actuator_trntype: wp.array(dtype=int),
+  actuator_trnid: wp.array(dtype=wp.vec2i),
+  # Data in:
+  actuator_force_in: wp.array2d(dtype=float),
+  # Data out:
+  ten_actfrc_out: wp.array2d(dtype=float),
+):
+  worldid, actid = wp.tid()
+
+  if actuator_trntype[actid] == int(TrnType.TENDON.value):
+    tenid = actuator_trnid[actid][0]
+    # TODO(team): only compute for tendons with force limits?
+    wp.atomic_add(ten_actfrc_out[worldid], tenid, actuator_force_in[worldid, actid])
+
+
+@wp.kernel
+def _tendon_actuator_force_clamp(
+  # Model:
+  actuator_trntype: wp.array(dtype=int),
+  actuator_trnid: wp.array(dtype=wp.vec2i),
+  tendon_actfrclimited: wp.array(dtype=bool),
+  tendon_actfrcrange: wp.array2d(dtype=wp.vec2),
+  # Data in:
+  ten_actfrc_in: wp.array2d(dtype=float),
+  # Data out:
+  actuator_force_out: wp.array2d(dtype=float),
+):
+  worldid, actid = wp.tid()
+
+  if actuator_trntype[actid] == int(TrnType.TENDON.value):
+    tenid = actuator_trnid[actid][0]
+    if tendon_actfrclimited[tenid]:
+      ten_actfrc = ten_actfrc_in[worldid, tenid]
+      actfrcrange = tendon_actfrcrange[worldid, tenid]
+
+      if ten_actfrc < actfrcrange[0]:
+        actuator_force_out[worldid, actid] *= actfrcrange[0] / ten_actfrc
+      elif ten_actfrc > actfrcrange[1]:
+        actuator_force_out[worldid, actid] *= actfrcrange[1] / ten_actfrc
 
 
 @wp.kernel
@@ -1021,6 +909,8 @@ def fwd_actuation(m: Model, d: Data):
       m.actuator_biasprm,
       m.actuator_ctrlrange,
       m.actuator_forcerange,
+      m.actuator_acc0,
+      m.actuator_lengthrange,
       d.act,
       d.ctrl,
       d.actuator_length,
@@ -1029,6 +919,33 @@ def fwd_actuation(m: Model, d: Data):
     ],
     outputs=[d.act_dot, d.actuator_force],
   )
+
+  if m.ntendon:
+    d.ten_actfrc.zero_()
+
+    wp.launch(
+      _tendon_actuator_force,
+      dim=(d.nworld, m.nu),
+      inputs=[
+        m.actuator_trntype,
+        m.actuator_trnid,
+        d.actuator_force,
+      ],
+      outputs=[d.ten_actfrc],
+    )
+
+    wp.launch(
+      _tendon_actuator_force_clamp,
+      dim=(d.nworld, m.nu),
+      inputs=[
+        m.actuator_trntype,
+        m.actuator_trnid,
+        m.tendon_actfrclimited,
+        m.tendon_actfrcrange,
+        d.ten_actfrc,
+      ],
+      outputs=[d.actuator_force],
+    )
 
   if m.opt.is_sparse:
     wp.launch(
@@ -1064,7 +981,7 @@ def fwd_actuation(m: Model, d: Data):
         outputs=[
           d.qfrc_actuator.reshape(d.qfrc_actuator.shape + (1,)),
         ],
-        block_dim=32,
+        block_dim=m.block_dim.qfrc_actuator,
       )
 
     wp.launch(

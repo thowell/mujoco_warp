@@ -18,6 +18,7 @@ import warp as wp
 from . import math
 from . import support
 from . import types
+from .types import ConstraintType
 from .types import vec5
 from .types import vec11
 from .warp_util import event_scope
@@ -38,14 +39,17 @@ def _update_efc_row(
   solref: wp.vec2,
   solimp: vec5,
   margin: float,
-  Jqvel: float,
+  vel: float,
   frictionloss: float,
+  type: int,
   id: int,
   # Data out:
+  efc_type_out: wp.array(dtype=int),
   efc_id_out: wp.array(dtype=int),
   efc_pos_out: wp.array(dtype=float),
   efc_margin_out: wp.array(dtype=float),
   efc_D_out: wp.array(dtype=float),
+  efc_vel_out: wp.array(dtype=float),
   efc_aref_out: wp.array(dtype=float),
   efc_frictionloss_out: wp.array(dtype=float),
 ):
@@ -84,10 +88,12 @@ def _update_efc_row(
 
   # Update constraints
   efc_D_out[efcid] = 1.0 / wp.max(invweight * (1.0 - imp) / imp, types.MJ_MINVAL)
-  efc_aref_out[efcid] = -k * imp * pos_aref - b * Jqvel
+  efc_vel_out[efcid] = vel
+  efc_aref_out[efcid] = -k * imp * pos_aref - b * vel
   efc_pos_out[efcid] = pos_aref + margin
   efc_margin_out[efcid] = margin
   efc_frictionloss_out[efcid] = frictionloss
+  efc_type_out[efcid] = type
   efc_id_out[efcid] = id
 
 
@@ -99,7 +105,7 @@ def _efc_equality_connect(
   opt_timestep: float,
   body_parentid: wp.array(dtype=int),
   body_rootid: wp.array(dtype=int),
-  body_invweight0: wp.array3d(dtype=float),
+  body_invweight0: wp.array2d(dtype=wp.vec2),
   dof_bodyid: wp.array(dtype=int),
   site_bodyid: wp.array(dtype=int),
   eq_obj1id: wp.array(dtype=int),
@@ -124,11 +130,13 @@ def _efc_equality_connect(
   # Data out:
   ne_connect_out: wp.array(dtype=int),
   efc_worldid_out: wp.array(dtype=int),
+  efc_type_out: wp.array(dtype=int),
   efc_id_out: wp.array(dtype=int),
   efc_J_out: wp.array2d(dtype=float),
   efc_pos_out: wp.array(dtype=float),
   efc_margin_out: wp.array(dtype=float),
   efc_D_out: wp.array(dtype=float),
+  efc_vel_out: wp.array(dtype=float),
   efc_aref_out: wp.array(dtype=float),
   efc_frictionloss_out: wp.array(dtype=float),
 ):
@@ -199,7 +207,7 @@ def _efc_equality_connect(
     efc_J_out[efcid + 2, dofid] = j1mj2[2]
     Jqvel += j1mj2 * qvel_in[worldid, dofid]
 
-  invweight = body_invweight0[worldid, body1id, 0] + body_invweight0[worldid, body2id, 0]
+  invweight = body_invweight0[worldid, body1id][0] + body_invweight0[worldid, body2id][0]
   pos_imp = wp.length(pos)
 
   solref = eq_solref[worldid, i_eq]
@@ -221,11 +229,14 @@ def _efc_equality_connect(
       0.0,
       Jqvel[i],
       0.0,
+      ConstraintType.EQUALITY.value,
       i_eq,
+      efc_type_out,
       efc_id_out,
       efc_pos_out,
       efc_margin_out,
       efc_D_out,
+      efc_vel_out,
       efc_aref_out,
       efc_frictionloss_out,
     )
@@ -258,11 +269,13 @@ def _efc_equality_joint(
   # Data out:
   ne_jnt_out: wp.array(dtype=int),
   efc_worldid_out: wp.array(dtype=int),
+  efc_type_out: wp.array(dtype=int),
   efc_id_out: wp.array(dtype=int),
   efc_J_out: wp.array2d(dtype=float),
   efc_pos_out: wp.array(dtype=float),
   efc_margin_out: wp.array(dtype=float),
   efc_D_out: wp.array(dtype=float),
+  efc_vel_out: wp.array(dtype=float),
   efc_aref_out: wp.array(dtype=float),
   efc_frictionloss_out: wp.array(dtype=float),
 ):
@@ -320,11 +333,14 @@ def _efc_equality_joint(
     0.0,
     Jqvel,
     0.0,
+    ConstraintType.EQUALITY.value,
     i_eq,
+    efc_type_out,
     efc_id_out,
     efc_pos_out,
     efc_margin_out,
     efc_D_out,
+    efc_vel_out,
     efc_aref_out,
     efc_frictionloss_out,
   )
@@ -358,11 +374,13 @@ def _efc_equality_tendon(
   # Data out:
   ne_ten_out: wp.array(dtype=int),
   efc_worldid_out: wp.array(dtype=int),
+  efc_type_out: wp.array(dtype=int),
   efc_id_out: wp.array(dtype=int),
   efc_J_out: wp.array2d(dtype=float),
   efc_pos_out: wp.array(dtype=float),
   efc_margin_out: wp.array(dtype=float),
   efc_D_out: wp.array(dtype=float),
+  efc_vel_out: wp.array(dtype=float),
   efc_aref_out: wp.array(dtype=float),
   efc_frictionloss_out: wp.array(dtype=float),
 ):
@@ -426,11 +444,14 @@ def _efc_equality_tendon(
     0.0,
     Jqvel,
     0.0,
+    ConstraintType.EQUALITY.value,
     eqid,
+    efc_type_out,
     efc_id_out,
     efc_pos_out,
     efc_margin_out,
     efc_D_out,
+    efc_vel_out,
     efc_aref_out,
     efc_frictionloss_out,
   )
@@ -453,11 +474,13 @@ def _efc_friction_dof(
   nf_out: wp.array(dtype=int),
   nefc_out: wp.array(dtype=int),
   efc_worldid_out: wp.array(dtype=int),
+  efc_type_out: wp.array(dtype=int),
   efc_id_out: wp.array(dtype=int),
   efc_J_out: wp.array2d(dtype=float),
   efc_pos_out: wp.array(dtype=float),
   efc_margin_out: wp.array(dtype=float),
   efc_D_out: wp.array(dtype=float),
+  efc_vel_out: wp.array(dtype=float),
   efc_aref_out: wp.array(dtype=float),
   efc_frictionloss_out: wp.array(dtype=float),
 ):
@@ -489,11 +512,14 @@ def _efc_friction_dof(
     0.0,
     Jqvel,
     dof_frictionloss[worldid, dofid],
+    ConstraintType.FRICTION_DOF.value,
     dofid,
+    efc_type_out,
     efc_id_out,
     efc_pos_out,
     efc_margin_out,
     efc_D_out,
+    efc_vel_out,
     efc_aref_out,
     efc_frictionloss_out,
   )
@@ -517,11 +543,13 @@ def _efc_friction_tendon(
   nf_out: wp.array(dtype=int),
   nefc_out: wp.array(dtype=int),
   efc_worldid_out: wp.array(dtype=int),
+  efc_type_out: wp.array(dtype=int),
   efc_id_out: wp.array(dtype=int),
   efc_J_out: wp.array2d(dtype=float),
   efc_pos_out: wp.array(dtype=float),
   efc_margin_out: wp.array(dtype=float),
   efc_D_out: wp.array(dtype=float),
+  efc_vel_out: wp.array(dtype=float),
   efc_aref_out: wp.array(dtype=float),
   efc_frictionloss_out: wp.array(dtype=float),
 ):
@@ -555,11 +583,14 @@ def _efc_friction_tendon(
     0.0,
     Jqvel,
     frictionloss,
+    ConstraintType.FRICTION_TENDON.value,
     tenid,
+    efc_type_out,
     efc_id_out,
     efc_pos_out,
     efc_margin_out,
     efc_D_out,
+    efc_vel_out,
     efc_aref_out,
     efc_frictionloss_out,
   )
@@ -573,7 +604,7 @@ def _efc_equality_weld(
   opt_timestep: float,
   body_parentid: wp.array(dtype=int),
   body_rootid: wp.array(dtype=int),
-  body_invweight0: wp.array3d(dtype=float),
+  body_invweight0: wp.array2d(dtype=wp.vec2),
   dof_bodyid: wp.array(dtype=int),
   site_bodyid: wp.array(dtype=int),
   site_quat: wp.array2d(dtype=wp.quat),
@@ -601,11 +632,13 @@ def _efc_equality_weld(
   # Data out:
   ne_weld_out: wp.array(dtype=int),
   efc_worldid_out: wp.array(dtype=int),
+  efc_type_out: wp.array(dtype=int),
   efc_id_out: wp.array(dtype=int),
   efc_J_out: wp.array2d(dtype=float),
   efc_pos_out: wp.array(dtype=float),
   efc_margin_out: wp.array(dtype=float),
   efc_D_out: wp.array(dtype=float),
+  efc_vel_out: wp.array(dtype=float),
   efc_aref_out: wp.array(dtype=float),
   efc_frictionloss_out: wp.array(dtype=float),
 ):
@@ -701,7 +734,7 @@ def _efc_equality_weld(
   crotq = math.mul_quat(quat1, quat)  # copy axis components
   crot = wp.vec3(crotq[1], crotq[2], crotq[3]) * torquescale
 
-  invweight_t = body_invweight0[worldid, body1id, 0] + body_invweight0[worldid, body2id, 0]
+  invweight_t = body_invweight0[worldid, body1id][0] + body_invweight0[worldid, body2id][0]
 
   pos_imp = wp.sqrt(wp.length_sq(cpos) + wp.length_sq(crot))
 
@@ -721,16 +754,19 @@ def _efc_equality_weld(
       0.0,
       Jqvelp[i],
       0.0,
+      ConstraintType.EQUALITY.value,
       i_eq,
+      efc_type_out,
       efc_id_out,
       efc_pos_out,
       efc_margin_out,
       efc_D_out,
+      efc_vel_out,
       efc_aref_out,
       efc_frictionloss_out,
     )
 
-  invweight_r = body_invweight0[worldid, body1id, 1] + body_invweight0[worldid, body2id, 1]
+  invweight_r = body_invweight0[worldid, body1id][1] + body_invweight0[worldid, body2id][1]
 
   for i in range(3):
     _update_efc_row(
@@ -745,11 +781,14 @@ def _efc_equality_weld(
       0.0,
       Jqvelr[i],
       0.0,
+      ConstraintType.EQUALITY.value,
       i_eq,
+      efc_type_out,
       efc_id_out,
       efc_pos_out,
       efc_margin_out,
       efc_D_out,
+      efc_vel_out,
       efc_aref_out,
       efc_frictionloss_out,
     )
@@ -763,7 +802,7 @@ def _efc_limit_slide_hinge(
   jnt_dofadr: wp.array(dtype=int),
   jnt_solref: wp.array2d(dtype=wp.vec2),
   jnt_solimp: wp.array2d(dtype=vec5),
-  jnt_range: wp.array3d(dtype=float),
+  jnt_range: wp.array2d(dtype=wp.vec2),
   jnt_margin: wp.array2d(dtype=float),
   jnt_limited_slide_hinge_adr: wp.array(dtype=int),
   dof_invweight0: wp.array2d(dtype=float),
@@ -777,11 +816,13 @@ def _efc_limit_slide_hinge(
   # Data out:
   nl_out: wp.array(dtype=int),
   efc_worldid_out: wp.array(dtype=int),
+  efc_type_out: wp.array(dtype=int),
   efc_id_out: wp.array(dtype=int),
   efc_J_out: wp.array2d(dtype=float),
   efc_pos_out: wp.array(dtype=float),
   efc_margin_out: wp.array(dtype=float),
   efc_D_out: wp.array(dtype=float),
+  efc_vel_out: wp.array(dtype=float),
   efc_aref_out: wp.array(dtype=float),
   efc_frictionloss_out: wp.array(dtype=float),
 ):
@@ -822,11 +863,14 @@ def _efc_limit_slide_hinge(
       jntmargin,
       Jqvel,
       0.0,
-      dofadr,
+      ConstraintType.LIMIT_JOINT.value,
+      jntid,
+      efc_type_out,
       efc_id_out,
       efc_pos_out,
       efc_margin_out,
       efc_D_out,
+      efc_vel_out,
       efc_aref_out,
       efc_frictionloss_out,
     )
@@ -840,7 +884,7 @@ def _efc_limit_ball(
   jnt_dofadr: wp.array(dtype=int),
   jnt_solref: wp.array2d(dtype=wp.vec2),
   jnt_solimp: wp.array2d(dtype=vec5),
-  jnt_range: wp.array3d(dtype=float),
+  jnt_range: wp.array2d(dtype=wp.vec2),
   jnt_margin: wp.array2d(dtype=float),
   jnt_limited_ball_adr: wp.array(dtype=int),
   dof_invweight0: wp.array2d(dtype=float),
@@ -854,11 +898,13 @@ def _efc_limit_ball(
   # Data out:
   nl_out: wp.array(dtype=int),
   efc_worldid_out: wp.array(dtype=int),
+  efc_type_out: wp.array(dtype=int),
   efc_id_out: wp.array(dtype=int),
   efc_J_out: wp.array2d(dtype=float),
   efc_pos_out: wp.array(dtype=float),
   efc_margin_out: wp.array(dtype=float),
   efc_D_out: wp.array(dtype=float),
+  efc_vel_out: wp.array(dtype=float),
   efc_aref_out: wp.array(dtype=float),
   efc_frictionloss_out: wp.array(dtype=float),
 ):
@@ -908,11 +954,14 @@ def _efc_limit_ball(
       jntmargin,
       Jqvel,
       0.0,
+      ConstraintType.LIMIT_JOINT.value,
       jntid,
+      efc_type_out,
       efc_id_out,
       efc_pos_out,
       efc_margin_out,
       efc_D_out,
+      efc_vel_out,
       efc_aref_out,
       efc_frictionloss_out,
     )
@@ -945,11 +994,13 @@ def _efc_limit_tendon(
   # Data out:
   nl_out: wp.array(dtype=int),
   efc_worldid_out: wp.array(dtype=int),
+  efc_type_out: wp.array(dtype=int),
   efc_id_out: wp.array(dtype=int),
   efc_J_out: wp.array2d(dtype=float),
   efc_pos_out: wp.array(dtype=float),
   efc_margin_out: wp.array(dtype=float),
   efc_D_out: wp.array(dtype=float),
+  efc_vel_out: wp.array(dtype=float),
   efc_aref_out: wp.array(dtype=float),
   efc_frictionloss_out: wp.array(dtype=float),
 ):
@@ -1001,11 +1052,14 @@ def _efc_limit_tendon(
       tenmargin,
       Jqvel,
       0.0,
+      ConstraintType.LIMIT_TENDON.value,
       tenid,
+      efc_type_out,
       efc_id_out,
       efc_pos_out,
       efc_margin_out,
       efc_D_out,
+      efc_vel_out,
       efc_aref_out,
       efc_frictionloss_out,
     )
@@ -1019,7 +1073,7 @@ def _efc_contact_pyramidal(
   opt_impratio: float,
   body_parentid: wp.array(dtype=int),
   body_rootid: wp.array(dtype=int),
-  body_invweight0: wp.array3d(dtype=float),
+  body_invweight0: wp.array2d(dtype=wp.vec2),
   dof_bodyid: wp.array(dtype=int),
   geom_bodyid: wp.array(dtype=int),
   # Data in:
@@ -1043,11 +1097,13 @@ def _efc_contact_pyramidal(
   # Data out:
   nefc_out: wp.array(dtype=int),
   efc_worldid_out: wp.array(dtype=int),
+  efc_type_out: wp.array(dtype=int),
   efc_id_out: wp.array(dtype=int),
   efc_J_out: wp.array2d(dtype=float),
   efc_pos_out: wp.array(dtype=float),
   efc_margin_out: wp.array(dtype=float),
   efc_D_out: wp.array(dtype=float),
+  efc_vel_out: wp.array(dtype=float),
   efc_aref_out: wp.array(dtype=float),
   efc_frictionloss_out: wp.array(dtype=float),
 ):
@@ -1084,7 +1140,7 @@ def _efc_contact_pyramidal(
     frame = frame_in[conid]
 
     # pyramidal has common invweight across all edges
-    invweight = body_invweight0[worldid, body1, 0] + body_invweight0[worldid, body2, 0]
+    invweight = body_invweight0[worldid, body1][0] + body_invweight0[worldid, body2][0]
 
     if condim > 1:
       dimid2 = dimid / 2 + 1
@@ -1140,6 +1196,11 @@ def _efc_contact_pyramidal(
       efc_J_out[efcid, i] = J
       Jqvel += J * qvel_in[worldid, i]
 
+    if condim == 1:
+      efc_type = int(ConstraintType.CONTACT_FRICTIONLESS.value)
+    else:
+      efc_type = int(ConstraintType.CONTACT_PYRAMIDAL.value)
+
     _update_efc_row(
       opt_timestep,
       refsafe_in,
@@ -1152,11 +1213,14 @@ def _efc_contact_pyramidal(
       includemargin,
       Jqvel,
       0.0,
+      efc_type,
       conid,
+      efc_type_out,
       efc_id_out,
       efc_pos_out,
       efc_margin_out,
       efc_D_out,
+      efc_vel_out,
       efc_aref_out,
       efc_frictionloss_out,
     )
@@ -1170,7 +1234,7 @@ def _efc_contact_elliptic(
   opt_impratio: float,
   body_parentid: wp.array(dtype=int),
   body_rootid: wp.array(dtype=int),
-  body_invweight0: wp.array3d(dtype=float),
+  body_invweight0: wp.array2d(dtype=wp.vec2),
   dof_bodyid: wp.array(dtype=int),
   geom_bodyid: wp.array(dtype=int),
   # Data in:
@@ -1195,11 +1259,13 @@ def _efc_contact_elliptic(
   # Data out:
   nefc_out: wp.array(dtype=int),
   efc_worldid_out: wp.array(dtype=int),
+  efc_type_out: wp.array(dtype=int),
   efc_id_out: wp.array(dtype=int),
   efc_J_out: wp.array2d(dtype=float),
   efc_pos_out: wp.array(dtype=float),
   efc_margin_out: wp.array(dtype=float),
   efc_D_out: wp.array(dtype=float),
+  efc_vel_out: wp.array(dtype=float),
   efc_aref_out: wp.array(dtype=float),
   efc_frictionloss_out: wp.array(dtype=float),
   # Out:
@@ -1273,7 +1339,7 @@ def _efc_contact_elliptic(
       efc_J_out[efcid, i] = J
       Jqvel += J * qvel_in[worldid, i]
 
-    invweight = body_invweight0[worldid, body1, 0] + body_invweight0[worldid, body2, 0]
+    invweight = body_invweight0[worldid, body1][0] + body_invweight0[worldid, body2][0]
 
     ref = solref_in[conid]
     pos_aref = pos
@@ -1297,6 +1363,11 @@ def _efc_contact_elliptic(
 
       pos_aref = 0.0
 
+    if condim == 1:
+      efc_type = int(ConstraintType.CONTACT_FRICTIONLESS.value)
+    else:
+      efc_type = int(ConstraintType.CONTACT_ELLIPTIC.value)
+
     _update_efc_row(
       opt_timestep,
       refsafe_in,
@@ -1309,11 +1380,14 @@ def _efc_contact_elliptic(
       includemargin,
       Jqvel,
       0.0,
+      efc_type,
       conid,
+      efc_type_out,
       efc_id_out,
       efc_pos_out,
       efc_margin_out,
       efc_D_out,
+      efc_vel_out,
       efc_aref_out,
       efc_frictionloss_out,
     )
@@ -1397,11 +1471,13 @@ def make_constraint(m: types.Model, d: types.Data):
         outputs=[
           d.ne_connect,
           d.efc.worldid,
+          d.efc.type,
           d.efc.id,
           d.efc.J,
           d.efc.pos,
           d.efc.margin,
           d.efc.D,
+          d.efc.vel,
           d.efc.aref,
           d.efc.frictionloss,
         ],
@@ -1442,11 +1518,13 @@ def make_constraint(m: types.Model, d: types.Data):
         outputs=[
           d.ne_weld,
           d.efc.worldid,
+          d.efc.type,
           d.efc.id,
           d.efc.J,
           d.efc.pos,
           d.efc.margin,
           d.efc.D,
+          d.efc.vel,
           d.efc.aref,
           d.efc.frictionloss,
         ],
@@ -1478,11 +1556,13 @@ def make_constraint(m: types.Model, d: types.Data):
         outputs=[
           d.ne_jnt,
           d.efc.worldid,
+          d.efc.type,
           d.efc.id,
           d.efc.J,
           d.efc.pos,
           d.efc.margin,
           d.efc.D,
+          d.efc.vel,
           d.efc.aref,
           d.efc.frictionloss,
         ],
@@ -1515,11 +1595,13 @@ def make_constraint(m: types.Model, d: types.Data):
         outputs=[
           d.ne_ten,
           d.efc.worldid,
+          d.efc.type,
           d.efc.id,
           d.efc.J,
           d.efc.pos,
           d.efc.margin,
           d.efc.D,
+          d.efc.vel,
           d.efc.aref,
           d.efc.frictionloss,
         ],
@@ -1558,11 +1640,13 @@ def make_constraint(m: types.Model, d: types.Data):
           d.nf,
           d.nefc,
           d.efc.worldid,
+          d.efc.type,
           d.efc.id,
           d.efc.J,
           d.efc.pos,
           d.efc.margin,
           d.efc.D,
+          d.efc.vel,
           d.efc.aref,
           d.efc.frictionloss,
         ],
@@ -1586,11 +1670,13 @@ def make_constraint(m: types.Model, d: types.Data):
           d.nf,
           d.nefc,
           d.efc.worldid,
+          d.efc.type,
           d.efc.id,
           d.efc.J,
           d.efc.pos,
           d.efc.margin,
           d.efc.D,
+          d.efc.vel,
           d.efc.aref,
           d.efc.frictionloss,
         ],
@@ -1622,11 +1708,13 @@ def make_constraint(m: types.Model, d: types.Data):
           outputs=[
             d.nl,
             d.efc.worldid,
+            d.efc.type,
             d.efc.id,
             d.efc.J,
             d.efc.pos,
             d.efc.margin,
             d.efc.D,
+            d.efc.vel,
             d.efc.aref,
             d.efc.frictionloss,
           ],
@@ -1656,11 +1744,13 @@ def make_constraint(m: types.Model, d: types.Data):
           outputs=[
             d.nl,
             d.efc.worldid,
+            d.efc.type,
             d.efc.id,
             d.efc.J,
             d.efc.pos,
             d.efc.margin,
             d.efc.D,
+            d.efc.vel,
             d.efc.aref,
             d.efc.frictionloss,
           ],
@@ -1695,11 +1785,13 @@ def make_constraint(m: types.Model, d: types.Data):
           outputs=[
             d.nl,
             d.efc.worldid,
+            d.efc.type,
             d.efc.id,
             d.efc.J,
             d.efc.pos,
             d.efc.margin,
             d.efc.D,
+            d.efc.vel,
             d.efc.aref,
             d.efc.frictionloss,
           ],
@@ -1748,11 +1840,13 @@ def make_constraint(m: types.Model, d: types.Data):
           outputs=[
             d.nefc,
             d.efc.worldid,
+            d.efc.type,
             d.efc.id,
             d.efc.J,
             d.efc.pos,
             d.efc.margin,
             d.efc.D,
+            d.efc.vel,
             d.efc.aref,
             d.efc.frictionloss,
           ],
@@ -1791,11 +1885,13 @@ def make_constraint(m: types.Model, d: types.Data):
           outputs=[
             d.nefc,
             d.efc.worldid,
+            d.efc.type,
             d.efc.id,
             d.efc.J,
             d.efc.pos,
             d.efc.margin,
             d.efc.D,
+            d.efc.vel,
             d.efc.aref,
             d.efc.frictionloss,
             d.contact.efc_address,

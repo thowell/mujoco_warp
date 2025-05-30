@@ -273,3 +273,8 @@ def closest_segment_to_segment_points(a0: wp.vec3, a1: wp.vec3, b0: wp.vec3, b1:
 @wp.func
 def safe_div(x: float, y: float) -> float:
   return x / wp.where(y != 0.0, y, types.MJ_MINVAL)
+
+
+@wp.func
+def upper_tri_index(n: int, i: int, j: int) -> int:
+  return (n * (n - 1) - (n - i) * (n - i - 1)) / 2 + j - i - 1
