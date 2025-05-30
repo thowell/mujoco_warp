@@ -1348,6 +1348,8 @@ class Data:
     wrap_xpos: Cartesian 3D points in all paths                 (nworld, nwrap, 6)
     wrap_geom_xpos: Cartesian 3D points for geom wrap points    (nworld, <=nwrap, 6)
     sensordata: sensor data array                               (nsensordata,)
+    ray_dist: ray distance to nearest geom                      (nworld, 1)
+    ray_geomid: id of geom that intersects with ray             (nworld, 1)
   """
 
   nworld: int  # warp only
@@ -1478,3 +1480,7 @@ class Data:
 
   # sensors
   sensordata: wp.array2d(dtype=float)
+
+  # ray
+  ray_dist: wp.array2d(dtype=float)  # warp only
+  ray_geomid: wp.array2d(dtype=int)  # warp only
