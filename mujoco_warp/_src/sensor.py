@@ -638,7 +638,7 @@ def sensor_pos(m: Model, d: Data):
 
   if m.sensor_e_kinetic:
     energy_vel(m, d)
-    
+
   wp.launch(
     _sensor_pos,
     dim=(d.nworld, m.sensor_pos_adr.size),
