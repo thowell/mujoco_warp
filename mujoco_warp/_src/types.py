@@ -128,11 +128,13 @@ class EnableBit(enum.IntFlag):
   """Enable optional feature bitflags.
 
   Members:
+    ENERGY: energy computation
     INVDISCRETE: discrete-time inverse dynamics
   """
 
+  ENERGY = mujoco.mjtEnableBit.mjENBL_ENERGY
   INVDISCRETE = mujoco.mjtEnableBit.mjENBL_INVDISCRETE
-  # unsupported: OVERRIDE, ENERGY, FWDINV, MULTICCD, ISLAND
+  # unsupported: OVERRIDE, FWDINV, MULTICCD, ISLAND
 
 
 class TrnType(enum.IntEnum):
