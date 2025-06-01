@@ -22,73 +22,153 @@ from absl.testing import absltest
 
 import mujoco_warp as mjwarp
 
+from . import test_util
+
 
 class IOTest(absltest.TestCase):
-  def test_equality(self):
+  def test_make_put_data(self):
+    """Tests that make_data and put_data are producing the same shapes for all arrays."""
+    mjm, _, _, d = test_util.fixture("pendula.xml")
+    md = mjwarp.make_data(mjm, nconmax=512, njmax=512)
+
+    # same number of fields
+    self.assertEqual(len(d.__dict__), len(md.__dict__))
+
+    # test shapes for all arrays
+    for attr, val in md.__dict__.items():
+      if isinstance(val, wp.array):
+        self.assertEqual(val.shape, getattr(d, attr).shape, f"{attr} shape mismatch")
+
+  # TODO(team): sensors
+
+  def test_actuator_trntype(self):
+    mjm = mujoco.MjModel.from_xml_string("""
+      <mujoco>
+        <worldbody>
+          <body name="body">
+            <geom type="sphere" size=".1"/>
+            <site name="site0"/>
+            <joint type="slide"/>
+          </body>
+          <site name="site1"/>
+        </worldbody>
+        <tendon>
+          <spatial name="tendon">
+            <site site="site0"/>
+            <site site="site1"/>
+          </spatial>
+        </tendon>
+        <actuator>
+          <general cranksite="site0" slidersite="site1" cranklength=".1"/>
+          <general tendon="tendon"/>
+          <general site="site0" refsite="site1"/>
+          <general body="body" ctrlrange="0 1"/>
+        </actuator>
+      </mujoco>
+    """)
+
+    with self.assertRaises(NotImplementedError):
+      mjwarp.put_model(mjm)
+
+  def test_get_data_into_m(self):
+    mjm = mujoco.MjModel.from_xml_string("""
+      <mujoco>
+        <worldbody>
+          <body pos="0 0 0" >
+            <geom type="box" pos="0 0 0" size=".5 .5 .5" />
+            <joint type="hinge" />
+          </body>
+          <body pos="0 0 0.1">
+            <geom type="sphere" size="0.5"/>
+            <freejoint/>
+          </body>
+        </worldbody>
+      </mujoco>
+    """)
+
+    mjd = mujoco.MjData(mjm)
+    mujoco.mj_forward(mjm, mjd)
+
+    mjd_ref = mujoco.MjData(mjm)
+    mujoco.mj_forward(mjm, mjd_ref)
+
+    m = mjwarp.put_model(mjm)
+    d = mjwarp.put_data(mjm, mjd)
+
+    mjd.qLD.fill(-123)
+    mjd.qM.fill(-123)
+
+    mjwarp.get_data_into(mjd, mjm, d)
+    np.testing.assert_allclose(mjd.qLD, mjd_ref.qLD)
+    np.testing.assert_allclose(mjd.qM, mjd_ref.qM)
+
+  def test_ellipsoid_fluid_model(self):
+    with self.assertRaises(NotImplementedError):
+      mjm = mujoco.MjModel.from_xml_string(
+        """
+      <mujoco>
+        <option density="1"/>
+        <worldbody>
+          <body>
+            <geom type="sphere" size=".1" fluidshape="ellipsoid"/>
+            <freejoint/>
+          </body>
+        </worldbody>
+      </mujoco>
+      """
+      )
+      mjwarp.put_model(mjm)
+
+  def test_jacobian_auto(self):
+    mjm = mujoco.MjModel.from_xml_string("""
+      <mujoco>
+        <option jacobian="auto"/>
+        <worldbody>
+          <replicate count="11">
+          <body>
+            <geom type="sphere" size=".1"/>
+            <freejoint/>
+            </body>
+          </replicate>
+        </worldbody>
+      </mujoco>
+    """)
+    mjwarp.put_model(mjm)
+
+  def test_put_data_qLD(self):
     mjm = mujoco.MjModel.from_xml_string("""
     <mujoco>
       <worldbody>
-        <body name="body1">
-          <geom type="sphere" size=".1"/>
-          <freejoint/>
+        <body>
+          <geom type="sphere" size="1"/>
+          <joint type="hinge"/>
         </body>
-        <body name="body2">
-          <geom type="sphere" size=".1"/>
-          <freejoint/>
-        </body>
-      </worldbody>  
-      <equality>
-        <connect body1="body1" body2="body2" anchor="0 0 0"/>                      
-      </equality>              
+      </worldbody>
     </mujoco>
     """)
+    mjd = mujoco.MjData(mjm)
+    d = mjwarp.put_data(mjm, mjd)
+    self.assertTrue((d.qLD.numpy() == 0.0).all())
 
+    mujoco.mj_forward(mjm, mjd)
+    mjd.qM[:] = 0.0
+    d = mjwarp.put_data(mjm, mjd)
+    self.assertTrue((d.qLD.numpy() == 0.0).all())
+
+    mujoco.mj_forward(mjm, mjd)
+    mjd.qLD[:] = 0.0
+    d = mjwarp.put_data(mjm, mjd)
+    self.assertTrue((d.qLD.numpy() == 0.0).all())
+
+  def test_implicitfast_sparse(self):
     with self.assertRaises(NotImplementedError):
-      mjwarp.put_model(mjm)
-
-  def test_sensor(self):
-    mjm = mujoco.MjModel.from_xml_string("""
+      test_util.fixture(
+        xml="""
       <mujoco>
-        <worldbody>
-          <body>
-            <geom type="sphere" size=".1"/>
-            <joint name="slide" type="slide"/>
-          </body>
-        </worldbody>   
-        <sensor>
-          <jointpos joint="slide"/>                      
-        </sensor> 
+        <option integrator="implicitfast" jacobian="sparse"/>
       </mujoco>
-    """)
-
-    with self.assertRaises(NotImplementedError):
-      mjwarp.put_model(mjm)
-
-  def test_tendon(self):
-    mjm = mujoco.MjModel.from_xml_string("""
-      <mujoco>
-        <worldbody>
-          <body>          
-            <geom type="sphere" size=".1"/>
-            <site name="site0"/>
-            <joint name="slide" type="slide"/>
-            <body pos="0 0 .1">
-              <geom type="sphere" size=".1"/>
-              <site name="site1"/>
-            </body>
-          </body>
-        </worldbody>  
-        <tendon>
-          <spatial>
-            <site site="site0"/>
-            <site site="site1"/>
-          </spatial>                      
-        </tendon>              
-      </mujoco>
-    """)
-
-    with self.assertRaises(NotImplementedError):
-      mjwarp.put_model(mjm)
+      """
+      )
 
 
 if __name__ == "__main__":
