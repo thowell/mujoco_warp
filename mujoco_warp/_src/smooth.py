@@ -885,20 +885,13 @@ def _factor_i_dense(m: Model, d: Data, M: wp.array, L: wp.array):
     )
 
 
-def factor_i(m: Model, d: Data, M, L, D=None):
-  """Factorizaton of inertia-like matrix M, assumed spd."""
-
-  if m.opt.is_sparse:
-    assert D is not None
-    _factor_i_sparse(m, d, M, L, D)
-  else:
-    _factor_i_dense(m, d, M, L)
-
-
 @event_scope
 def factor_m(m: Model, d: Data):
   """Factorizaton of inertia-like matrix M, assumed spd."""
-  factor_i(m, d, d.qM, d.qLD, d.qLDiagInv)
+  if m.opt.is_sparse:
+    _factor_i_sparse(m, d, d.qM, d.qLD, d.qLDiagInv)
+  else:
+    _factor_i_dense(m, d, d.qM, d.qLD)
 
 
 @wp.kernel
