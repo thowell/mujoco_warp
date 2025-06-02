@@ -643,6 +643,7 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
           (mjm.sensor_type != mujoco.mjtSensor.mjSENS_TOUCH)
           | (mjm.sensor_type != mujoco.mjtSensor.mjSENS_JOINTLIMITFRC)
           | (mjm.sensor_type != mujoco.mjtSensor.mjSENS_TENDONLIMITFRC)
+          | (mjm.sensor_type != mujoco.mjtSensor.mjSENS_TENDONACTFRC)
         )
       )[0],
       dtype=int,
@@ -661,6 +662,10 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
     ),
     sensor_e_potential=(mjm.sensor_type == mujoco.mjtSensor.mjSENS_E_POTENTIAL).any(),
     sensor_e_kinetic=(mjm.sensor_type == mujoco.mjtSensor.mjSENS_E_KINETIC).any(),
+    sensor_tendonactfrc_adr=wp.array(
+      np.nonzero(mjm.sensor_type == mujoco.mjtSensor.mjSENS_TENDONACTFRC)[0],
+      dtype=int,
+    ),
     sensor_subtree_vel=np.isin(
       mjm.sensor_type,
       [mujoco.mjtSensor.mjSENS_SUBTREELINVEL, mujoco.mjtSensor.mjSENS_SUBTREEANGMOM],

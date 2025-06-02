@@ -352,7 +352,8 @@ class SensorType(enum.IntEnum):
     ACCELEROMETER: accelerometer
     FORCE: force
     TORQUE: torque
-    ACTUATORFRC: scalar actuator force
+    ACTUATORFRC: scalar actuator force, measured at the joint
+    TENDONACTFRC: scalar actuator force, measured at the tendon
     JOINTACTFRC: scalar actuator force, measured at the joint
     JOINTLIMITFRC: joint limit force
     TENDONLIMITFRC: tendon limit force
@@ -395,6 +396,7 @@ class SensorType(enum.IntEnum):
   FORCE = mujoco.mjtSensor.mjSENS_FORCE
   TORQUE = mujoco.mjtSensor.mjSENS_TORQUE
   ACTUATORFRC = mujoco.mjtSensor.mjSENS_ACTUATORFRC
+  TENDONACTFRC = mujoco.mjtSensor.mjSENS_TENDONACTFRC
   JOINTACTFRC = mujoco.mjtSensor.mjSENS_JOINTACTFRC
   JOINTLIMITFRC = mujoco.mjtSensor.mjSENS_JOINTLIMITFRC
   TENDONLIMITFRC = mujoco.mjtSensor.mjSENS_TENDONLIMITFRC
@@ -941,6 +943,7 @@ class Model:
     sensor_limitfrc_adr: address for limit force sensors     (<=nsensor,)
     sensor_e_potential: evaluate energy_pos
     sensor_e_kinetic: evaluate energy_vel
+    sensor_tendonactfrc_adr: address for tendonactfrc sensor (<=nsensor,)
     sensor_subtree_vel: evaluate subtree_vel
     sensor_rne_postconstraint: evaluate rne_postconstraint
     sensor_rangefinder_bodyid: bodyid for rangefinder        (nrangefinder,)
@@ -1220,6 +1223,7 @@ class Model:
   sensor_limitfrc_adr: wp.array(dtype=int)  # warp only
   sensor_e_potential: bool  # warp only
   sensor_e_kinetic: bool  # warp only
+  sensor_tendonactfrc_adr: wp.array(dtype=int)  # warp only
   sensor_subtree_vel: bool  # warp only
   sensor_rne_postconstraint: bool  # warp only
   sensor_rangefinder_bodyid: wp.array(dtype=int)  # warp only
