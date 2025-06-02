@@ -161,8 +161,6 @@ class SmoothTest(parameterized.TestCase):
     mjwarp.rne(m, d)
     _assert_eq(d.qfrc_bias.numpy()[0], mjd.qfrc_bias, "qfrc_bias")
 
-    # TODO(team): test DisableBit.GRAVITY
-
   @parameterized.parameters(True, False)
   def test_rne_postconstraint(self, gravity):
     """Tests rne_postconstraint."""
@@ -254,9 +252,10 @@ class SmoothTest(parameterized.TestCase):
     _assert_eq(d.cvel.numpy()[0], mjd.cvel, "cvel")
     _assert_eq(d.cdof_dot.numpy()[0], mjd.cdof_dot, "cdof_dot")
 
-  def test_transmission(self):
+  @parameterized.parameters("pendula.xml", "actuation/site.xml")
+  def test_transmission(self, xml):
     """Tests transmission."""
-    mjm, mjd, m, d = test_util.fixture("pendula.xml")
+    mjm, mjd, m, d = test_util.fixture(xml)
 
     for arr in (d.actuator_length, d.actuator_moment):
       arr.zero_()
@@ -288,10 +287,15 @@ class SmoothTest(parameterized.TestCase):
     _assert_eq(d.subtree_angmom.numpy()[0], mjd.subtree_angmom, "subtree_angmom")
 
   @parameterized.parameters(
-    ("tendon/fixed.xml"),
-    ("tendon/site.xml"),
-    ("tendon/fixed_site.xml"),
-    ("tendon/site_fixed.xml"),
+    "tendon/fixed.xml",
+    "tendon/site.xml",
+    "tendon/pulley_site.xml",
+    "tendon/fixed_site.xml",
+    "tendon/pulley_fixed_site.xml",
+    "tendon/site_fixed.xml",
+    "tendon/pulley_site_fixed.xml",
+    "tendon/wrap.xml",
+    "tendon/pulley_wrap.xml",
   )
   def test_tendon(self, xml):
     """Tests tendon."""
@@ -320,7 +324,35 @@ class SmoothTest(parameterized.TestCase):
     )
     _assert_eq(d.actuator_moment.numpy()[0], actuator_moment, "actuator_moment")
 
-  # TODO(team): test factor_solve_i
+  @parameterized.parameters(True, False)
+  def test_factor_solve_i(self, sparse):
+    mjm, mjd, m, d = test_util.fixture(
+      xml="""
+    <mujoco>
+      <worldbody>
+        <body>
+          <geom type="sphere" size=".1"/>
+          <freejoint/>
+        </body>
+      </worldbody>
+    </mujoco>
+    """,
+      sparse=sparse,
+    )
+
+    qM = np.zeros((mjm.nv, mjm.nv))
+    mujoco.mj_fullM(mjm, qM, mjd.qM)
+
+    d.qLD.zero_()
+    if sparse:
+      d.qLDiagInv.zero_()
+
+    res = wp.zeros((1, mjm.nv), dtype=float)
+    vec = wp.ones((1, mjm.nv), dtype=float)
+
+    mjwarp._src.smooth.factor_solve_i(m, d, d.qM, d.qLD, d.qLDiagInv, res, vec)
+
+    _assert_eq(res.numpy()[0], np.linalg.solve(qM, vec.numpy()[0]), "qM \\ 1")
 
 
 if __name__ == "__main__":

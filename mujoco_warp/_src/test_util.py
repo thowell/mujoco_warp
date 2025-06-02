@@ -28,6 +28,7 @@ from . import warp_util
 from .types import ConeType
 from .types import Data
 from .types import DisableBit
+from .types import EnableBit
 from .types import IntegratorType
 from .types import Model
 from .types import SolverType
@@ -44,6 +45,7 @@ def fixture(
   gravity: bool = True,
   qpos0: bool = False,
   kick: bool = False,
+  energy: bool = False,
   eulerdamp: Optional[bool] = None,
   cone: Optional[ConeType] = None,
   integrator: Optional[IntegratorType] = None,
@@ -53,6 +55,9 @@ def fixture(
   ls_parallel: Optional[bool] = None,
   sparse: Optional[bool] = None,
   disableflags: Optional[int] = None,
+  enableflags: Optional[int] = None,
+  applied: bool = False,
+  nstep: int = 3,
   seed: int = 42,
   nworld: int = None,
   nconmax: int = None,
@@ -80,12 +85,17 @@ def fixture(
   if not eulerdamp:
     mjm.opt.disableflags |= DisableBit.EULERDAMP
 
+  if energy:
+    mjm.opt.enableflags |= EnableBit.ENERGY
+
   if cone is not None:
     mjm.opt.cone = cone
   if integrator is not None:
     mjm.opt.integrator = integrator
   if disableflags is not None:
     mjm.opt.disableflags |= disableflags
+  if enableflags is not None:
+    mjm.opt.enableflags |= enableflags
   if solver is not None:
     mjm.opt.solver = solver
   if iterations is not None:
@@ -110,8 +120,12 @@ def fixture(
   if kick:
     # give the system a little kick to ensure we have non-identity rotations
     mjd.qvel = np.random.uniform(-0.01, 0.01, mjm.nv)
-    mjd.ctrl = np.random.normal(scale=0.01, size=mjm.nu)
-    mujoco.mj_step(mjm, mjd, 3)  # let dynamics get state significantly non-zero
+    mjd.ctrl = np.random.uniform(-0.1, 0.1, size=mjm.nu)
+  if applied:
+    mjd.qfrc_applied = np.random.uniform(-0.1, 0.1, size=mjm.nv)
+    mjd.xfrc_applied = np.random.uniform(-0.1, 0.1, size=mjd.xfrc_applied.shape)
+  if kick or applied:
+    mujoco.mj_step(mjm, mjd, nstep)  # let dynamics get state significantly non-zero
 
   if mjm.nmocap:
     mjd.mocap_pos = np.random.random(mjd.mocap_pos.shape)
