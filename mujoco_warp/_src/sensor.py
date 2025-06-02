@@ -1435,125 +1435,122 @@ def sensor_acc(m: Model, d: Data):
   if m.opt.disableflags & DisableBit.SENSOR:
     return
 
-  if m.sensor_touch_adr.size > 0:
-    wp.launch(
-      _sensor_touch_zero,
-      dim=(d.nworld, m.sensor_touch_adr.size),
-      inputs=[
-        m.sensor_adr,
-        m.sensor_touch_adr,
-      ],
-      outputs=[
-        d.sensordata,
-      ],
-    )
-    wp.launch(
-      _sensor_touch,
-      dim=(d.nconmax, m.sensor_touch_adr.size),
-      inputs=[
-        m.opt.cone,
-        m.geom_bodyid,
-        m.site_type,
-        m.site_bodyid,
-        m.site_size,
-        m.sensor_objid,
-        m.sensor_adr,
-        m.sensor_touch_adr,
-        d.ncon,
-        d.site_xpos,
-        d.site_xmat,
-        d.contact.pos,
-        d.contact.frame,
-        d.contact.dim,
-        d.contact.geom,
-        d.contact.efc_address,
-        d.contact.worldid,
-        d.efc.force,
-      ],
-      outputs=[
-        d.sensordata,
-      ],
-    )
+  wp.launch(
+    _sensor_touch_zero,
+    dim=(d.nworld, m.sensor_touch_adr.size),
+    inputs=[
+      m.sensor_adr,
+      m.sensor_touch_adr,
+    ],
+    outputs=[
+      d.sensordata,
+    ],
+  )
+  wp.launch(
+    _sensor_touch,
+    dim=(d.nconmax, m.sensor_touch_adr.size),
+    inputs=[
+      m.opt.cone,
+      m.geom_bodyid,
+      m.site_type,
+      m.site_bodyid,
+      m.site_size,
+      m.sensor_objid,
+      m.sensor_adr,
+      m.sensor_touch_adr,
+      d.ncon,
+      d.site_xpos,
+      d.site_xmat,
+      d.contact.pos,
+      d.contact.frame,
+      d.contact.dim,
+      d.contact.geom,
+      d.contact.efc_address,
+      d.contact.worldid,
+      d.efc.force,
+    ],
+    outputs=[
+      d.sensordata,
+    ],
+  )
 
-  if m.sensor_acc_adr.size > 0:
-    if m.sensor_rne_postconstraint:
-      smooth.rne_postconstraint(m, d)
+  if m.sensor_rne_postconstraint:
+    smooth.rne_postconstraint(m, d)
 
-    wp.launch(
-      _sensor_acc,
-      dim=(d.nworld, m.sensor_acc_adr.size),
-      inputs=[
-        m.body_rootid,
-        m.jnt_dofadr,
-        m.geom_bodyid,
-        m.site_bodyid,
-        m.cam_bodyid,
-        m.sensor_type,
-        m.sensor_datatype,
-        m.sensor_objtype,
-        m.sensor_objid,
-        m.sensor_adr,
-        m.sensor_cutoff,
-        m.sensor_acc_adr,
-        d.xpos,
-        d.xipos,
-        d.geom_xpos,
-        d.site_xpos,
-        d.site_xmat,
-        d.cam_xpos,
-        d.subtree_com,
-        d.cvel,
-        d.actuator_force,
-        d.qfrc_actuator,
-        d.cacc,
-        d.cfrc_int,
-      ],
-      outputs=[d.sensordata],
-    )
+  wp.launch(
+    _sensor_acc,
+    dim=(d.nworld, m.sensor_acc_adr.size),
+    inputs=[
+      m.body_rootid,
+      m.jnt_dofadr,
+      m.geom_bodyid,
+      m.site_bodyid,
+      m.cam_bodyid,
+      m.sensor_type,
+      m.sensor_datatype,
+      m.sensor_objtype,
+      m.sensor_objid,
+      m.sensor_adr,
+      m.sensor_cutoff,
+      m.sensor_acc_adr,
+      d.xpos,
+      d.xipos,
+      d.geom_xpos,
+      d.site_xpos,
+      d.site_xmat,
+      d.cam_xpos,
+      d.subtree_com,
+      d.cvel,
+      d.actuator_force,
+      d.qfrc_actuator,
+      d.cacc,
+      d.cfrc_int,
+    ],
+    outputs=[d.sensordata],
+  )
 
-  if m.sensor_tendonactfrc_adr.size > 0:
-    wp.launch(
-      _tendon_actuator_force_zero,
-      dim=(d.nworld, m.sensor_tendonactfrc_adr.size),
-      inputs=[
-        m.sensor_adr,
-        m.sensor_tendonactfrc_adr,
-      ],
-      outputs=[
-        d.sensordata,
-      ],
-    )
+  wp.launch(
+    _tendon_actuator_force_zero,
+    dim=(d.nworld, m.sensor_tendonactfrc_adr.size),
+    inputs=[
+      m.sensor_adr,
+      m.sensor_tendonactfrc_adr,
+    ],
+    outputs=[
+      d.sensordata,
+    ],
+  )
 
-    wp.launch(
-      _tendon_actuator_force,
-      dim=(d.nworld, m.sensor_tendonactfrc_adr.size, m.nu),
-      inputs=[
-        m.actuator_trntype,
-        m.actuator_trnid,
-        m.sensor_objid,
-        m.sensor_adr,
-        m.sensor_tendonactfrc_adr,
-        d.actuator_force,
-      ],
-      outputs=[
-        d.sensordata,
-      ],
-    )
+  wp.launch(
+    _tendon_actuator_force,
+    dim=(d.nworld, m.sensor_tendonactfrc_adr.size, m.nu),
+    inputs=[
+      m.actuator_trntype,
+      m.actuator_trnid,
+      m.sensor_objid,
+      m.sensor_adr,
+      m.sensor_tendonactfrc_adr,
+      d.actuator_force,
+    ],
+    outputs=[
+      d.sensordata,
+    ],
+  )
 
-    wp.launch(
-      _tendon_actuator_force_cutoff,
-      dim=(d.nworld, m.sensor_tendonactfrc_adr.size),
-      inputs=[
-        m.sensor_datatype,
-        m.sensor_adr,
-        m.sensor_cutoff,
-        m.sensor_tendonactfrc_adr,
-        d.sensordata,
-      ],
-      outputs=[
-        d.sensordata,
-      ],
-    )
+  wp.launch(
+    _tendon_actuator_force_cutoff,
+    dim=(d.nworld, m.sensor_tendonactfrc_adr.size),
+    inputs=[
+      m.sensor_datatype,
+      m.sensor_adr,
+      m.sensor_cutoff,
+      m.sensor_tendonactfrc_adr,
+      d.sensordata,
+    ],
+    outputs=[
+      d.sensordata,
+    ],
+  )
 
 
 @wp.kernel
