@@ -266,7 +266,7 @@ class SensorTest(parameterized.TestCase):
           <tendonlimitfrc tendon="limittendon"/>
           <tendonlimitfrc tendon="limittendon" cutoff=".001"/>
           <tendonactuatorfrc tendon="tendon"/>
-          <tendonactuatorfrc tendon="tendon" cutoff=".001"/>          
+          <tendonactuatorfrc tendon="tendon" cutoff=".001"/>
           <framelinacc objtype="body" objname="body9"/>
           <framelinacc objtype="body" objname="body9" cutoff=".001"/>
           <frameangacc objtype="body" objname="body9"/>
