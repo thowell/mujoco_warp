@@ -113,7 +113,7 @@ class ForwardTest(parameterized.TestCase):
       keyframe=0,
     )
 
-    _assert_eq(d.ctrl.numpy()[0], mjd.ctrl)
+    _assert_eq(d.ctrl.numpy()[0], mjd.ctrl, "ctrl")
 
   def test_fwd_acceleration(self):
     _, mjd, m, d = test_util.fixture("humanoid/humanoid.xml", kick=True)
