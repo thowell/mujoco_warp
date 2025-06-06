@@ -301,6 +301,7 @@ def _ray_ellipsoid(pos: wp.vec3, mat: wp.mat33, size: wp.vec3, pnt: wp.vec3, vec
   return sol
 
 
+@wp.func
 def _ray_cylinder(pos: wp.vec3, mat: wp.mat33, size: wp.vec3, pnt: wp.vec3, vec: wp.vec3) -> float:
   """Returns the distance at which a ray intersects with a cylinder."""
   # bounding sphere test
