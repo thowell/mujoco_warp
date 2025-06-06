@@ -137,15 +137,16 @@ class RayTest(absltest.TestCase):
 
   def test_ray_cylinder(self):
     """Tests ray<>cylinder matches MuJoCo."""
-    mjm, mjd, m, d, = test_util.fixture("ray.xml")
+    mjm, mjd, m, d = test_util.fixture("ray.xml")
 
-    pnt = wp.array([wp.vec3(2.0, 0.0, 2.0)], dtype=wp.vec3).reshape((1, 1))
-    vec = wp.array([wp.vec3(0.0, 0.0, -1.0)], dtype=wp.vec3).reshape((1, 1))
+    pnt = wp.array([wp.vec3(2.0, 0.0, 0.05)], dtype=wp.vec3).reshape((1, 1))
+    vec = wp.array([wp.normalize(wp.vec3(0.0, 0.05, 1.0))], dtype=wp.vec3).reshape((1, 1))
 
-    mj_dist = mujoco.mj_ray(mjm, mjd, pnt.numpy()[0, 0], vec.numpy()[0, 0], None, 1, -1, np.zeros(1, dtype=int))
+    mj_geomid = np.zeros(1, dtype=np.int32)
+    mj_dist = mujoco.mj_ray(mjm, mjd, pnt.numpy()[0, 0], vec.numpy()[0, 0], None, 1, -1, mj_geomid)
     dist, geomid = mjwarp.ray(m, d, pnt, vec)
 
-    _assert_eq(geomid.numpy()[0, 0], 5, "geomid")
+    _assert_eq(geomid.numpy()[0, 0], mj_geomid[0], "geomid")
     _assert_eq(dist.numpy()[0, 0], mj_dist, "dist")
 
   def test_ray_box(self):
