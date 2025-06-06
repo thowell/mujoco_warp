@@ -470,9 +470,9 @@ def passive(m: Model, d: Data):
   d.qfrc_damper.zero_()
   d.qfrc_gravcomp.zero_()
   d.qfrc_fluid.zero_()
-  d.qfrc_passive.zero_()
 
   if m.opt.disableflags & DisableBit.PASSIVE:
+    d.qfrc_passive.zero_()
     return
 
   wp.launch(
