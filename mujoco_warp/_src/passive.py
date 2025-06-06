@@ -466,16 +466,15 @@ def _flex_bending(
 @event_scope
 def passive(m: Model, d: Data):
   """Adds all passive forces."""
-  if m.opt.disableflags & DisableBit.PASSIVE:
-    d.qfrc_spring.zero_()
-    d.qfrc_damper.zero_()
-    d.qfrc_gravcomp.zero_()
-    d.qfrc_fluid.zero_()
-    d.qfrc_passive.zero_()
-    return
-
   d.qfrc_spring.zero_()
   d.qfrc_damper.zero_()
+  d.qfrc_gravcomp.zero_()
+  d.qfrc_fluid.zero_()
+  d.qfrc_passive.zero_()
+
+  if m.opt.disableflags & DisableBit.PASSIVE:
+    return
+
   wp.launch(
     _spring_damper_dof_passive,
     dim=(d.nworld, m.njnt),
@@ -549,7 +548,6 @@ def passive(m: Model, d: Data):
   )
 
   gravcomp = m.ngravcomp and not (m.opt.disableflags & DisableBit.GRAVITY)
-  d.qfrc_gravcomp.zero_()
 
   if gravcomp:
     wp.launch(
