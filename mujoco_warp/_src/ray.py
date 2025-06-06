@@ -381,7 +381,7 @@ def _ray_hfield(
 ):
   # check geom type
   if geom_type[id] != int(GeomType.HFIELD.value):
-    return
+    return wp.inf
 
   # hfield id and dimensions
   hid = geom_dataid[id]
