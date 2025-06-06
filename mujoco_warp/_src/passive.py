@@ -22,7 +22,6 @@ from .types import Data
 from .types import DisableBit
 from .types import JointType
 from .types import Model
-from .types import Option
 from .warp_util import event_scope
 
 
