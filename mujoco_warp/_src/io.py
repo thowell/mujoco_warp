@@ -298,9 +298,11 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
 
   def create_nmodel_batched_array(mjm_array, dtype):
     array = wp.array(mjm_array, dtype=dtype)
+    array.strides = (0,) + array.strides
+    if type(mjm_array) in wp.types.vector_types:
+      return array  # array of vector type already has a leading dim
     array.ndim += 1
     array.shape = (1,) + array.shape
-    array.strides = (0,) + array.strides
     return array
 
   # rangefinder
@@ -344,9 +346,10 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
       timestep=mjm.opt.timestep,
       tolerance=mjm.opt.tolerance,
       ls_tolerance=mjm.opt.ls_tolerance,
-      gravity=wp.vec3(mjm.opt.gravity),
-      magnetic=wp.vec3(mjm.opt.magnetic),
-      wind=wp.vec3(mjm.opt.wind[0], mjm.opt.wind[1], mjm.opt.wind[2]),
+      gravity=create_nmodel_batched_array(wp.vec3(mjm.opt.gravity), dtype=wp.vec3),
+      magnetic=create_nmodel_batched_array(wp.vec3(mjm.opt.magnetic), dtype=wp.vec3),
+      wind=create_nmodel_batched_array(wp.vec3(mjm.opt.wind), dtype=wp.vec3),
+      has_fluid=mjm.opt.wind.any() or mjm.opt.density or mjm.opt.viscosity,
       density=mjm.opt.density,
       viscosity=mjm.opt.viscosity,
       cone=mjm.opt.cone,

@@ -173,7 +173,7 @@ def _spring_damper_tendon_passive(
 @wp.kernel
 def _gravity_force(
   # Model:
-  opt_gravity: wp.vec3,
+  opt_gravity: wp.array(dtype=wp.vec3),
   body_parentid: wp.array(dtype=int),
   body_rootid: wp.array(dtype=int),
   body_mass: wp.array2d(dtype=float),
@@ -189,9 +189,10 @@ def _gravity_force(
   worldid, bodyid, dofid = wp.tid()
   bodyid += 1  # skip world body
   gravcomp = body_gravcomp[worldid, bodyid]
+  gravity = opt_gravity[worldid]
 
   if gravcomp:
-    force = -opt_gravity * body_mass[worldid, bodyid] * gravcomp
+    force = -gravity * body_mass[worldid, bodyid] * gravcomp
 
     pos = xipos_in[worldid, bodyid]
     jac, _ = support.jac(body_parentid, body_rootid, dof_bodyid, subtree_com_in, cdof_in, pos, bodyid, dofid, worldid)
@@ -202,7 +203,7 @@ def _gravity_force(
 @wp.kernel
 def _box_fluid(
   # Model:
-  opt_wind: wp.vec3,
+  opt_wind: wp.array(dtype=wp.vec3),
   opt_density: float,
   opt_viscosity: float,
   body_rootid: wp.array(dtype=int),
@@ -219,6 +220,7 @@ def _box_fluid(
   """Fluid forces based on inertia-box approximation."""
 
   worldid, bodyid = wp.tid()
+  wind = opt_wind[worldid]
 
   # map from CoM-centered to local body-centered 6D velocity
 
@@ -238,9 +240,9 @@ def _box_fluid(
   lvel_torque = rotT @ torque
   lvel_force = rotT @ force
 
-  if opt_wind[0] or opt_wind[1] or opt_wind[2]:
+  if wind[0] or wind[1] or wind[2]:
     # subtract translational component from body velocity
-    lvel_force -= rotT @ opt_wind
+    lvel_force -= rotT @ wind
 
   lfrc_torque = wp.vec3(0.0)
   lfrc_force = wp.vec3(0.0)
@@ -321,6 +323,7 @@ def _fluid(m: Model, d: Data):
 @wp.kernel
 def _qfrc_passive(
   # Model:
+  opt_has_fluid: bool,
   jnt_actgravcomp: wp.array(dtype=int),
   dof_jntid: wp.array(dtype=int),
   # Data in:
@@ -330,7 +333,6 @@ def _qfrc_passive(
   qfrc_fluid_in: wp.array2d(dtype=float),
   # In:
   gravcomp: bool,
-  fluid: bool,
   # Data out:
   qfrc_passive_out: wp.array2d(dtype=float),
 ):
@@ -343,7 +345,7 @@ def _qfrc_passive(
     qfrc_passive += qfrc_gravcomp_in[worldid, dofid]
 
   # add fluid force
-  if fluid:
+  if opt_has_fluid:
     qfrc_passive += qfrc_fluid_in[worldid, dofid]
 
   qfrc_passive_out[worldid, dofid] = qfrc_passive
@@ -577,14 +579,22 @@ def passive(m: Model, d: Data):
       outputs=[d.qfrc_gravcomp],
     )
 
-  fluid = m.opt.density or m.opt.viscosity or m.opt.wind[0] or m.opt.wind[1] or m.opt.wind[2]
-  if fluid:
+  if m.opt.has_fluid:
     _fluid(m, d)
 
   wp.launch(
     _qfrc_passive,
     dim=(d.nworld, m.nv),
-    inputs=[m.jnt_actgravcomp, m.dof_jntid, d.qfrc_spring, d.qfrc_damper, d.qfrc_gravcomp, d.qfrc_fluid, gravcomp, fluid],
+    inputs=[
+      m.opt.has_fluid,
+      m.jnt_actgravcomp,
+      m.dof_jntid,
+      d.qfrc_spring,
+      d.qfrc_damper,
+      d.qfrc_gravcomp,
+      d.qfrc_fluid,
+      gravcomp,
+    ],
     outputs=[
       d.qfrc_passive,
     ],
