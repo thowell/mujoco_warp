@@ -311,6 +311,13 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
   rangefinder_sensor_adr = np.full(mjm.nsensor, -1)
   rangefinder_sensor_adr[sensor_rangefinder_adr] = np.arange(len(sensor_rangefinder_adr))
 
+  if mjm.ngeom > 1000:
+    broadphase = types.BroadphaseType.SAP_SEGMENTED
+  elif mjm.ngeom > 100:
+    broadphase = types.BroadphaseType.SAP_TILE
+  else:
+    broadphase = types.BroadphaseType.NXN
+
   m = types.Model(
     nq=mjm.nq,
     nv=mjm.nv,
@@ -366,6 +373,7 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
       epa_iterations=12,
       epa_exact_neg_distance=wp.bool(False),
       depth_extension=0.1,
+      broadphase=broadphase,
       graph_conditional=False,
     ),
     stat=types.Statistic(

@@ -482,6 +482,20 @@ vec10 = vec10f
 vec11 = vec11f
 
 
+class BroadphaseType(enum.IntEnum):
+  """Type of broadphase algorithm.
+
+  Attributes:
+     NXN: Broad phase checking all pairs
+     SAP_TILE: Sweep and prune broad phase using tile sort
+     SAP_SEGMENTED: Sweep and prune broad phase using segment sort
+  """
+
+  NXN = 0
+  SAP_TILE = 1
+  SAP_SEGMENTED = 2
+
+
 @dataclasses.dataclass
 class Option:
   """Physics options.
@@ -510,6 +524,7 @@ class Option:
     has_fluid: True if wind, density, or viscosity are non-zero at put_model time
     density: density of medium
     viscosity: viscosity of medium
+    broadphase: broadphase type, 0: nxn, 1: sap_tile, 2: sap_segmented
     graph_conditional: flag to use cuda graph conditional, should be False when JAX is used
   """
 
@@ -536,6 +551,7 @@ class Option:
   has_fluid: bool
   density: float
   viscosity: float
+  broadphase: int
   graph_conditional: bool  # warp only
 
 
