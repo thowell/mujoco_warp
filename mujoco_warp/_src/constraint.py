@@ -404,16 +404,18 @@ def _efc_equality_tendon(
 
   obj1id = eq_obj1id[eqid]
   obj2id = eq_obj2id[eqid]
+
   data = eq_data[worldid, eqid]
   solref = eq_solref[worldid, eqid]
   solimp = eq_solimp[worldid, eqid]
   pos1 = ten_length_in[worldid, obj1id] - tendon_length0[worldid, obj1id]
-  pos2 = ten_length_in[worldid, obj2id] - tendon_length0[worldid, obj2id]
   jac1 = ten_J_in[worldid, obj1id]
-  jac2 = ten_J_in[worldid, obj2id]
 
   if obj2id > -1:
     invweight = tendon_invweight0[worldid, obj1id] + tendon_invweight0[worldid, obj2id]
+
+    pos2 = ten_length_in[worldid, obj2id] - tendon_length0[worldid, obj2id]
+    jac2 = ten_J_in[worldid, obj2id]
 
     dif = pos2
     dif2 = dif * dif
