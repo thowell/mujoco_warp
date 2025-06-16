@@ -49,7 +49,6 @@ def _spring_damper_dof_passive(
   if stiffness == 0.0 and damping == 0.0:
     return
 
-  dofid = jnt_dofadr[jntid]
   jnttype = jnt_type[jntid]
   qposid = jnt_qposadr[jntid]
 
