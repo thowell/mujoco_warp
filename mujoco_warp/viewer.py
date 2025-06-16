@@ -16,6 +16,7 @@
 """An example integration of MJWarp with the MuJoCo viewer."""
 
 import logging
+import pickle
 import time
 from typing import Sequence
 
@@ -83,6 +84,7 @@ def _main(argv: Sequence[str]) -> None:
     print("Engine: MuJoCo C")
   else:  # mjwarp
     print("Engine: MuJoCo Warp")
+    mjm_hash = pickle.dumps(mjm)
     m = mjwarp.put_model(mjm)
     m.opt.ls_parallel = _LS_PARALLEL.value
     d = mjwarp.put_data(mjm, mjd)
@@ -111,29 +113,11 @@ def _main(argv: Sequence[str]) -> None:
         wp.copy(d.qvel, wp.array([mjd.qvel.astype(np.float32)]))
         wp.copy(d.time, wp.array([mjd.time], dtype=wp.float32))
 
-        # on reset, update options and potentially recompile step
-        if mjd.time == 0.0:
-          recompile = False
-
-          for field in m.opt.__dataclass_fields__:
-            try:
-              mjm_option = getattr(mjm.opt, field)
-            except:
-              continue
-
-            m_option = getattr(m.opt, field)
-            if m_option != mjm_option:
-              m_option_type = type(m_option)
-              if m_option_type == int or m_option_type == float:
-                setattr(m.opt, field, mjm_option)
-              elif m_option_type == wp.vec3:
-                setattr(m.opt, field, wp.vec3(mjm_option[0], mjm_option[1], mjm_option[2]))
-              else:
-                raise NotImplementedError(f"Field {field} option type {m_option_type} is not supported.")
-              recompile = True
-
-          if recompile:
-            graph = _compile_step(m, d)
+        hash = pickle.dumps(mjm)
+        if hash != mjm_hash:
+          mjm_hash = hash
+          m = mjwarp.put_model(mjm)
+          graph = _compile_step(m, d)
 
         if _VIEWER_GLOBAL_STATE["running"]:
           wp.capture_launch(graph)
