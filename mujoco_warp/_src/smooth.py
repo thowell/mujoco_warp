@@ -1653,11 +1653,12 @@ def _transmission_body_moment(
   ncon_in: wp.array(dtype=int),
   subtree_com_in: wp.array2d(dtype=wp.vec3),
   cdof_in: wp.array2d(dtype=wp.spatial_vector),
+  contact_dist_in: wp.array(dtype=float),
   contact_pos_in: wp.array(dtype=wp.vec3),
   contact_frame_in: wp.array(dtype=wp.mat33),
+  contact_includemargin_in: wp.array(dtype=float),
   contact_dim_in: wp.array(dtype=int),
   contact_geom_in: wp.array(dtype=wp.vec2i),
-  contact_exclude_in: wp.array(dtype=int),
   contact_efc_address_in: wp.array2d(dtype=int),
   contact_worldid_in: wp.array(dtype=int),
   efc_J_in: wp.array2d(dtype=float),
@@ -1691,7 +1692,7 @@ def _transmission_body_moment(
   if b1 != bodyid and b2 != bodyid:
     return
 
-  contact_exclude = contact_exclude_in[conid]
+  contact_exclude = int(contact_dist_in[conid] >= contact_includemargin_in[conid])
 
   # mark contact normals in efc_force
   if contact_exclude == 0:
@@ -1821,11 +1822,12 @@ def transmission(m: Model, d: Data):
         d.ncon,
         d.subtree_com,
         d.cdof,
+        d.contact.dist,
         d.contact.pos,
         d.contact.frame,
+        d.contact.includemargin,
         d.contact.dim,
         d.contact.geom,
-        d.contact.exclude,
         d.contact.efc_address,
         d.contact.worldid,
         d.efc.J,

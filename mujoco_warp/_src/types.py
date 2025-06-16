@@ -1083,7 +1083,6 @@ class Contact:
     solimp: constraint solver impedance
     dim: contact space dimensionality: 1, 3, 4 or 6
     geom: geom ids; -1 for flex
-    exclude: flag: 0: include, 1: in gap
     efc_address: address in efc; -1: not included
     worldid: world id
   """
@@ -1098,7 +1097,6 @@ class Contact:
   solimp: wp.array(dtype=vec5)
   dim: wp.array(dtype=int)
   geom: wp.array(dtype=wp.vec2i)
-  exclude: wp.array(dtype=int)
   efc_address: wp.array2d(dtype=int)
   worldid: wp.array(dtype=int)
 

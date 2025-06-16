@@ -228,7 +228,6 @@ def _box_box(
   contact_solreffriction_out: wp.array(dtype=wp.vec2),
   contact_solimp_out: wp.array(dtype=vec5),
   contact_geom_out: wp.array(dtype=wp.vec2i),
-  contact_exclude_out: wp.array(dtype=int),
   contact_worldid_out: wp.array(dtype=int),
 ):
   """Calculates contacts between pairs of boxes."""
@@ -395,7 +394,6 @@ def _box_box(
         contact_solimp_out,
         contact_dim_out,
         contact_geom_out,
-        contact_exclude_out,
         contact_worldid_out,
       )
 
@@ -648,7 +646,6 @@ def box_box_narrowphase(
       d.contact.solreffriction,
       d.contact.solimp,
       d.contact.geom,
-      d.contact.exclude,
       d.contact.worldid,
     ],
     block_dim=BOX_BOX_BLOCK_DIM,

@@ -746,7 +746,6 @@ def _gjk_epa_pipeline(
     contact_solimp_out: wp.array(dtype=vec5),
     contact_dim_out: wp.array(dtype=int),
     contact_geom_out: wp.array(dtype=wp.vec2i),
-    contact_exclude_out: wp.array(dtype=int),
     contact_worldid_out: wp.array(dtype=int),
   ):
     tid = wp.tid()
@@ -850,7 +849,6 @@ def _gjk_epa_pipeline(
         contact_solimp_out,
         contact_dim_out,
         contact_geom_out,
-        contact_exclude_out,
         contact_worldid_out,
       )
 
@@ -920,7 +918,6 @@ def gjk_narrowphase(m: Model, d: Data):
         d.contact.solimp,
         d.contact.dim,
         d.contact.geom,
-        d.contact.exclude,
         d.contact.worldid,
       ],
     )

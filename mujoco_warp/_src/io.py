@@ -677,7 +677,6 @@ def make_data(mjm: mujoco.MjModel, nworld: int = 1, nconmax: int = -1, njmax: in
       solimp=wp.zeros((nconmax,), dtype=types.vec5),
       dim=wp.zeros((nconmax,), dtype=int),
       geom=wp.zeros((nconmax,), dtype=wp.vec2i),
-      exclude=wp.zeros((nconmax,), dtype=int),
       efc_address=wp.zeros(
         (nconmax, 2 * (np.max(np.concatenate((mjm.geom_condim, mjm.pair_dim))) - 1)),
         dtype=int,
@@ -982,7 +981,6 @@ def put_data(
       solimp=padtile(mjd.contact.solimp, nconmax, dtype=types.vec5),
       dim=padtile(mjd.contact.dim, nconmax),
       geom=padtile(mjd.contact.geom, nconmax, dtype=wp.vec2i),
-      exclude=padtile(mjd.contact.exclude, nconmax, dtype=int),
       efc_address=arr(contact_efc_address),
       worldid=arr(contact_worldid),
     ),
