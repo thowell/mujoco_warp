@@ -27,9 +27,6 @@ from .types import GeomType
 from .types import Model
 from .types import vec5
 
-BOX_BOX_BLOCK_DIM = 32
-
-
 _HUGE_VAL = 1e6
 _TINY_VAL = 1e-6
 
@@ -517,7 +514,7 @@ def _clip_quad(subject_quad: mat43f, subject_normal: wp.vec3, clipping_quad: mat
 # TODO(ca): tiling variant
 @wp.func
 def _manifold_points(poly: Any, mask: Any, clipping_norm: wp.vec3) -> wp.vec4b:
-  """Chooses four points on the polygon with approximately maximal area. Return the indices"""
+  """Chooses four points on the polygon with approximately maximal area. Returns indices."""
   n = len(poly)
 
   a_idx = wp.int32(0)
@@ -648,5 +645,5 @@ def box_box_narrowphase(
       d.contact.geom,
       d.contact.worldid,
     ],
-    block_dim=BOX_BOX_BLOCK_DIM,
+    block_dim=m.block_dim.box_box,
   )
