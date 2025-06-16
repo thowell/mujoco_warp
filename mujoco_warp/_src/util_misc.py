@@ -184,6 +184,7 @@ def wrap_inside(
   # In:
   end: wp.vec4,
   radius: float,
+  # TODO(team): update kernel analyzer to allow defaults
   maxiter: int = 20,  # kernel_analyzer: ignore
   zinit: float = 1.0 - 1.0e-7,  # kernel_analyzer: ignore
   tolerance: float = 1.0e-6,  # kernel_analyzer: ignore
