@@ -46,8 +46,8 @@ def _spring_damper_dof_passive(
   stiffness = jnt_stiffness[worldid, jntid]
   damping = dof_damping[worldid, dofid]
 
-  has_stiffness = stiffness == 0.0
-  has_damping = damping == 0.0
+  has_stiffness = stiffness != 0.0
+  has_damping = damping != 0.0
 
   if not has_stiffness:
     qfrc_spring_out[worldid, dofid] = 0.0
