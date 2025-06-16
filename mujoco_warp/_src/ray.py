@@ -384,20 +384,12 @@ def _ray_hfield(
 
   # compute size and pos of base box
   base_scale = size[3] * 0.5
-  base_size = wp.vec3(
-    size[0],
-    size[1],
-    base_scale,
-  )
+  base_size = wp.vec3(size[0], size[1], base_scale)
   base_pos = pos + mat_col * base_scale
 
   # compute size and pos of top box
   top_scale = size[2] * 0.5
-  top_size = wp.vec3(
-    size[0],
-    size[1],
-    top_scale,
-  )
+  top_size = wp.vec3(size[0], size[1], top_scale)
   top_pos = pos + mat_col * top_scale
 
   # init: intersection with base box
@@ -437,14 +429,8 @@ def _ray_hfield(
   # project segment endpoints in horizontal plane, discretize
   dx = (2.0 * size[0]) / float(ncol - 1)
   dy = (2.0 * size[1]) / float(nrow - 1)
-  SX = wp.vec2(
-    (lpnt[0] * seg[0] * lvec[0] + size[0]) / dx,
-    (lpnt[0] * seg[1] * lvec[0] + size[0]) / dx,
-  )
-  SY = wp.vec2(
-    (lpnt[1] + seg[0] * lvec[1] + size[1]) / dy,
-    (lpnt[1] + seg[1] * lvec[1] + size[1]) / dy,
-  )
+  SX = wp.vec2((lpnt[0] * seg[0] * lvec[0] + size[0]) / dx, (lpnt[0] * seg[1] * lvec[0] + size[0]) / dx)
+  SY = wp.vec2((lpnt[1] + seg[0] * lvec[1] + size[1]) / dy, (lpnt[1] + seg[1] * lvec[1] + size[1]) / dy)
 
   # compute ranges, with +1 padding
   cmin = wp.max(0, int(wp.floor(wp.min(SX[0], SX[1])) - 1.0))
