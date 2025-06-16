@@ -37,6 +37,9 @@ class BlockDim:
 
   # collision_box
   box_box: int = 32
+  # derivative
+  qderiv_actuator_passive_actuation: int = 64
+  qderiv_actuator_passive_no_actuation: int = 256
   # forward
   euler_dense: int = 32
   actuator_velocity_sparse: int = 32
