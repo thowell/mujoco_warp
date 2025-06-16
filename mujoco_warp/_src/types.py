@@ -39,7 +39,6 @@ class BlockDim:
   box_box: int = 32
   # forward
   euler_dense: int = 32
-  implicit_actuator_qderiv: wp.vec2i = wp.vec2i(64, 256)
   actuator_velocity_sparse: int = 32
   actuator_velocity_dense: int = 32
   tendon_velocity: int = 32
@@ -143,15 +142,17 @@ class TrnType(enum.IntEnum):
   Members:
     JOINT: force on joint
     JOINTINPARENT: force on joint, expressed in parent frame
+    SLIDERCRANK: force via slider-crank linkage
     TENDON: force on tendon
     SITE: force on site
   """
 
   JOINT = mujoco.mjtTrn.mjTRN_JOINT
   JOINTINPARENT = mujoco.mjtTrn.mjTRN_JOINTINPARENT
+  SLIDERCRANK = mujoco.mjtTrn.mjTRN_SLIDERCRANK
   TENDON = mujoco.mjtTrn.mjTRN_TENDON
   SITE = mujoco.mjtTrn.mjTRN_SITE
-  # unsupported: SLIDERCRANK, BODY
+  # unsupported: BODY
 
 
 class DynType(enum.IntEnum):
@@ -480,6 +481,20 @@ vec10 = vec10f
 vec11 = vec11f
 
 
+class BroadphaseType(enum.IntEnum):
+  """Type of broadphase algorithm.
+
+  Attributes:
+     NXN: Broad phase checking all pairs
+     SAP_TILE: Sweep and prune broad phase using tile sort
+     SAP_SEGMENTED: Sweep and prune broad phase using segment sort
+  """
+
+  NXN = 0
+  SAP_TILE = 1
+  SAP_SEGMENTED = 2
+
+
 @dataclasses.dataclass
 class Option:
   """Physics options.
@@ -505,8 +520,10 @@ class Option:
     depth_extension: distance past which closest point is not calculated for convex geoms
     ls_parallel: evaluate engine solver step sizes in parallel
     wind: wind (for lift, drag, and viscosity)
+    has_fluid: True if wind, density, or viscosity are non-zero at put_model time
     density: density of medium
     viscosity: viscosity of medium
+    broadphase: broadphase type, 0: nxn, 1: sap_tile, 2: sap_segmented
     graph_conditional: flag to use cuda graph conditional, should be False when JAX is used
   """
 
@@ -514,8 +531,8 @@ class Option:
   impratio: float
   tolerance: float
   ls_tolerance: float
-  gravity: wp.vec3
-  magnetic: wp.vec3
+  gravity: wp.array(dtype=wp.vec3)
+  magnetic: wp.array(dtype=wp.vec3)
   integrator: int
   cone: int
   solver: int
@@ -529,9 +546,11 @@ class Option:
   epa_exact_neg_distance: bool  # warp only
   depth_extension: float  # warp only
   ls_parallel: bool
-  wind: wp.vec3
+  wind: wp.array(dtype=wp.vec3)
+  has_fluid: bool
   density: float
   viscosity: float
+  broadphase: int
   graph_conditional: bool  # warp only
 
 
@@ -875,6 +894,7 @@ class Model:
     actuator_forcerange: range of forces                     (nworld, nu, 2)
     actuator_actrange: range of activations                  (nworld, nu, 2)
     actuator_gear: scale length and transmitted force        (nworld, nu, 6)
+    actuator_cranklength: crank length for slider-crank      (nu,)
     actuator_acc0: acceleration from unit force in qpos0     (nu,)
     actuator_lengthrange: feasible actuator length range     (nu, 2)
     nxn_geom_pair: valid collision pair geom ids             (<= ngeom * (ngeom - 1) // 2,)
@@ -904,6 +924,7 @@ class Model:
     tendon_margin: min distance for limit detection          (nworld, ntendon,)
     tendon_stiffness: stiffness coefficient                  (nworld, ntendon,)
     tendon_damping: damping coefficient                      (nworld, ntendon,)
+    tendon_armature: inertia associated with tendon velocity (nworld, ntendon,)
     tendon_frictionloss: loss due to friction                (nworld, ntendon,)
     tendon_lengthspring: spring resting length range         (nworld, ntendon, 2)
     tendon_length0: tendon length in qpos0                   (nworld, ntendon,)
@@ -1159,6 +1180,7 @@ class Model:
   actuator_forcerange: wp.array2d(dtype=wp.vec2)
   actuator_actrange: wp.array2d(dtype=wp.vec2)
   actuator_gear: wp.array2d(dtype=wp.spatial_vector)
+  actuator_cranklength: wp.array(dtype=float)
   actuator_acc0: wp.array(dtype=float)
   actuator_lengthrange: wp.array(dtype=wp.vec2)
   nxn_geom_pair: wp.array(dtype=wp.vec2i)  # warp only
@@ -1188,6 +1210,7 @@ class Model:
   tendon_margin: wp.array2d(dtype=float)
   tendon_stiffness: wp.array2d(dtype=float)
   tendon_damping: wp.array2d(dtype=float)
+  tendon_armature: wp.array2d(dtype=float)
   tendon_frictionloss: wp.array2d(dtype=float)
   tendon_lengthspring: wp.array2d(dtype=wp.vec2)
   tendon_length0: wp.array2d(dtype=float)
@@ -1311,6 +1334,8 @@ class Data:
     ximat: Cartesian orientation of body inertia                (nworld, nbody, 3, 3)
     xanchor: Cartesian position of joint anchor                 (nworld, njnt, 3)
     xaxis: Cartesian joint axis                                 (nworld, njnt, 3)
+    geom_skip: skip calculating `geom_xpos` and `geom_xmat`     (ngeom,)
+               during step, reuse previous value
     geom_xpos: Cartesian geom position                          (nworld, ngeom, 3)
     geom_xmat: Cartesian geom orientation                       (nworld, ngeom, 3, 3)
     site_xpos: Cartesian site position                          (nworld, nsite, 3)
@@ -1381,6 +1406,8 @@ class Data:
     cfrc_ext: com-based external force on body                  (nworld, nbody, 6)
     ten_length: tendon lengths                                  (nworld, ntendon)
     ten_J: tendon Jacobian                                      (nworld, ntendon, nv)
+    ten_Jdot: time derivative of tendon Jacobian                (nworld, ntendon, nv)
+    ten_bias_coef: tendon bias force coefficient                (nworld, ntendon)
     ten_wrapadr: start address of tendon's path                 (nworld, ntendon)
     ten_wrapnum: number of wrap points in path                  (nworld, ntendon)
     ten_actfrc: total actuator force at tendon                  (nworld, ntendon)
@@ -1437,6 +1464,7 @@ class Data:
   ximat: wp.array2d(dtype=wp.mat33)
   xanchor: wp.array2d(dtype=wp.vec3)
   xaxis: wp.array2d(dtype=wp.vec3)
+  geom_skip: wp.array(dtype=bool)  # warp only
   geom_xpos: wp.array2d(dtype=wp.vec3)
   geom_xmat: wp.array2d(dtype=wp.mat33)
   site_xpos: wp.array2d(dtype=wp.vec3)
@@ -1518,6 +1546,8 @@ class Data:
   # tendon
   ten_length: wp.array2d(dtype=float)
   ten_J: wp.array3d(dtype=float)
+  ten_Jdot: wp.array3d(dtype=float)  # warp only
+  ten_bias_coef: wp.array2d(dtype=float)  # warp only
   ten_wrapadr: wp.array2d(dtype=int)
   ten_wrapnum: wp.array2d(dtype=int)
   ten_actfrc: wp.array2d(dtype=float)  # warp only
