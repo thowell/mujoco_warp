@@ -1107,21 +1107,6 @@ def linesearch_jv_fused(nv: int, dofs_per_thread: int):
 
 
 @wp.kernel
-def linesearch_zero_quad_gauss(
-  # Data in:
-  efc_done_in: wp.array(dtype=bool),
-  # Data out:
-  efc_quad_gauss_out: wp.array(dtype=wp.vec3),
-):
-  worldid = wp.tid()
-
-  if efc_done_in[worldid]:
-    return
-
-  efc_quad_gauss_out[worldid] = wp.vec3(0.0)
-
-
-@wp.kernel
 def linesearch_init_quad_gauss(
   # Model:
   nv: int,
@@ -1135,16 +1120,19 @@ def linesearch_init_quad_gauss(
   # Data out:
   efc_quad_gauss_out: wp.array(dtype=wp.vec3),
 ):
-  worldid, dofid = wp.tid()
+  worldid = wp.tid()
   if efc_done_in[worldid]:
     return
 
-  search = efc_search_in[worldid, dofid]
-  quad_gauss = wp.vec3()
-  quad_gauss[0] = efc_gauss_in[worldid] / float(nv)
-  quad_gauss[1] = search * (efc_Ma_in[worldid, dofid] - qfrc_smooth_in[worldid, dofid])
-  quad_gauss[2] = 0.5 * search * efc_mv_in[worldid, dofid]
-  wp.atomic_add(efc_quad_gauss_out, worldid, quad_gauss)
+  quad_gauss_0 = efc_gauss_in[worldid]
+  quad_gauss_1 = float(0.0)
+  quad_gauss_2 = float(0.0)
+  for i in range(nv):
+    search = efc_search_in[worldid, i]
+    quad_gauss_1 += search * (efc_Ma_in[worldid, i] - qfrc_smooth_in[worldid, i])
+    quad_gauss_2 += 0.5 * search * efc_mv_in[worldid, i]
+
+  efc_quad_gauss_out[worldid] = wp.vec3(quad_gauss_0, quad_gauss_1, quad_gauss_2)
 
 
 @wp.kernel
@@ -1313,17 +1301,9 @@ def _linesearch(m: types.Model, d: types.Data):
 
   # prepare quadratics
   # quad_gauss = [gauss, search.T @ Ma - search.T @ qfrc_smooth, 0.5 * search.T @ mv]
-  # TOOD(team): is zero_() better here?
-  wp.launch(
-    linesearch_zero_quad_gauss,
-    dim=(d.nworld),
-    inputs=[d.efc.done],
-    outputs=[d.efc.quad_gauss],
-  )
-
   wp.launch(
     linesearch_init_quad_gauss,
-    dim=(d.nworld, m.nv),
+    dim=(d.nworld),
     inputs=[m.nv, d.qfrc_smooth, d.efc.Ma, d.efc.search, d.efc.gauss, d.efc.mv, d.efc.done],
     outputs=[d.efc.quad_gauss],
   )
@@ -1414,14 +1394,17 @@ def solve_init_jaref(
   # Data out:
   efc_Jaref_out: wp.array(dtype=float),
 ):
-  efcid, dofid = wp.tid()
+  efcid = wp.tid()
 
   if efcid >= nefc_in[0]:
     return
 
   worldid = efc_worldid_in[efcid]
-  jaref = efc_J_in[efcid, dofid] * qacc_in[worldid, dofid] - efc_aref_in[efcid] / float(nv)
-  wp.atomic_add(efc_Jaref_out, efcid, jaref)
+  jaref = float(0.0)
+  for i in range(nv):
+    jaref += efc_J_in[efcid, i] * qacc_in[worldid, i]
+
+  efc_Jaref_out[efcid] = jaref - efc_aref_in[efcid]
 
 
 @wp.kernel
@@ -2059,7 +2042,6 @@ def update_gradient_JTDAJ(
   # Data out:
   efc_h_out: wp.array3d(dtype=float),
 ):
-  # TODO(team): static m?
   efcid_temp, elementid = wp.tid()
 
   nefc = nefc_in[0]
@@ -2263,9 +2245,9 @@ def update_gradient_cholesky_blocked(tile_size: int):
     if efc_done_in[worldid]:
       return
 
-    wp.static(create_blocked_cholesky_func(TILE_SIZE))(tid_block, efc_h_in[worldid], matrix_size, 0, 0, cholesky_L_tmp[worldid])
+    wp.static(create_blocked_cholesky_func(TILE_SIZE))(tid_block, efc_h_in[worldid], matrix_size, cholesky_L_tmp[worldid])
     wp.static(create_blocked_cholesky_solve_func(TILE_SIZE))(
-      cholesky_L_tmp[worldid], efc_grad_in[worldid], cholesky_y_tmp[worldid], matrix_size, 0, 0, efc_Mgrad_out[worldid]
+      tid_block, cholesky_L_tmp[worldid], efc_grad_in[worldid], cholesky_y_tmp[worldid], matrix_size, efc_Mgrad_out[worldid]
     )
 
   return kernel
@@ -2322,7 +2304,7 @@ def _update_gradient(m: types.Model, d: types.Data):
       # can be change in future to fine-tune the perf. The optimal factor will
       # depend on the kernel's occupancy, which determines how many blocks can
       # simultaneously run on the SM. TODO: This factor can be tuned further.
-      dim_x = int((sm_count * 6 * 256) / m.dof_tri_row.size)
+      dim_x = ceil((sm_count * 6 * 256) / m.dof_tri_row.size)
       dim_y = dim_x
     else:
       # fall back for CPU
@@ -2542,7 +2524,6 @@ def solve_done(
   nsolving_out: wp.array(dtype=int),
   efc_done_out: wp.array(dtype=bool),
 ):
-  # TODO(team): static m?
   worldid = wp.tid()
 
   if efc_done_in[worldid]:
@@ -2636,10 +2617,9 @@ def create_context(m: types.Model, d: types.Data, grad: bool = True):
   )
 
   # jaref = d.efc_J @ d.qacc - d.efc_aref
-  d.efc.Jaref.zero_()
   wp.launch(
     solve_init_jaref,
-    dim=(d.njmax, m.nv),
+    dim=(d.njmax),
     inputs=[m.nv, d.nefc, d.qacc, d.efc.worldid, d.efc.J, d.efc.aref],
     outputs=[d.efc.Jaref],
   )
@@ -2655,6 +2635,13 @@ def create_context(m: types.Model, d: types.Data, grad: bool = True):
 
 @event_scope
 def solve(m: types.Model, d: types.Data):
+  if m.opt.graph_conditional:
+    wp.capture_if(condition=d.nefc, on_true=_solve, on_false=None, m=m, d=d)
+  else:
+    _solve(m, d)
+
+
+def _solve(m: types.Model, d: types.Data):
   """Finds forces that satisfy constraints."""
   # warmstart
   wp.copy(d.qacc, d.qacc_warmstart)

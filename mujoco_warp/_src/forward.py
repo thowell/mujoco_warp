@@ -506,6 +506,7 @@ def fwd_position(m: Model, d: Data):
   smooth.camlight(m, d)
   smooth.tendon(m, d)
   smooth.crb(m, d)
+  smooth.tendon_armature(m, d)
   smooth.factor_m(m, d)
   collision_driver.collision(m, d)
   constraint.make_constraint(m, d)
@@ -639,6 +640,7 @@ def fwd_velocity(m: Model, d: Data):
   smooth.com_vel(m, d)
   passive.passive(m, d)
   smooth.rne(m, d)
+  smooth.tendon_bias(m, d, d.qfrc_bias)
 
 
 @wp.kernel
@@ -679,22 +681,23 @@ def _actuator_force(
     ctrl = wp.clamp(ctrl, ctrlrange[0], ctrlrange[1])
 
   if na:
-    dyntype = actuator_dyntype[uid]
     actadr = actuator_actadr[uid]
 
-    act_dot = 0.0
-    if dyntype == int(DynType.INTEGRATOR.value):
-      act_dot = ctrl
-    elif dyntype == int(DynType.FILTER.value) or dyntype == int(DynType.FILTEREXACT.value):
-      dynprm = actuator_dynprm[worldid, uid]
-      act = act_in[worldid, actadr]
-      act_dot = (ctrl - act) / wp.max(dynprm[0], MJ_MINVAL)
-    elif dyntype == int(DynType.MUSCLE.value):
-      dynprm = actuator_dynprm[worldid, uid]
-      act = act_in[worldid, actadr]
-      act_dot = util_misc.muscle_dynamics(ctrl, act, dynprm)
+    if actadr > -1:
+      dyntype = actuator_dyntype[uid]
+      act_dot = 0.0
+      if dyntype == int(DynType.INTEGRATOR.value):
+        act_dot = ctrl
+      elif dyntype == int(DynType.FILTER.value) or dyntype == int(DynType.FILTEREXACT.value):
+        dynprm = actuator_dynprm[worldid, uid]
+        act = act_in[worldid, actadr]
+        act_dot = (ctrl - act) / wp.max(dynprm[0], MJ_MINVAL)
+      elif dyntype == int(DynType.MUSCLE.value):
+        dynprm = actuator_dynprm[worldid, uid]
+        act = act_in[worldid, actadr]
+        act_dot = util_misc.muscle_dynamics(ctrl, act, dynprm)
 
-    act_dot_out[worldid, actadr] = act_dot
+      act_dot_out[worldid, actadr] = act_dot
 
   ctrl_act = ctrl
   if na:
