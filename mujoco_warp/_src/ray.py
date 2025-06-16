@@ -414,10 +414,10 @@ def _ray_hfield(
   else:
     b0[2] = 0.0
   b1 = b0 + lvec * -wp.dot(lvec, b0) / wp.dot(lvec, lvec)
-  b1, __ = normalize_with_norm(b1)
+  b1 = wp.normalize(b1)
 
   b2 = wp.cross(b1, lvec)
-  b2, __ = normalize_with_norm(b2)
+  b2 = wp.normalize(b2)
 
   # find ray segment intersecting top box
   seg = wp.vec2(0.0, top_intersect)
