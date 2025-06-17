@@ -38,6 +38,8 @@ class BlockDim:
 
   # collision_box
   box_box: int = 32
+  # collision_driver
+  segmented_sort: int = 128
   # derivative
   qderiv_actuator_passive_actuation: int = 64
   qderiv_actuator_passive_no_actuation: int = 256
