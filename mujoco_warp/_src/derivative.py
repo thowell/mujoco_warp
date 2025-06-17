@@ -218,7 +218,9 @@ def deriv_smooth_vel(m: Model, d: Data, flg_forward: bool = True):
           d.qfrc_integration.reshape(d.qfrc_integration.shape + (1,)),
           d.qM_integration,
         ],
-        block_dim=64 if actuation_enabled else 256,
+        block_dim=m.block_dim.qderiv_actuator_passive_actuation
+        if actuation_enabled
+        else m.block_dim.qderiv_actuator_passive_no_actuation,
       )
 
   # TODO(team): rne derivative
