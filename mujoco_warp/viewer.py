@@ -129,14 +129,6 @@ def _main(argv: Sequence[str]) -> None:
           wp.capture_launch(graph)
           wp.synchronize()
 
-        # check number of contacts and number of constraints
-        ncon = d.ncon.numpy()[0]
-        nefc = d.nefc.numpy()[0]
-        if ncon >= d.nconmax:
-          print(f"ncon={ncon} > nconmax={d.nconmax}")
-        if nefc >= d.njmax:
-          print(f"nefc={nefc} > njmax={d.njmax}")
-
         mjwarp.get_data_into(mjd, mjm, d)
 
       viewer.sync()
