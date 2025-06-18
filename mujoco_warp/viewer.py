@@ -38,6 +38,8 @@ _VIEWER_GLOBAL_STATE = {
   "running": True,
   "step_once": False,
 }
+_NCONMAX = flags.DEFINE_integer("nconmax", None, "Maximum number of contacts.")
+_NJMAX = flags.DEFINE_integer("njmax", None, "Maximum number of constraints.")
 
 
 def key_callback(key: int) -> None:
@@ -87,7 +89,7 @@ def _main(argv: Sequence[str]) -> None:
     mjm_hash = pickle.dumps(mjm)
     m = mjwarp.put_model(mjm)
     m.opt.ls_parallel = _LS_PARALLEL.value
-    d = mjwarp.put_data(mjm, mjd)
+    d = mjwarp.put_data(mjm, mjd, nconmax=_NCONMAX.value, njmax=_NJMAX.value)
 
     if _CLEAR_KERNEL_CACHE.value:
       wp.clear_kernel_cache()
@@ -126,6 +128,14 @@ def _main(argv: Sequence[str]) -> None:
           _VIEWER_GLOBAL_STATE["step_once"] = False
           wp.capture_launch(graph)
           wp.synchronize()
+
+        # check number of contacts and number of constraints
+        ncon = d.ncon.numpy()[0]
+        nefc = d.nefc.numpy()[0]
+        if ncon >= d.nconmax:
+          print(f"ncon={ncon} > nconmax={d.nconmax}")
+        if nefc >= d.njmax:
+          print(f"nefc={nefc} > njmax={d.njmax}")
 
         mjwarp.get_data_into(mjd, mjm, d)
 
