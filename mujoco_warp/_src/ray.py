@@ -17,7 +17,6 @@ from typing import Tuple
 
 import warp as wp
 
-from .math import normalize_with_norm
 from .types import MJ_MINVAL
 from .types import Data
 from .types import GeomType
