@@ -706,7 +706,7 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
     mat_rgba=create_nmodel_batched_array(mjm.mat_rgba, dtype=wp.vec4),
     geompair2hfgeompair=wp.array(_hfield_geom_pair(mjm)[1], dtype=int),
     block_dim=types.BlockDim(),
-    convex_collision_pair=wp.array(convex_collision_pair, dtype=wp.vec2i),
+    convex_collision_pair=convex_collision_pair,
   )
 
   return m
