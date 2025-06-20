@@ -170,6 +170,16 @@ class IOTest(absltest.TestCase):
       """
       )
 
+  def test_noslip_solver(self):
+    with self.assertRaises(NotImplementedError):
+      test_util.fixture(
+        xml="""
+      <mujoco>
+        <option noslip_iterations="1"/>
+      </mujoco>
+      """
+      )
+
 
 if __name__ == "__main__":
   wp.init()
