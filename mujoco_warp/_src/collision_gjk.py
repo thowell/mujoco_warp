@@ -913,6 +913,8 @@ def _polytope4(
   pt.verts2[2] = simplex2[2]
   pt.verts2[3] = simplex2[3]
 
+  pt.nverts = 4
+
   # if the origin is on a face, replace the 3-simplex with a 2-simplex
   if _attach_face(pt, 0, 0, 1, 2) < MJ_MINVAL2:
     simplex, simplex1, simplex2 = _replace_simplex3(pt, 0, 1, 2)
