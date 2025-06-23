@@ -855,22 +855,22 @@ def _polytope3(
     return pt
 
   # create hexahedron for EPA
-  if _attach_face(pt, 0, 3, 0, 1) < MJ_MINVAL2:
+  if _attach_face(pt, 0, 4, 0, 1) < MJ_MINVAL2:
     pt.status = 6
     return pt
-  if _attach_face(pt, 1, 3, 2, 0) < MJ_MINVAL2:
+  if _attach_face(pt, 1, 4, 2, 0) < MJ_MINVAL2:
     pt.status = 7
     return pt
-  if _attach_face(pt, 2, 3, 1, 2) < MJ_MINVAL2:
+  if _attach_face(pt, 2, 4, 1, 2) < MJ_MINVAL2:
     pt.status = 8
     return pt
-  if _attach_face(pt, 3, 4, 1, 0) < MJ_MINVAL2:
+  if _attach_face(pt, 3, 3, 1, 0) < MJ_MINVAL2:
     pt.status = 9
     return pt
-  if _attach_face(pt, 4, 4, 0, 2) < MJ_MINVAL2:
+  if _attach_face(pt, 4, 3, 0, 2) < MJ_MINVAL2:
     pt.status = 10
     return pt
-  if _attach_face(pt, 5, 4, 2, 1) < MJ_MINVAL2:
+  if _attach_face(pt, 5, 3, 2, 1) < MJ_MINVAL2:
     pt.status = 11
     return pt
 
