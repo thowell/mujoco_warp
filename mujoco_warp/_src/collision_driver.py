@@ -22,6 +22,7 @@ from .collision_hfield import hfield_midphase
 from .collision_primitive import primitive_narrowphase
 from .math import upper_tri_index
 from .types import MJ_MAXVAL
+from .types import BroadphaseType
 from .types import Data
 from .types import DisableBit
 from .types import GeomType
@@ -263,6 +264,29 @@ def _sap_broadphase(
     worldgeomid += nsweep_in
 
 
+def _segmented_sort(tile_size: int):
+  @wp.kernel
+  def segmented_sort(
+    # Data in:
+    sap_projection_lower_in: wp.array2d(dtype=float),
+    sap_sort_index_in: wp.array2d(dtype=int),
+  ):
+    worldid = wp.tid()
+
+    # Load input into shared memory
+    keys = wp.tile_load(sap_projection_lower_in[worldid], shape=tile_size, storage="shared")
+    values = wp.tile_load(sap_sort_index_in[worldid], shape=tile_size, storage="shared")
+
+    # Perform in-place sorting
+    wp.tile_sort(keys, values)
+
+    # Store sorted shared memory into output arrays
+    wp.tile_store(sap_projection_lower_in[worldid], keys)
+    wp.tile_store(sap_sort_index_in[worldid], values)
+
+  return segmented_sort
+
+
 def sap_broadphase(m: Model, d: Data):
   """Broadphase collision detection via sweep-and-prune."""
 
@@ -290,14 +314,20 @@ def sap_broadphase(m: Model, d: Data):
     ],
   )
 
-  # TODO(team): tile sort
-
-  wp.utils.segmented_sort_pairs(
-    d.sap_projection_lower,
-    d.sap_sort_index,
-    nworldgeom,
-    d.sap_segment_index,
-  )
+  if m.opt.broadphase == int(BroadphaseType.SAP_TILE):
+    wp.launch_tiled(
+      kernel=_segmented_sort(m.ngeom),
+      dim=(d.nworld),
+      inputs=[d.sap_projection_lower, d.sap_sort_index],
+      block_dim=m.block_dim.segmented_sort,
+    )
+  else:
+    wp.utils.segmented_sort_pairs(
+      d.sap_projection_lower,
+      d.sap_sort_index,
+      nworldgeom,
+      d.sap_segment_index,
+    )
 
   wp.launch(
     kernel=_sap_range,
@@ -449,8 +479,7 @@ def collision(m: Model, d: Data):
   if (dsbl_flgs & DisableBit.CONSTRAINT) | (dsbl_flgs & DisableBit.CONTACT):
     return
 
-  # TODO(team): determine ngeom to switch from n^2 to sap
-  if m.ngeom <= 100:
+  if m.opt.broadphase == int(BroadphaseType.NXN):
     nxn_broadphase(m, d)
   else:
     sap_broadphase(m, d)
