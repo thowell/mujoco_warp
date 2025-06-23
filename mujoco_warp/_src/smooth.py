@@ -2106,11 +2106,11 @@ def _transmission_body_moment(
 
   contact_exclude = int(contact_dist_in[conid] >= contact_includemargin_in[conid])
 
+  if dofid == 0:
+    wp.atomic_add(actuator_trntype_body_ncon_out[worldid], trnbodyid, 1)
+
   # mark contact normals in efc_force
   if contact_exclude == 0:
-    if dofid == 0:
-      wp.atomic_add(actuator_trntype_body_ncon_out[worldid], trnbodyid, 1)
-
     contact_dim = contact_dim_in[conid]
     contact_efc_address = contact_efc_address_in[conid]
 
@@ -2129,9 +2129,6 @@ def _transmission_body_moment(
 
   # excluded contact in gap: get Jacobian, accumulate
   elif contact_exclude == 1:
-    if dofid == 0:
-      wp.atomic_add(actuator_trntype_body_ncon_out[worldid], trnbodyid, 1)
-
     contact_pos = contact_pos_in[conid]
     contact_frame = contact_frame_in[conid]
     normal = wp.vec3(contact_frame[0, 0], contact_frame[0, 1], contact_frame[0, 2])
