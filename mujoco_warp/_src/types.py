@@ -150,6 +150,7 @@ class TrnType(enum.IntEnum):
     JOINTINPARENT: force on joint, expressed in parent frame
     SLIDERCRANK: force via slider-crank linkage
     TENDON: force on tendon
+    BODY: adhesion force on body's geoms
     SITE: force on site
   """
 
@@ -157,8 +158,8 @@ class TrnType(enum.IntEnum):
   JOINTINPARENT = mujoco.mjtTrn.mjTRN_JOINTINPARENT
   SLIDERCRANK = mujoco.mjtTrn.mjTRN_SLIDERCRANK
   TENDON = mujoco.mjtTrn.mjTRN_TENDON
+  BODY = mujoco.mjtTrn.mjTRN_BODY
   SITE = mujoco.mjtTrn.mjTRN_SITE
-  # unsupported: BODY
 
 
 class DynType(enum.IntEnum):
@@ -976,6 +977,8 @@ class Model:
     sensor_rangefinder_bodyid: bodyid for rangefinder        (nrangefinder,)
     mocap_bodyid: id of body for mocap                       (nmocap,)
     mat_rgba: rgba                                           (nworld, nmat, 4)
+    actuator_trntype_body_adr: addresses for actuators       (<=nu,)
+                               with body transmission
     geompair2hfgeompair: geom pair to geom pair with         (ngeom * (ngeom - 1) // 2,)
                          height field mapping
     block_dim: BlockDim
@@ -1258,6 +1261,7 @@ class Model:
   sensor_rangefinder_bodyid: wp.array(dtype=int)  # warp only
   mocap_bodyid: wp.array(dtype=int)  # warp only
   mat_rgba: wp.array2d(dtype=wp.vec4)
+  actuator_trntype_body_adr: wp.array(dtype=int)  # warp only
   geompair2hfgeompair: wp.array(dtype=int)  # warp only
   block_dim: BlockDim  # warp only
 
@@ -1428,6 +1432,7 @@ class Data:
     ray_dist: ray distance to nearest geom                      (nworld, 1)
     ray_geomid: id of geom that intersects with ray             (nworld, 1)
     energy_vel_mul_m_skip: skip mul_m computation               (nworld,)
+    actuator_trntype_body_ncon: number of active contacts       (nworld, <=nu,)
   """
 
   nworld: int  # warp only
@@ -1574,3 +1579,6 @@ class Data:
   # mul_m
   energy_vel_mul_m_skip: wp.array(dtype=bool)
   discrete_acc_mul_m_skip: wp.array(dtype=bool)  # warp only
+
+  # actuator
+  actuator_trntype_body_ncon: wp.array2d(dtype=int)
