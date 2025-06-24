@@ -1553,7 +1553,7 @@ class Data:
 
   # narrowphase collision (EPA polytope)
   epa_vert: wp.array2d(dtype=wp.vec)
-  epa_ert1: wp.array2d(dtype=wp.vec3)
+  epa_vert1: wp.array2d(dtype=wp.vec3)
   epa_vert2: wp.array2d(dtype=wp.vec3)
   epa_face: wp.array2d(dtype=wp.vec3i)
   epa_pr: wp.array2d(dtype=wp.vec3)
