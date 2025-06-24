@@ -22,10 +22,8 @@ import warp as wp
 from . import math
 from . import types
 
-
 # number of max iterations to run GJK/EPA
 MJ_CCD_ITERATIONS = 12
-
 
 def _hfield_geom_pair(mjm: mujoco.MjModel) -> Tuple[int, np.array]:
   geom1, geom2 = np.triu_indices(mjm.ngeom, k=1)
