@@ -51,11 +51,11 @@ The following features are implemented:
 | Category          | Feature                                                                                                  |
 | ----------------- | ---------------------------------------------------------------------------------------------------------|
 | Dynamics          | Forward, Inverse                                                                                         |
-| Transmission      | `JOINT`, `JOINTINPARENT`, `TENDON`, `SITE`                                                               |
+| Transmission      | `JOINT`, `JOINTINPARENT`, `TENDON`,`BODY`, `SITE`                                                        |
 | Actuator Dynamics | `NONE`, `INTEGRATOR`, `FILTER`, `FILTEREXACT`, `MUSCLE`                                                  |
 | Actuator Gain     | `FIXED`, `AFFINE`, `MUSCLE`                                                                              |
 | Actuator Bias     | `NONE`, `AFFINE`, `MUSCLE`                                                                               |
-| Geom              | `PLANE`, `SPHERE`, `CAPSULE`, `ELLIPSOID`, `CYLINDER`, `BOX`, `HFIELD`, `MESH`                           |
+| Geom              | `PLANE`, `SPHERE`, `CAPSULE`, `ELLIPSOID`, `CYLINDER`, `BOX`, `HFIELD`, `MESH`, `SDF`                    |
 | Constraint        | `FRICTION JOINT`, `FRICTION TENDON`, `LIMIT_BALL`, `LIMIT_JOINT`, `LIMIT_TENDON`,                        |
 |                   | `CONTACT_PYRAMIDAL`, `CONTACT_ELLIPTIC`                                                                  |
 | Equality          | `CONNECT`, `WELD`, `JOINT`, `TENDON`                                                                     |
