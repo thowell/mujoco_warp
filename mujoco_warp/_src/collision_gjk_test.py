@@ -43,15 +43,15 @@ def _geom_dist(m: Model, d: Data, gid1: int, gid2: int, iterations: int):
     gid1: int,
     gid2: int,
     iterations: int,
-    verts: wp.array(dtype=wp.vec3),
-    verts1: wp.array(dtype=wp.vec3),
-    verts2: wp.array(dtype=wp.vec3),
-    face_verts: wp.array(dtype=wp.vec3i),
-    face_v: wp.array(dtype=wp.vec3),
-    face_dist2: wp.array(dtype=float),
+    vert: wp.array(dtype=wp.vec3),
+    vert1: wp.array(dtype=wp.vec3),
+    vert2: wp.array(dtype=wp.vec3),
+    face: wp.array(dtype=wp.vec3i),
+    face_pr: wp.array(dtype=wp.vec3),
+    face_norm2: wp.array(dtype=float),
     face_index: wp.array(dtype=int),
     map: wp.array(dtype=int),
-    edges: wp.array(dtype=int),
+    horizon: wp.array(dtype=int),
     # Out:
     dist_out: wp.array(dtype=float),
     pos_out: wp.array(dtype=wp.vec3),
@@ -101,30 +101,30 @@ def _geom_dist(m: Model, d: Data, gid1: int, gid2: int, iterations: int):
       geomtype2,
       x_1,
       x_2,
-      verts,
-      verts1,
-      verts2,
-      face_verts,
-      face_v,
-      face_dist2,
+      vert,
+      vert1,
+      vert2,
+      face,
+      face_pr,
+      face_norm2,
       face_index,
       map,
-      edges,
+      horizon,
     )
 
     dist_out[0] = dist
     pos_out[0] = x1
     pos_out[1] = x2
 
-  verts = wp.array(shape=(iterations,), dtype=wp.vec3)
-  verts1 = wp.array(shape=(iterations,), dtype=wp.vec3)
-  verts2 = wp.array(shape=(iterations,), dtype=wp.vec3)
-  face_verts = wp.array(shape=(2 * iterations,), dtype=wp.vec3i)
-  face_v = wp.array(shape=(2 * iterations,), dtype=wp.vec3)
-  face_dist2 = wp.array(shape=(2 * iterations,), dtype=float)
+  vert = wp.array(shape=(iterations,), dtype=wp.vec3)
+  vert1 = wp.array(shape=(iterations,), dtype=wp.vec3)
+  vert2 = wp.array(shape=(iterations,), dtype=wp.vec3)
+  face = wp.array(shape=(2 * iterations,), dtype=wp.vec3i)
+  face_pr = wp.array(shape=(2 * iterations,), dtype=wp.vec3)
+  face_norm2 = wp.array(shape=(2 * iterations,), dtype=float)
   face_index = wp.array(shape=(2 * iterations,), dtype=int)
   map = wp.array(shape=(2 * iterations,), dtype=int)
-  edges = wp.array(shape=(2 * iterations,), dtype=int)
+  horizon = wp.array(shape=(2 * iterations,), dtype=int)
   dist_out = wp.array(shape=(1,), dtype=float)
   pos_out = wp.array(shape=(2,), dtype=wp.vec3)
   wp.launch(
@@ -142,15 +142,15 @@ def _geom_dist(m: Model, d: Data, gid1: int, gid2: int, iterations: int):
       gid1,
       gid2,
       iterations,
-      verts,
-      verts1,
-      verts2,
-      face_verts,
-      face_v,
-      face_dist2,
+      vert,
+      vert1,
+      vert2,
+      face,
+      face_pr,
+      face_norm2,
       face_index,
       map,
-      edges,
+      horizon,
     ],
     outputs=[
       dist_out,
