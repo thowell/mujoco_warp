@@ -988,6 +988,7 @@ class Model:
     geompair2hfgeompair: geom pair to geom pair with         (ngeom * (ngeom - 1) // 2,)
                          height field mapping
     block_dim: BlockDim
+    geom_type_pair: geom type id pairs for collisions
   """
 
   nq: int
@@ -1273,6 +1274,7 @@ class Model:
   actuator_trntype_body_adr: wp.array(dtype=int)  # warp only
   geompair2hfgeompair: wp.array(dtype=int)  # warp only
   block_dim: BlockDim  # warp only
+  geom_type_pair: tuple[tuple[int, int], ...]  # warp only
 
 
 @dataclasses.dataclass
@@ -1441,7 +1443,7 @@ class Data:
     wrap_xpos: Cartesian 3D points in all paths                 (nworld, nwrap, 6)
     wrap_geom_xpos: Cartesian 3D points for geom wrap points    (nworld, <=nwrap, 6)
     sensordata: sensor data array                               (nsensordata,)
-    discrete_acc_mul_m_skip: skip mul_m computation             (nworld,)
+    inverse_mul_m_skip: skip mul_m computation                  (nworld,)
     sensor_rangefinder_pnt: points for rangefinder              (nworld, nrangefinder, 3)
     sensor_rangefinder_vec: directions for rangefinder          (nworld, nrangefinder, 3)
     sensor_rangefinder_dist: distances for rangefinder          (nworld, nrangefinder)
@@ -1566,7 +1568,7 @@ class Data:
   ncollision: wp.array(dtype=int)
 
   # narrowphase collision (EPA polytope)
-  epa_vert: wp.array2d(dtype=wp.vec)
+  epa_vert: wp.array2d(dtype=wp.vec3)
   epa_vert1: wp.array2d(dtype=wp.vec3)
   epa_vert2: wp.array2d(dtype=wp.vec3)
   epa_face: wp.array2d(dtype=wp.vec3i)
@@ -1607,7 +1609,7 @@ class Data:
 
   # mul_m
   energy_vel_mul_m_skip: wp.array(dtype=bool)
-  discrete_acc_mul_m_skip: wp.array(dtype=bool)  # warp only
+  inverse_mul_m_skip: wp.array(dtype=bool)  # warp only
 
   # actuator
   actuator_trntype_body_ncon: wp.array2d(dtype=int)

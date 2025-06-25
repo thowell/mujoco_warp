@@ -373,30 +373,7 @@ class SmoothTest(parameterized.TestCase):
     _assert_eq(res.numpy()[0], np.linalg.solve(qM, vec.numpy()[0]), "qM \\ 1")
 
   def test_tendon_armature(self):
-    mjm, mjd, m, d = test_util.fixture(
-      xml="""
-    <mujoco>
-      <worldbody>
-        <body>
-          <joint type="hinge" axis="0 1 0"/>
-          <geom type="sphere" size=".2" pos="1 0 0"/>
-          <site name="site0" pos="1 0 0"/>
-        </body>
-        <site name="site1" pos="1 0 0"/>
-      </worldbody>
-      <tendon>
-        <spatial armature="2">
-          <site site="site0"/>
-          <site site="site1"/>
-        </spatial>
-      </tendon>
-      <keyframe>
-        <key qpos="1" qvel=".5"/>
-      </keyframe>
-    </mujoco>
-    """,
-      keyframe=0,
-    )
+    mjm, mjd, m, d = test_util.fixture("tendon/armature.xml", keyframe=0)
 
     # qM
     d.qM.zero_()

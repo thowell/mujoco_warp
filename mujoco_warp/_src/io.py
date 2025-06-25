@@ -336,6 +336,8 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
 
     nxn_pairid[pairid] = i
 
+  geom_type_pair = tuple(set(zip(mjm.geom_type[geom1], mjm.geom_type[geom2])))
+
   def create_nmodel_batched_array(mjm_array, dtype, expand_dim=True):
     array = wp.array(mjm_array, dtype=dtype)
     array.strides = (0,) + array.strides
@@ -748,6 +750,7 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
     actuator_trntype_body_adr=wp.array(np.nonzero(mjm.actuator_trntype == mujoco.mjtTrn.mjTRN_BODY)[0], dtype=int),
     geompair2hfgeompair=wp.array(_hfield_geom_pair(mjm)[1], dtype=int),
     block_dim=types.BlockDim(),
+    geom_type_pair=geom_type_pair,
   )
 
   return m
@@ -862,7 +865,7 @@ def make_data(mjm: mujoco.MjModel, nworld: int = 1, nconmax: int = -1, njmax: in
       dim=wp.zeros((nconmax,), dtype=int),
       geom=wp.zeros((nconmax,), dtype=wp.vec2i),
       efc_address=wp.zeros(
-        (nconmax, 2 * (np.max(np.concatenate((mjm.geom_condim, mjm.pair_dim))) - 1)),
+        (nconmax, np.maximum(1, 2 * (np.max(np.concatenate([mjm.geom_condim, mjm.pair_dim])) - 1))),
         dtype=int,
       ),
       worldid=wp.zeros((nconmax,), dtype=int),
@@ -991,7 +994,7 @@ def make_data(mjm: mujoco.MjModel, nworld: int = 1, nconmax: int = -1, njmax: in
     ray_geomid=wp.zeros((nworld, 1), dtype=int),
     # mul_m
     energy_vel_mul_m_skip=wp.zeros((nworld,), dtype=bool),
-    discrete_acc_mul_m_skip=wp.array((nworld,), dtype=bool),
+    inverse_mul_m_skip=wp.array((nworld,), dtype=bool),
     # actuator
     actuator_trntype_body_ncon=wp.zeros((nworld, np.sum(mjm.actuator_trntype == mujoco.mjtTrn.mjTRN_BODY)), dtype=int),
   )
@@ -1067,7 +1070,9 @@ def put_data(
     mjd.moment_colind,
   )
 
-  contact_efc_address = np.zeros((nconmax, 2 * (np.max(np.concatenate((mjm.geom_condim, mjm.pair_dim)) - 1))), dtype=int)
+  contact_efc_address = np.zeros(
+    (nconmax, np.maximum(1, 2 * (np.max(np.concatenate([mjm.geom_condim, mjm.pair_dim])) - 1))), dtype=int
+  )
   for i in range(nworld):
     for j in range(mjd.ncon):
       condim = mjd.contact.dim[j]
@@ -1327,7 +1332,7 @@ def put_data(
     ray_geomid=wp.zeros((nworld, 1), dtype=int),
     # mul_m
     energy_vel_mul_m_skip=wp.zeros((nworld,), dtype=bool),
-    discrete_acc_mul_m_skip=wp.zeros((nworld,), dtype=bool),
+    inverse_mul_m_skip=wp.zeros((nworld,), dtype=bool),
     # actuator
     actuator_trntype_body_ncon=wp.zeros((nworld, np.sum(mjm.actuator_trntype == mujoco.mjtTrn.mjTRN_BODY)), dtype=int),
   )
