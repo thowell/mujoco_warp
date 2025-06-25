@@ -840,8 +840,15 @@ def ccd_kernel_builder(
     if tid >= ncollision_in[0]:
       return
 
+    geoms = collision_pair_in[tid]
+    g1 = geoms[0]
+    g2 = geoms[1]
+
+    if geom_type[g1] != geomtype1 or geom_type[g2] != geomtype2:
+      return
+
     worldid = collision_worldid_in[tid]
-    geoms, margin, gap, condim, friction, solref, solreffriction, solimp = contact_params(
+    _, margin, gap, condim, friction, solref, solreffriction, solimp = contact_params(
       geom_condim,
       geom_priority,
       geom_solmix,
@@ -862,12 +869,6 @@ def ccd_kernel_builder(
       tid,
       worldid,
     )
-
-    g1 = geoms[0]
-    g2 = geoms[1]
-
-    if geom_type[g1] != geomtype1 or geom_type[g2] != geomtype2:
-      return
 
     hftri_index = collision_hftri_index_in[tid]
 
