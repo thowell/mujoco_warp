@@ -1557,7 +1557,7 @@ class Data:
   ncollision: wp.array(dtype=int)
 
   # narrowphase collision (EPA polytope)
-  epa_vert: wp.array2d(dtype=wp.vec)
+  epa_vert: wp.array2d(dtype=wp.vec3)
   epa_vert1: wp.array2d(dtype=wp.vec3)
   epa_vert2: wp.array2d(dtype=wp.vec3)
   epa_face: wp.array2d(dtype=wp.vec3i)
