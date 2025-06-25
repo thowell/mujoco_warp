@@ -988,6 +988,7 @@ class Model:
     geompair2hfgeompair: geom pair to geom pair with         (ngeom * (ngeom - 1) // 2,)
                          height field mapping
     block_dim: BlockDim
+    geom_type_pair: geom type id pairs for collisions
   """
 
   nq: int
@@ -1273,6 +1274,7 @@ class Model:
   actuator_trntype_body_adr: wp.array(dtype=int)  # warp only
   geompair2hfgeompair: wp.array(dtype=int)  # warp only
   block_dim: BlockDim  # warp only
+  geom_type_pair: tuple[tuple[int, int], ...]  # warp only
 
 
 @dataclasses.dataclass

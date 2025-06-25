@@ -61,6 +61,30 @@ VECI1 = vec6(0, 0, 0, 1, 1, 2)
 VECI2 = vec6(1, 2, 3, 2, 3, 3)
 
 
+_CONVEX_COLLISION = {
+  (GeomType.HFIELD.value, GeomType.SPHERE.value),
+  (GeomType.HFIELD.value, GeomType.CAPSULE.value),
+  (GeomType.HFIELD.value, GeomType.ELLIPSOID.value),
+  (GeomType.HFIELD.value, GeomType.CYLINDER.value),
+  (GeomType.HFIELD.value, GeomType.BOX.value),
+  (GeomType.HFIELD.value, GeomType.MESH.value),
+  (GeomType.SPHERE.value, GeomType.ELLIPSOID.value),
+  (GeomType.SPHERE.value, GeomType.MESH.value),
+  (GeomType.CAPSULE.value, GeomType.CYLINDER.value),
+  (GeomType.CAPSULE.value, GeomType.ELLIPSOID.value),
+  (GeomType.CAPSULE.value, GeomType.MESH.value),
+  (GeomType.ELLIPSOID.value, GeomType.ELLIPSOID.value),
+  (GeomType.ELLIPSOID.value, GeomType.CYLINDER.value),
+  (GeomType.ELLIPSOID.value, GeomType.BOX.value),
+  (GeomType.ELLIPSOID.value, GeomType.MESH.value),
+  (GeomType.CYLINDER.value, GeomType.CYLINDER.value),
+  (GeomType.CYLINDER.value, GeomType.BOX.value),
+  (GeomType.CYLINDER.value, GeomType.MESH.value),
+  (GeomType.BOX.value, GeomType.MESH.value),
+  (GeomType.MESH.value, GeomType.MESH.value),
+}
+
+
 @wp.func
 def gjk_support_geom(geom: Geom, geomtype: int, dir: wp.vec3):
   local_dir = wp.transpose(geom.rot) @ dir
@@ -158,30 +182,6 @@ def _gjk_support(
 
   support_pt = s1 - s2
   return dist1 + dist2, support_pt
-
-
-_CONVEX_COLLISION_FUNC = {
-  (GeomType.HFIELD.value, GeomType.SPHERE.value),
-  (GeomType.HFIELD.value, GeomType.CAPSULE.value),
-  (GeomType.HFIELD.value, GeomType.ELLIPSOID.value),
-  (GeomType.HFIELD.value, GeomType.CYLINDER.value),
-  (GeomType.HFIELD.value, GeomType.BOX.value),
-  (GeomType.HFIELD.value, GeomType.MESH.value),
-  (GeomType.SPHERE.value, GeomType.ELLIPSOID.value),
-  (GeomType.SPHERE.value, GeomType.MESH.value),
-  (GeomType.CAPSULE.value, GeomType.CYLINDER.value),
-  (GeomType.CAPSULE.value, GeomType.ELLIPSOID.value),
-  (GeomType.CAPSULE.value, GeomType.MESH.value),
-  (GeomType.ELLIPSOID.value, GeomType.ELLIPSOID.value),
-  (GeomType.ELLIPSOID.value, GeomType.CYLINDER.value),
-  (GeomType.ELLIPSOID.value, GeomType.BOX.value),
-  (GeomType.ELLIPSOID.value, GeomType.MESH.value),
-  (GeomType.CYLINDER.value, GeomType.CYLINDER.value),
-  (GeomType.CYLINDER.value, GeomType.BOX.value),
-  (GeomType.CYLINDER.value, GeomType.MESH.value),
-  (GeomType.BOX.value, GeomType.MESH.value),
-  (GeomType.MESH.value, GeomType.MESH.value),
-}
 
 
 @wp.func
@@ -1001,90 +1001,82 @@ def ccd_kernel_builder(
   return gjk_epa_sparse
 
 
-_ccd_kernels = {}
-
-
 def convex_narrowphase(m: Model, d: Data):
-  if len(_ccd_kernels) == 0:
-    for types in _CONVEX_COLLISION_FUNC:
-      t1 = types[0]
-      t2 = types[1]
-      _ccd_kernels[(t1, t2)] = ccd_kernel_builder(
-        True,
-        t1,
-        t2,
-        m.opt.gjk_iterations,
-        m.opt.epa_iterations,
-        m.opt.epa_exact_neg_distance,
-        m.opt.depth_extension,
+  for geom_pair in m.geom_type_pair:
+    if geom_pair in _CONVEX_COLLISION:
+      wp.launch(
+        ccd_kernel_builder(
+          True,
+          int(geom_pair[0]),
+          int(geom_pair[1]),
+          m.opt.gjk_iterations,
+          m.opt.epa_iterations,
+          m.opt.epa_exact_neg_distance,
+          m.opt.depth_extension,
+        ),
+        dim=d.nconmax,
+        inputs=[
+          m.ngeom,
+          m.geom_type,
+          m.geom_condim,
+          m.geom_dataid,
+          m.geom_priority,
+          m.geom_solmix,
+          m.geom_solref,
+          m.geom_solimp,
+          m.geom_size,
+          m.geom_friction,
+          m.geom_margin,
+          m.geom_gap,
+          m.hfield_adr,
+          m.hfield_nrow,
+          m.hfield_ncol,
+          m.hfield_size,
+          m.hfield_data,
+          m.mesh_vertadr,
+          m.mesh_vertnum,
+          m.mesh_vert,
+          m.mesh_graphadr,
+          m.mesh_graph,
+          m.pair_dim,
+          m.pair_solref,
+          m.pair_solreffriction,
+          m.pair_solimp,
+          m.pair_margin,
+          m.pair_gap,
+          m.pair_friction,
+          m.geompair2hfgeompair,
+          d.nconmax,
+          d.geom_xpos,
+          d.geom_xmat,
+          d.collision_pair,
+          d.collision_hftri_index,
+          d.collision_pairid,
+          d.collision_worldid,
+          d.ncollision,
+          d.epa_vert,
+          d.epa_vert1,
+          d.epa_vert2,
+          d.epa_face,
+          d.epa_pr,
+          d.epa_norm2,
+          d.epa_index,
+          d.epa_map,
+          d.epa_horizon,
+        ],
+        outputs=[
+          d.ncon,
+          d.ncon_hfield,
+          d.contact.dist,
+          d.contact.pos,
+          d.contact.frame,
+          d.contact.includemargin,
+          d.contact.friction,
+          d.contact.solref,
+          d.contact.solreffriction,
+          d.contact.solimp,
+          d.contact.dim,
+          d.contact.geom,
+          d.contact.worldid,
+        ],
       )
-
-  for ccd_kernel in _ccd_kernels.values():
-    wp.launch(
-      ccd_kernel,
-      dim=d.nconmax,
-      inputs=[
-        m.ngeom,
-        m.geom_type,
-        m.geom_condim,
-        m.geom_dataid,
-        m.geom_priority,
-        m.geom_solmix,
-        m.geom_solref,
-        m.geom_solimp,
-        m.geom_size,
-        m.geom_friction,
-        m.geom_margin,
-        m.geom_gap,
-        m.hfield_adr,
-        m.hfield_nrow,
-        m.hfield_ncol,
-        m.hfield_size,
-        m.hfield_data,
-        m.mesh_vertadr,
-        m.mesh_vertnum,
-        m.mesh_vert,
-        m.mesh_graphadr,
-        m.mesh_graph,
-        m.pair_dim,
-        m.pair_solref,
-        m.pair_solreffriction,
-        m.pair_solimp,
-        m.pair_margin,
-        m.pair_gap,
-        m.pair_friction,
-        m.geompair2hfgeompair,
-        d.nconmax,
-        d.geom_xpos,
-        d.geom_xmat,
-        d.collision_pair,
-        d.collision_hftri_index,
-        d.collision_pairid,
-        d.collision_worldid,
-        d.ncollision,
-        d.epa_vert,
-        d.epa_vert1,
-        d.epa_vert2,
-        d.epa_face,
-        d.epa_pr,
-        d.epa_norm2,
-        d.epa_index,
-        d.epa_map,
-        d.epa_horizon,
-      ],
-      outputs=[
-        d.ncon,
-        d.ncon_hfield,
-        d.contact.dist,
-        d.contact.pos,
-        d.contact.frame,
-        d.contact.includemargin,
-        d.contact.friction,
-        d.contact.solref,
-        d.contact.solreffriction,
-        d.contact.solimp,
-        d.contact.dim,
-        d.contact.geom,
-        d.contact.worldid,
-      ],
-    )

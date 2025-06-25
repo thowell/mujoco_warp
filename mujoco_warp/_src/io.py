@@ -336,6 +336,8 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
 
     nxn_pairid[pairid] = i
 
+  geom_type_pair = tuple(set(zip(mjm.geom_type[geom1], mjm.geom_type[geom2])))
+
   def create_nmodel_batched_array(mjm_array, dtype, expand_dim=True):
     array = wp.array(mjm_array, dtype=dtype)
     array.strides = (0,) + array.strides
@@ -748,6 +750,7 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
     actuator_trntype_body_adr=wp.array(np.nonzero(mjm.actuator_trntype == mujoco.mjtTrn.mjTRN_BODY)[0], dtype=int),
     geompair2hfgeompair=wp.array(_hfield_geom_pair(mjm)[1], dtype=int),
     block_dim=types.BlockDim(),
+    geom_type_pair=geom_type_pair,
   )
 
   return m
