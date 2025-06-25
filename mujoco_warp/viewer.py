@@ -52,6 +52,11 @@ def key_callback(key: int) -> None:
 
 def _load_model():
   spec = mujoco.MjSpec.from_file(_MODEL_PATH.value)
+  # check if the file has any mujoco.sdf test plugins
+  if any(p.plugin_name.startswith("mujoco.sdf") for p in spec.plugins):
+    from mujoco_warp.test_data.collision_sdf.utils import register_sdf_plugins as register_sdf_plugins
+
+    register_sdf_plugins(mjwarp.collision_sdf)
   return spec.compile()
 
 

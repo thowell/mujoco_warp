@@ -15,9 +15,10 @@
 
 import warp as wp
 
-from .collision_convex import gjk_support_geom
+from .collision_hfield import hfield_prism_vertex
 from .collision_primitive import Geom
 from .types import MJ_MINVAL
+from .types import GeomType
 
 # TODO(team): improve compile time to enable backward pass
 wp.config.enable_backward = False
@@ -67,6 +68,85 @@ class Polytope:
 
 
 @wp.func
+def _support(geom: Geom, geomtype: int, dir: wp.vec3):
+  local_dir = wp.transpose(geom.rot) @ dir
+  if geomtype == int(GeomType.SPHERE.value):
+    support_pt = geom.pos + geom.size[0] * dir
+  elif geomtype == int(GeomType.BOX.value):
+    res = wp.cw_mul(wp.sign(local_dir), geom.size)
+    support_pt = geom.rot @ res + geom.pos
+  elif geomtype == int(GeomType.CAPSULE.value):
+    res = local_dir * geom.size[0]
+    # add cylinder contribution
+    res[2] += wp.sign(local_dir[2]) * geom.size[1]
+    support_pt = geom.rot @ res + geom.pos
+  elif geomtype == int(GeomType.ELLIPSOID.value):
+    res = wp.cw_mul(local_dir, geom.size)
+    res = wp.normalize(res)
+    # transform to ellipsoid
+    res = wp.cw_mul(res, geom.size)
+    support_pt = geom.rot @ res + geom.pos
+  elif geomtype == int(GeomType.CYLINDER.value):
+    res = wp.vec3(0.0, 0.0, 0.0)
+    # set result in XY plane: support on circle
+    d = wp.sqrt(wp.dot(local_dir, local_dir))
+    if d > MJ_MINVAL:
+      scl = geom.size[0] / d
+      res[0] = local_dir[0] * scl
+      res[1] = local_dir[1] * scl
+    # set result in Z direction
+    res[2] = wp.sign(local_dir[2]) * geom.size[1]
+    support_pt = geom.rot @ res + geom.pos
+  elif geomtype == int(GeomType.MESH.value):
+    max_dist = float(FLOAT_MIN)
+    if geom.graphadr == -1 or geom.vertnum < 10:
+      # exhaustive search over all vertices
+      for i in range(geom.vertnum):
+        vert = geom.vert[geom.vertadr + i]
+        dist = wp.dot(vert, local_dir)
+        if dist > max_dist:
+          max_dist = dist
+          support_pt = vert
+    else:
+      numvert = geom.graph[geom.graphadr]
+      vert_edgeadr = geom.graphadr + 2
+      vert_globalid = geom.graphadr + 2 + numvert
+      edge_localid = geom.graphadr + 2 + 2 * numvert
+      # hillclimb until no change
+      prev = int(-1)
+      imax = int(0)
+
+      while True:
+        prev = int(imax)
+        i = int(geom.graph[vert_edgeadr + imax])
+        while geom.graph[edge_localid + i] >= 0:
+          subidx = geom.graph[edge_localid + i]
+          idx = geom.graph[vert_globalid + subidx]
+          dist = wp.dot(local_dir, geom.vert[geom.vertadr + idx])
+          if dist > max_dist:
+            max_dist = dist
+            imax = int(subidx)
+          i += int(1)
+        if imax == prev:
+          break
+      imax = geom.graph[vert_globalid + imax]
+      support_pt = geom.vert[geom.vertadr + imax]
+
+    support_pt = geom.rot @ support_pt + geom.pos
+  elif geomtype == int(GeomType.HFIELD.value):
+    max_dist = float(FLOAT_MIN)
+    for i in range(6):
+      vert = hfield_prism_vertex(geom.hfprism, i)
+      dist = wp.dot(vert, local_dir)
+      if dist > max_dist:
+        max_dist = dist
+        support_pt = vert
+    support_pt = geom.rot @ support_pt + geom.pos
+
+  return support_pt
+
+
+@wp.func
 def _attach_face(pt: Polytope, idx: int, v1: int, v2: int, v3: int):
   # compute witness point v
   r, ret = _project_origin_plane(pt.verts[v3], pt.verts[v2], pt.verts[v1])
@@ -84,8 +164,8 @@ def _attach_face(pt: Polytope, idx: int, v1: int, v2: int, v3: int):
 
 @wp.func
 def _epa_support(pt: Polytope, idx: int, geom1: Geom, geom2: Geom, geom1_type: int, geom2_type: int, dir: wp.vec3):
-  _, s1 = gjk_support_geom(geom1, geom1_type, dir)
-  _, s2 = gjk_support_geom(geom2, geom2_type, -dir)
+  s1 = _support(geom1, geom1_type, dir)
+  s2 = _support(geom2, geom2_type, -dir)
 
   pt.verts[idx] = s1 - s2
   pt.verts1[idx] = s1
@@ -382,7 +462,7 @@ def _S2D(s1: wp.vec3, s2: wp.vec3, s3: wp.vec3):
 
   if not comp2:
     subcoord = _S1D(s1, s3)
-    x = subcoord[0] * s1 + subcoord[1] * s2
+    x = subcoord[0] * s1 + subcoord[1] * s3
     d = wp.dot(x, x)
     if d < dmin:
       coordinates[0] = subcoord[0]
@@ -440,14 +520,15 @@ def _gjk(
   x_k = x1_0 - x2_0
 
   for k in range(gjk_iterations):
-    xnorm = wp.norm_l2(x_k)
-    if xnorm < MJ_MINVAL:
+    xnorm = wp.dot(x_k, x_k)
+    # TODO(kbayes): determine new constant here
+    if xnorm < 1e-10:
       break
-    dir = -(x_k / xnorm)
+    dir_neg = x_k / wp.sqrt(xnorm)
 
     # compute the kth support point
-    _, s1_k = gjk_support_geom(geom1, geomtype1, dir)
-    _, s2_k = gjk_support_geom(geom2, geomtype2, -dir)
+    s1_k = _support(geom1, geomtype1, -dir_neg)
+    s2_k = _support(geom2, geomtype2, dir_neg)
     simplex1[n] = s1_k
     simplex2[n] = s2_k
     simplex[n] = s1_k - s2_k
@@ -683,7 +764,7 @@ def _epa_witness(pt: Polytope, face_idx: int):
   # face on geom 1
   v1 = pt.verts1[pt.face_verts[face_idx][0]]
   v2 = pt.verts1[pt.face_verts[face_idx][1]]
-  v3 = pt.verts1[pt.face_verts[face_idx][1]]
+  v3 = pt.verts1[pt.face_verts[face_idx][2]]
   x1 = wp.vec3()
   x1[0] = v1[0] * l1 + v2[0] * l2 + v3[0] * l3
   x1[1] = v1[1] * l1 + v2[1] * l2 + v3[1] * l3
@@ -715,9 +796,7 @@ def _polytope2(
   geomtype2: int,
 ):
   """Create polytope for EPA given a 1-simplex from GJK"""
-  v1 = simplex[0]
-  v2 = simplex[1]
-  diff = v2 - v1
+  diff = simplex[1] - simplex[0]
 
   # find component with smallest magnitude (so cross product is largest)
   value = FLOAT_MAX
@@ -750,11 +829,6 @@ def _polytope2(
   _epa_support(pt, 2, geom1, geom2, geomtype1, geomtype2, d1 / wp.norm_l2(d1))
   _epa_support(pt, 3, geom1, geom2, geomtype1, geomtype2, d2 / wp.norm_l2(d2))
   _epa_support(pt, 4, geom1, geom2, geomtype1, geomtype2, d3 / wp.norm_l2(d3))
-  pt.nverts = 5
-
-  v3 = pt.verts[2]
-  v4 = pt.verts[3]
-  v5 = pt.verts[4]
 
   # build hexahedron
   if _attach_face(pt, 0, 0, 2, 3) < MJ_MINVAL:
@@ -782,17 +856,20 @@ def _polytope2(
     return _polytope3(pt, dist, simplex, simplex1, simplex2, geom1, geom2, geomtype1, geomtype2)
 
   # check hexahedron is convex
-  if not _ray_triangle(v1, v2, v3, v4, v5):
+  if not _ray_triangle(simplex[0], simplex[1], pt.verts[2], pt.verts[3], pt.verts[4]):
     pt.status = 1
     return pt
 
+  # populate face map
   for i in range(6):
     pt.map[i] = i
     pt.face_index[i] = i
-  pt.nmap = 6
+
+  # set polytope counts
+  pt.nverts = 5
   pt.nfaces = 6
+  pt.nmap = 6
   pt.status = 0
-  # valid hexahedron for EPA
   return pt
 
 
@@ -828,9 +905,8 @@ def _polytope3(
   pt.verts2[1] = simplex2[1]
   pt.verts2[2] = simplex2[2]
 
-  _epa_support(pt, 3, geom1, geom2, geomtype1, geomtype2, n)
-  _epa_support(pt, 4, geom1, geom2, geomtype1, geomtype2, -n)
-  pt.nverts = 5
+  _epa_support(pt, 3, geom1, geom2, geomtype1, geomtype2, -n)
+  _epa_support(pt, 4, geom1, geom2, geomtype1, geomtype2, n)
 
   v1 = simplex[0]
   v2 = simplex[1]
@@ -850,7 +926,7 @@ def _polytope3(
 
   # if origin does not lie on simplex then we need to check that the hexahedron contains the
   # origin
-  if dist > 1e-7 and not _test_tetra(v1, v2, v3, v4) and not _test_tetra(v1, v2, v3, v5):
+  if dist > 1e-5 and not _test_tetra(v1, v2, v3, v4) and not _test_tetra(v1, v2, v3, v5):
     pt.status = 5
     return pt
 
@@ -878,8 +954,11 @@ def _polytope3(
   for i in range(6):
     pt.map[i] = i
     pt.face_index[i] = i
-  pt.nmap = 6
+
+  # set polytope counts
+  pt.nverts = 5
   pt.nfaces = 6
+  pt.nmap = 6
   pt.status = 0
   return pt
 
@@ -938,9 +1017,12 @@ def _polytope4(
   for i in range(4):
     pt.map[i] = i
     pt.face_index[i] = i
-    pt.nmap = 4
-  pt.status = 0
+
+  # set polytope counts
+  pt.nverts = 4
   pt.nfaces = 4
+  pt.nmap = 4
+  pt.status = 0
   return pt
 
 
@@ -1084,6 +1166,8 @@ def ccd(
   else:
     pt = _polytope4(pt, result.dist, result.simplex, result.simplex1, result.simplex2, geom1, geom2, geomtype1, geomtype2)
 
-  # simplex not on boundary (objects are penetrating)
-  if pt.status == 0:
-    return _epa(tolerance * tolerance, epa_iterations, pt, geom1, geom2, geomtype1, geomtype2)
+  # origin on boundary (objects are not considered penetrating)
+  if pt.status:
+    return result.dist, result.x1, result.x2
+
+  return _epa(tolerance * tolerance, epa_iterations, pt, geom1, geom2, geomtype1, geomtype2)

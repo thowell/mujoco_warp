@@ -26,7 +26,6 @@ from .types import Model
 MAX_ITERATIONS = 10
 
 
-# TODO(kbayes): Use sensors when available instead of calling GJK directly
 def _geom_dist(m: Model, d: Data, gid1: int, gid2: int, iterations: int):
   @wp.kernel
   def _gjk_kernel(
@@ -44,17 +43,18 @@ def _geom_dist(m: Model, d: Data, gid1: int, gid2: int, iterations: int):
     gid1: int,
     gid2: int,
     iterations: int,
-    verts: wp.array(dtype=wp.vec3),
-    verts1: wp.array(dtype=wp.vec3),
-    verts2: wp.array(dtype=wp.vec3),
-    face_verts: wp.array(dtype=wp.vec3i),
-    face_v: wp.array(dtype=wp.vec3),
-    face_dist2: wp.array(dtype=float),
+    vert: wp.array(dtype=wp.vec3),
+    vert1: wp.array(dtype=wp.vec3),
+    vert2: wp.array(dtype=wp.vec3),
+    face: wp.array(dtype=wp.vec3i),
+    face_pr: wp.array(dtype=wp.vec3),
+    face_norm2: wp.array(dtype=float),
     face_index: wp.array(dtype=int),
     map: wp.array(dtype=int),
-    edges: wp.array(dtype=int),
+    horizon: wp.array(dtype=int),
     # Out:
     dist_out: wp.array(dtype=float),
+    pos_out: wp.array(dtype=wp.vec3),
   ):
     MESHGEOM = int(GeomType.MESH.value)
 
@@ -89,8 +89,8 @@ def _geom_dist(m: Model, d: Data, gid1: int, gid2: int, iterations: int):
 
     (
       dist,
-      _,
-      _,
+      x1,
+      x2,
     ) = ccd(
       1e-6,
       iterations,
@@ -101,29 +101,32 @@ def _geom_dist(m: Model, d: Data, gid1: int, gid2: int, iterations: int):
       geomtype2,
       x_1,
       x_2,
-      verts,
-      verts1,
-      verts2,
-      face_verts,
-      face_v,
-      face_dist2,
+      vert,
+      vert1,
+      vert2,
+      face,
+      face_pr,
+      face_norm2,
       face_index,
       map,
-      edges,
+      horizon,
     )
 
     dist_out[0] = dist
+    pos_out[0] = x1
+    pos_out[1] = x2
 
-  verts = wp.array(shape=(iterations,), dtype=wp.vec3)
-  verts1 = wp.array(shape=(iterations,), dtype=wp.vec3)
-  verts2 = wp.array(shape=(iterations,), dtype=wp.vec3)
-  face_verts = wp.array(shape=(2 * iterations,), dtype=wp.vec3i)
-  face_v = wp.array(shape=(2 * iterations,), dtype=wp.vec3)
-  face_dist2 = wp.array(shape=(2 * iterations,), dtype=float)
+  vert = wp.array(shape=(iterations,), dtype=wp.vec3)
+  vert1 = wp.array(shape=(iterations,), dtype=wp.vec3)
+  vert2 = wp.array(shape=(iterations,), dtype=wp.vec3)
+  face = wp.array(shape=(2 * iterations,), dtype=wp.vec3i)
+  face_pr = wp.array(shape=(2 * iterations,), dtype=wp.vec3)
+  face_norm2 = wp.array(shape=(2 * iterations,), dtype=float)
   face_index = wp.array(shape=(2 * iterations,), dtype=int)
   map = wp.array(shape=(2 * iterations,), dtype=int)
-  edges = wp.array(shape=(2 * iterations,), dtype=int)
+  horizon = wp.array(shape=(2 * iterations,), dtype=int)
   dist_out = wp.array(shape=(1,), dtype=float)
+  pos_out = wp.array(shape=(2,), dtype=wp.vec3)
   wp.launch(
     _gjk_kernel,
     dim=(1,),
@@ -139,21 +142,22 @@ def _geom_dist(m: Model, d: Data, gid1: int, gid2: int, iterations: int):
       gid1,
       gid2,
       iterations,
-      verts,
-      verts1,
-      verts2,
-      face_verts,
-      face_v,
-      face_dist2,
+      vert,
+      vert1,
+      vert2,
+      face,
+      face_pr,
+      face_norm2,
       face_index,
       map,
-      edges,
+      horizon,
     ],
     outputs=[
       dist_out,
+      pos_out,
     ],
   )
-  return dist_out.numpy()[0]
+  return dist_out.numpy()[0], pos_out.numpy()[0], pos_out.numpy()[1]
 
 
 class GJKTest(absltest.TestCase):
@@ -173,7 +177,7 @@ class GJKTest(absltest.TestCase):
        """
     )
 
-    dist = _geom_dist(m, d, 0, 1, MAX_ITERATIONS)
+    dist, _, _ = _geom_dist(m, d, 0, 1, MAX_ITERATIONS)
     self.assertEqual(1.0, dist)
 
   def test_spheres_touching(self):
@@ -190,7 +194,7 @@ class GJKTest(absltest.TestCase):
        """
     )
 
-    dist = _geom_dist(m, d, 0, 1, MAX_ITERATIONS)
+    dist, _, _ = _geom_dist(m, d, 0, 1, MAX_ITERATIONS)
     self.assertEqual(0.0, dist)
 
   def test_box_mesh_distance(self):
@@ -218,7 +222,7 @@ class GJKTest(absltest.TestCase):
        """
     )
 
-    dist = _geom_dist(m, d, 0, 1, MAX_ITERATIONS)
+    dist, _, _ = _geom_dist(m, d, 0, 1, MAX_ITERATIONS)
     self.assertAlmostEqual(0.1, dist)
 
   def test_sphere_sphere_contact(self):
@@ -236,7 +240,7 @@ class GJKTest(absltest.TestCase):
     )
 
     # TODO(kbayes): use margin trick instead of EPA for penetration recovery
-    dist = _geom_dist(m, d, 0, 1, 500)
+    dist, _, _ = _geom_dist(m, d, 0, 1, 500)
     self.assertAlmostEqual(-2, dist)
 
   def test_box_box_contact(self):
@@ -252,8 +256,12 @@ class GJKTest(absltest.TestCase):
       </mujoco>
       """
     )
-    dist = _geom_dist(m, d, 0, 1, MAX_ITERATIONS)
+    dist, x1, x2 = _geom_dist(m, d, 0, 1, MAX_ITERATIONS)
     self.assertAlmostEqual(-1, dist)
+    normal = wp.normalize(x1 - x2)
+    self.assertAlmostEqual(normal[0], 1)
+    self.assertAlmostEqual(normal[1], 0)
+    self.assertAlmostEqual(normal[2], 0)
 
   def test_mesh_mesh_contact(self):
     """Test penetration beween two meshes."""
@@ -289,7 +297,7 @@ class GJKTest(absltest.TestCase):
     </mujoco>
     """
     )
-    dist = _geom_dist(m, d, 0, 1, MAX_ITERATIONS)
+    dist, _, _ = _geom_dist(m, d, 0, 1, MAX_ITERATIONS)
     self.assertAlmostEqual(-0.01, dist)
 
 
