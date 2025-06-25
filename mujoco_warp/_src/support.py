@@ -259,26 +259,6 @@ def xfrc_accumulate(m: Model, d: Data, qfrc: wp.array2d(dtype=float)):
 
 
 @wp.func
-def bisection(x: wp.array(dtype=int), v: int, a_: int, b_: int) -> int:
-  # Binary search for the largest index i such that x[i] <= v
-  # x is a sorted array
-  # a and b are the start and end indices within x to search
-  a = int(a_)
-  b = int(b_)
-  c = int(0)
-  while b - a > 1:
-    c = (a + b) // 2
-    if x[c] <= v:
-      a = c
-    else:
-      b = c
-  c = a
-  if c != b and x[b] <= v:
-    c = b
-  return c
-
-
-@wp.func
 def all_same(v0: wp.vec3, v1: wp.vec3) -> wp.bool:
   dx = abs(v0[0] - v1[0])
   dy = abs(v0[1] - v1[1])
