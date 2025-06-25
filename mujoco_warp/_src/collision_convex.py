@@ -15,12 +15,12 @@
 
 import warp as wp
 
+from .collision_gjk import ccd
 from .collision_hfield import hfield_prism_vertex
 from .collision_primitive import Geom
 from .collision_primitive import _geom
 from .collision_primitive import contact_params
 from .collision_primitive import write_contact
-from .collision_gjk import ccd
 from .math import gjk_normalize
 from .math import make_frame
 from .math import orthonormal
