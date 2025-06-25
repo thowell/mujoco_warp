@@ -979,8 +979,7 @@ class Model:
     geompair2hfgeompair: geom pair to geom pair with         (ngeom * (ngeom - 1) // 2,)
                          height field mapping
     block_dim: BlockDim
-    convex_collision_pair: geom type id pairs for convex
-                           collision functions
+    collision_geom_pair: geom type id pairs for collisions
   """
 
   nq: int
@@ -1262,7 +1261,7 @@ class Model:
   mat_rgba: wp.array2d(dtype=wp.vec4)
   geompair2hfgeompair: wp.array(dtype=int)  # warp only
   block_dim: BlockDim  # warp only
-  convex_collision_pair: tuple  # warp only
+  collision_geom_pair: tuple  # warp only
 
 
 @dataclasses.dataclass
