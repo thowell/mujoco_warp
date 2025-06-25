@@ -914,7 +914,6 @@ def ccd_kernel_builder(
       hftri_index,
     )
 
-    margin = wp.max(geom_margin[worldid, g1], geom_margin[worldid, g2])
     points = mat3c()
 
     if default_gjk:
