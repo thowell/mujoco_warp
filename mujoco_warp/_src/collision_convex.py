@@ -159,30 +159,6 @@ def _gjk_support(
   return dist1 + dist2, support_pt
 
 
-_CONVEX_COLLISION_FUNC = {
-  (GeomType.HFIELD.value, GeomType.SPHERE.value),
-  (GeomType.HFIELD.value, GeomType.CAPSULE.value),
-  (GeomType.HFIELD.value, GeomType.ELLIPSOID.value),
-  (GeomType.HFIELD.value, GeomType.CYLINDER.value),
-  (GeomType.HFIELD.value, GeomType.BOX.value),
-  (GeomType.HFIELD.value, GeomType.MESH.value),
-  (GeomType.SPHERE.value, GeomType.ELLIPSOID.value),
-  (GeomType.SPHERE.value, GeomType.MESH.value),
-  (GeomType.CAPSULE.value, GeomType.CYLINDER.value),
-  (GeomType.CAPSULE.value, GeomType.ELLIPSOID.value),
-  (GeomType.CAPSULE.value, GeomType.MESH.value),
-  (GeomType.ELLIPSOID.value, GeomType.ELLIPSOID.value),
-  (GeomType.ELLIPSOID.value, GeomType.CYLINDER.value),
-  (GeomType.ELLIPSOID.value, GeomType.BOX.value),
-  (GeomType.ELLIPSOID.value, GeomType.MESH.value),
-  (GeomType.CYLINDER.value, GeomType.CYLINDER.value),
-  (GeomType.CYLINDER.value, GeomType.BOX.value),
-  (GeomType.CYLINDER.value, GeomType.MESH.value),
-  (GeomType.BOX.value, GeomType.MESH.value),
-  (GeomType.MESH.value, GeomType.MESH.value),
-}
-
-
 @wp.func
 def _expand_polytope(count: int, prev_count: int, dists: vecc3, tris: mat2c3, p: matc3):
   # expand polytope greedily
@@ -960,27 +936,12 @@ def _gjk_epa_pipeline(
   return gjk_epa_sparse
 
 
-_collision_kernels = {}
-
-
 def gjk_narrowphase(m: Model, d: Data):
-  if len(_collision_kernels) == 0:
-    for i in range(m.convex_collision_pair.shape[0]):
-      convex_collision_pair = m.convex_collision_pair[i]
-      t1 = int(convex_collision_pair[0])
-      t2 = int(convex_collision_pair[1])
-      _collision_kernels[(t1, t2)] = _gjk_epa_pipeline(
-        t1,
-        t2,
-        m.opt.gjk_iterations,
-        m.opt.epa_iterations,
-        m.opt.epa_exact_neg_distance,
-        m.opt.depth_extension,
-      )
-
-  for collision_kernel in _collision_kernels.values():
+  for type1, type2 in m.convex_collision_pair:
     wp.launch(
-      collision_kernel,
+      _gjk_epa_pipeline(
+        int(type1), int(type2), m.opt.gjk_iterations, m.opt.epa_iterations, m.opt.epa_exact_neg_distance, m.opt.depth_extension
+      ),
       dim=d.nconmax,
       inputs=[
         m.ngeom,

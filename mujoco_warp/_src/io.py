@@ -21,7 +21,30 @@ import warp as wp
 
 from . import math
 from . import types
-from .collision_convex import _CONVEX_COLLISION_FUNC
+from .types import GeomType
+
+_CONVEX_COLLISION = {
+  (GeomType.HFIELD.value, GeomType.SPHERE.value),
+  (GeomType.HFIELD.value, GeomType.CAPSULE.value),
+  (GeomType.HFIELD.value, GeomType.ELLIPSOID.value),
+  (GeomType.HFIELD.value, GeomType.CYLINDER.value),
+  (GeomType.HFIELD.value, GeomType.BOX.value),
+  (GeomType.HFIELD.value, GeomType.MESH.value),
+  (GeomType.SPHERE.value, GeomType.ELLIPSOID.value),
+  (GeomType.SPHERE.value, GeomType.MESH.value),
+  (GeomType.CAPSULE.value, GeomType.CYLINDER.value),
+  (GeomType.CAPSULE.value, GeomType.ELLIPSOID.value),
+  (GeomType.CAPSULE.value, GeomType.MESH.value),
+  (GeomType.ELLIPSOID.value, GeomType.ELLIPSOID.value),
+  (GeomType.ELLIPSOID.value, GeomType.CYLINDER.value),
+  (GeomType.ELLIPSOID.value, GeomType.BOX.value),
+  (GeomType.ELLIPSOID.value, GeomType.MESH.value),
+  (GeomType.CYLINDER.value, GeomType.CYLINDER.value),
+  (GeomType.CYLINDER.value, GeomType.BOX.value),
+  (GeomType.CYLINDER.value, GeomType.MESH.value),
+  (GeomType.BOX.value, GeomType.MESH.value),
+  (GeomType.MESH.value, GeomType.MESH.value),
+}
 
 
 def _hfield_geom_pair(mjm: mujoco.MjModel) -> Tuple[int, np.array]:
@@ -297,8 +320,7 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
 
     nxn_pairid[pairid] = i
 
-  convex_collision_pair = _CONVEX_COLLISION_FUNC & set(zip(mjm.geom_type[geom1], mjm.geom_type[geom2]))
-  convex_collision_pair = np.array([collision_pair for collision_pair in convex_collision_pair])
+  convex_collision_pair = tuple(_CONVEX_COLLISION & set(zip(mjm.geom_type[geom1], mjm.geom_type[geom2])))
 
   def create_nmodel_batched_array(mjm_array, dtype, expand_dim=True):
     array = wp.array(mjm_array, dtype=dtype)

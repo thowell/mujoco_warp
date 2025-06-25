@@ -16,7 +16,6 @@ import dataclasses
 import enum
 
 import mujoco
-import numpy as np
 import warp as wp
 
 MJ_MINVAL = mujoco.mjMINVAL
@@ -1263,7 +1262,7 @@ class Model:
   mat_rgba: wp.array2d(dtype=wp.vec4)
   geompair2hfgeompair: wp.array(dtype=int)  # warp only
   block_dim: BlockDim  # warp only
-  convex_collision_pair: np.array  # warp only
+  convex_collision_pair: tuple  # warp only
 
 
 @dataclasses.dataclass
