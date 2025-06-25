@@ -296,7 +296,7 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
 
     nxn_pairid[pairid] = i
 
-  collision_geom_pair = tuple(set(zip(mjm.geom_type[geom1], mjm.geom_type[geom2])))
+  geom_type_pair = tuple(set(zip(mjm.geom_type[geom1], mjm.geom_type[geom2])))
 
   def create_nmodel_batched_array(mjm_array, dtype, expand_dim=True):
     array = wp.array(mjm_array, dtype=dtype)
@@ -704,7 +704,7 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
     mat_rgba=create_nmodel_batched_array(mjm.mat_rgba, dtype=wp.vec4),
     geompair2hfgeompair=wp.array(_hfield_geom_pair(mjm)[1], dtype=int),
     block_dim=types.BlockDim(),
-    collision_geom_pair=collision_geom_pair,
+    geom_type_pair=geom_type_pair,
   )
 
   return m

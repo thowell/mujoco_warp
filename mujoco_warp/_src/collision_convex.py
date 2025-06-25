@@ -961,7 +961,7 @@ def _gjk_epa_pipeline(
 
 
 def gjk_narrowphase(m: Model, d: Data):
-  for geom_pair in m.collision_geom_pair:
+  for geom_pair in m.geom_type_pair:
     if geom_pair in _CONVEX_COLLISION:
       wp.launch(
         _gjk_epa_pipeline(
