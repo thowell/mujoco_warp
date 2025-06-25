@@ -862,7 +862,7 @@ def make_data(mjm: mujoco.MjModel, nworld: int = 1, nconmax: int = -1, njmax: in
       dim=wp.zeros((nconmax,), dtype=int),
       geom=wp.zeros((nconmax,), dtype=wp.vec2i),
       efc_address=wp.zeros(
-        (nconmax, 2 * (np.max(np.concatenate((mjm.geom_condim, mjm.pair_dim))) - 1)),
+        (nconmax, np.max(1, 2 * (np.max(np.concatenate([mjm.geom_condim, mjm.pair_dim])) - 1))),
         dtype=int,
       ),
       worldid=wp.zeros((nconmax,), dtype=int),
@@ -1067,7 +1067,9 @@ def put_data(
     mjd.moment_colind,
   )
 
-  contact_efc_address = np.zeros((nconmax, 2 * (np.max(np.concatenate((mjm.geom_condim, mjm.pair_dim)) - 1))), dtype=int)
+  contact_efc_address = np.zeros(
+    (nconmax, np.max(1, 2 * (np.max(np.concatenate([mjm.geom_condim, mjm.pair_dim])) - 1))), dtype=int
+  )
   for i in range(nworld):
     for j in range(mjd.ncon):
       condim = mjd.contact.dim[j]
