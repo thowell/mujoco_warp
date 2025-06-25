@@ -15,6 +15,7 @@
 
 import warp as wp
 
+from .collision_gjk import ccd
 from .collision_hfield import hfield_prism_vertex
 from .collision_primitive import Geom
 from .collision_primitive import _geom
@@ -237,7 +238,8 @@ def _max_contacts_height_field(
   return False
 
 
-def _gjk_epa_pipeline(
+def ccd_kernel_builder(
+  default_gjk: bool,
   geomtype1: int,
   geomtype2: int,
   gjk_iterations: int,
@@ -810,6 +812,15 @@ def _gjk_epa_pipeline(
     collision_pairid_in: wp.array(dtype=int),
     collision_worldid_in: wp.array(dtype=int),
     ncollision_in: wp.array(dtype=int),
+    epa_vert_in: wp.array2d(dtype=wp.vec3),
+    epa_vert1_in: wp.array2d(dtype=wp.vec3),
+    epa_vert2_in: wp.array2d(dtype=wp.vec3),
+    epa_face_in: wp.array2d(dtype=wp.vec3i),
+    epa_pr_in: wp.array2d(dtype=wp.vec3),
+    epa_norm2_in: wp.array2d(dtype=float),
+    epa_index_in: wp.array2d(dtype=int),
+    epa_map_in: wp.array2d(dtype=int),
+    epa_horizon_in: wp.array2d(dtype=int),
     # Data out:
     ncon_out: wp.array(dtype=int),
     ncon_hfield_out: wp.array2d(dtype=int),
@@ -903,25 +914,55 @@ def _gjk_epa_pipeline(
     )
 
     margin = wp.max(geom_margin[worldid, g1], geom_margin[worldid, g2])
+    points = mat3c()
 
-    simplex, normal = _gjk(geom1, geom2)
+    if default_gjk:
+      simplex, normal = _gjk(geom1, geom2)
 
-    # TODO(btaba): get depth from GJK, conditionally run EPA.
-    depth, normal = _epa(geom1, geom2, simplex, normal)
-    dist = -depth
+      # TODO(btaba): get depth from GJK, conditionally run EPA.
+      depth, normal = _epa(geom1, geom2, simplex, normal)
+      dist = -depth
 
-    if (dist - margin) >= 0.0 or depth != depth:
-      return
-
-    # TODO(btaba): split get_multiple_contacts into a separate kernel.
-
-    sphere = int(GeomType.SPHERE.value)
-    ellipsoid = int(GeomType.ELLIPSOID.value)
-    if geom_type[g1] == sphere or geom_type[g1] == ellipsoid or geom_type[g2] == sphere or geom_type[g2] == ellipsoid:
-      # TODO(team): _multiple_contacts should work with perturbation_angle=0
-      count, points = _multiple_contacts(geom1, geom2, depth, normal, 1, 2, 1.0e-5)
+      if (dist - margin) >= 0.0 or depth != depth:
+        return
+      # TODO(btaba): split get_multiple_contacts into a separate kernel.
+      sphere = int(GeomType.SPHERE.value)
+      ellipsoid = int(GeomType.ELLIPSOID.value)
+      if geom_type[g1] == sphere or geom_type[g1] == ellipsoid or geom_type[g2] == sphere or geom_type[g2] == ellipsoid:
+        # TODO(team): _multiple_contacts should work with perturbation_angle=0
+        count, points = _multiple_contacts(geom1, geom2, depth, normal, 1, 2, 1.0e-5)
+      else:
+        count, points = _multiple_contacts(geom1, geom2, depth, normal, 4, 8, 1.0e-3)
     else:
-      count, points = _multiple_contacts(geom1, geom2, depth, normal, 4, 8, 1.0e-3)
+      x1 = geom1.pos
+      x2 = geom2.pos
+
+      dist, x1, x2 = ccd(
+        1e-6,
+        gjk_iterations,
+        epa_iterations,
+        geom1,
+        geom2,
+        geomtype1,
+        geomtype2,
+        x1,
+        x2,
+        epa_vert_in[tid],
+        epa_vert1_in[tid],
+        epa_vert2_in[tid],
+        epa_face_in[tid],
+        epa_pr_in[tid],
+        epa_norm2_in[tid],
+        epa_index_in[tid],
+        epa_map_in[tid],
+        epa_horizon_in[tid],
+      )
+      count = 0
+      if dist < 0.0:
+        count = 1
+
+      points[0] = 0.5 * (x1 + x2)
+      normal = x1 - x2
 
     frame = make_frame(normal)
     for i in range(count):
@@ -960,15 +1001,16 @@ def _gjk_epa_pipeline(
   return gjk_epa_sparse
 
 
-_collision_kernels = {}
+_ccd_kernels = {}
 
 
-def gjk_narrowphase(m: Model, d: Data):
-  if len(_collision_kernels) == 0:
+def convex_narrowphase(m: Model, d: Data):
+  if len(_ccd_kernels) == 0:
     for types in _CONVEX_COLLISION_FUNC:
       t1 = types[0]
       t2 = types[1]
-      _collision_kernels[(t1, t2)] = _gjk_epa_pipeline(
+      _ccd_kernels[(t1, t2)] = ccd_kernel_builder(
+        True,
         t1,
         t2,
         m.opt.gjk_iterations,
@@ -977,9 +1019,9 @@ def gjk_narrowphase(m: Model, d: Data):
         m.opt.depth_extension,
       )
 
-  for collision_kernel in _collision_kernels.values():
+  for ccd_kernel in _ccd_kernels.values():
     wp.launch(
-      collision_kernel,
+      ccd_kernel,
       dim=d.nconmax,
       inputs=[
         m.ngeom,
@@ -1020,6 +1062,15 @@ def gjk_narrowphase(m: Model, d: Data):
         d.collision_pairid,
         d.collision_worldid,
         d.ncollision,
+        d.epa_vert,
+        d.epa_vert1,
+        d.epa_vert2,
+        d.epa_face,
+        d.epa_pr,
+        d.epa_norm2,
+        d.epa_index,
+        d.epa_map,
+        d.epa_horizon,
       ],
       outputs=[
         d.ncon,
