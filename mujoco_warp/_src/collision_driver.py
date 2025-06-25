@@ -17,9 +17,10 @@ from typing import Any
 
 import warp as wp
 
-from .collision_convex import gjk_narrowphase
+from .collision_convex import convex_narrowphase
 from .collision_hfield import hfield_midphase
 from .collision_primitive import primitive_narrowphase
+from .collision_sdf import sdf_narrowphase
 from .math import upper_tri_index
 from .types import MJ_MAXVAL
 from .types import BroadphaseType
@@ -491,5 +492,6 @@ def collision(m: Model, d: Data):
   # TODO(team): we should reject far-away contacts in the narrowphase instead of constraint
   #             partitioning because we can move some pressure of the atomics
   # TODO(team) switch between collision functions and GJK/EPA here
-  gjk_narrowphase(m, d)
+  convex_narrowphase(m, d)
   primitive_narrowphase(m, d)
+  sdf_narrowphase(m, d)
