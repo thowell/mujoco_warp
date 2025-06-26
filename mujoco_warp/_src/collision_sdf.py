@@ -353,9 +353,16 @@ def _sdf_narrowphase(
   if tid >= ncollision_in[0]:
     return
 
+  geoms = collision_pair_in[tid]
+
+  g2 = geoms[1]
+  type2 = geom_type[g2]
+  if type2 != int(GeomType.SDF.value):
+    return
+
   worldid = collision_worldid_in[tid]
 
-  geoms, margin, gap, condim, friction, solref, solreffriction, solimp = contact_params(
+  _, margin, gap, condim, friction, solref, solreffriction, solimp = contact_params(
     geom_condim,
     geom_priority,
     geom_solmix,
@@ -377,7 +384,6 @@ def _sdf_narrowphase(
     worldid,
   )
   g1 = geoms[0]
-  g2 = geoms[1]
 
   hftri_index = collision_hftri_index_in[tid]
 
@@ -423,12 +429,8 @@ def _sdf_narrowphase(
   )
 
   type1 = geom_type[g1]
-  type2 = geom_type[g2]
   g1_plugin = geom_plugin_index[g1]
   g2_plugin = geom_plugin_index[g2]
-
-  if type2 != int(GeomType.SDF.value):
-    return
 
   g2_to_g1_rot = wp.transpose(geom2.rot) * geom1.rot
   g2_to_g1_pos = wp.transpose(geom2.rot) * (geom1.pos - geom2.pos)
