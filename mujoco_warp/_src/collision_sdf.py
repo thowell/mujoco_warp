@@ -26,6 +26,7 @@ from .types import Data
 from .types import GeomType
 from .types import Model
 from .types import vec5
+from .warp_util import event_scope
 
 
 @wp.struct
@@ -510,6 +511,7 @@ def _sdf_narrowphase(
     )
 
 
+@event_scope
 def sdf_narrowphase(m: Model, d: Data):
   wp.launch(
     _sdf_narrowphase,
