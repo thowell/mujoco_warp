@@ -533,7 +533,7 @@ def _gjk(
   for k in range(gjk_iterations):
     xnorm = wp.dot(x_k, x_k)
     # TODO(kbayes): determine new constant here
-    if xnorm < 1e-10:
+    if xnorm < 1e-12:
       break
     dir_neg = x_k / wp.sqrt(xnorm)
 
