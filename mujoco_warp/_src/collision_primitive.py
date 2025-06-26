@@ -53,6 +53,7 @@ class Geom:
   vert: wp.array(dtype=wp.vec3)
   graphadr: int
   graph: wp.array(dtype=int)
+  index: int
 
 
 @wp.func
@@ -107,6 +108,7 @@ def _geom(
       geom_dataid, hfield_adr, hfield_nrow, hfield_ncol, hfield_size, hfield_data, gid, hftri_index
     )
 
+  geom.index = -1
   return geom
 
 

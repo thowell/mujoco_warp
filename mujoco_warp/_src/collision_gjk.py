@@ -69,6 +69,7 @@ class Polytope:
 
 @wp.func
 def _support(geom: Geom, geomtype: int, dir: wp.vec3):
+  index = -1
   local_dir = wp.transpose(geom.rot) @ dir
   if geomtype == int(GeomType.SPHERE.value):
     support_pt = geom.pos + geom.size[0] * dir
@@ -100,6 +101,10 @@ def _support(geom: Geom, geomtype: int, dir: wp.vec3):
   elif geomtype == int(GeomType.MESH.value):
     max_dist = float(FLOAT_MIN)
     if geom.graphadr == -1 or geom.vertnum < 10:
+      if geom.index > -1:
+        index = geom.index
+        max_dist = wp.dot(geom.vert[geom.index], local_dir)
+        support_pt = geom.vert[geom.index]
       # exhaustive search over all vertices
       for i in range(geom.vertnum):
         vert = geom.vert[geom.vertadr + i]
@@ -107,6 +112,7 @@ def _support(geom: Geom, geomtype: int, dir: wp.vec3):
         if dist > max_dist:
           max_dist = dist
           support_pt = vert
+          index = geom.vertadr + i
     else:
       numvert = geom.graph[geom.graphadr]
       vert_edgeadr = geom.graphadr + 2
@@ -115,6 +121,9 @@ def _support(geom: Geom, geomtype: int, dir: wp.vec3):
       # hillclimb until no change
       prev = int(-1)
       imax = int(0)
+      if geom.index > -1:
+        imax = geom.index
+        index = geom.index
 
       while True:
         prev = int(imax)
@@ -129,6 +138,7 @@ def _support(geom: Geom, geomtype: int, dir: wp.vec3):
           i += int(1)
         if imax == prev:
           break
+      index = imax
       imax = geom.graph[vert_globalid + imax]
       support_pt = geom.vert[geom.vertadr + imax]
 
@@ -143,7 +153,7 @@ def _support(geom: Geom, geomtype: int, dir: wp.vec3):
         support_pt = vert
     support_pt = geom.rot @ support_pt + geom.pos
 
-  return support_pt
+  return index, support_pt
 
 
 @wp.func
@@ -164,12 +174,13 @@ def _attach_face(pt: Polytope, idx: int, v1: int, v2: int, v3: int):
 
 @wp.func
 def _epa_support(pt: Polytope, idx: int, geom1: Geom, geom2: Geom, geom1_type: int, geom2_type: int, dir: wp.vec3):
-  s1 = _support(geom1, geom1_type, dir)
-  s2 = _support(geom2, geom2_type, -dir)
+  index1, s1 = _support(geom1, geom1_type, dir)
+  index2, s2 = _support(geom2, geom2_type, -dir)
 
   pt.verts[idx] = s1 - s2
   pt.verts1[idx] = s1
   pt.verts2[idx] = s2
+  return index1, index2
 
 
 @wp.func
@@ -527,8 +538,10 @@ def _gjk(
     dir_neg = x_k / wp.sqrt(xnorm)
 
     # compute the kth support point
-    s1_k = _support(geom1, geomtype1, -dir_neg)
-    s2_k = _support(geom2, geomtype2, dir_neg)
+    i1, s1_k = _support(geom1, geomtype1, -dir_neg)
+    i2, s2_k = _support(geom2, geomtype2, dir_neg)
+    geom1.index = i1
+    geom2.index = i2
     simplex1[n] = s1_k
     simplex2[n] = s2_k
     simplex[n] = s1_k - s2_k
@@ -1058,7 +1071,9 @@ def _epa(tolerance2: float, epa_iterations: int, pt: Polytope, geom1: Geom, geom
     # compute support point w from the closest face's normal
     lower = wp.sqrt(lower2)
     wi = pt.nverts
-    _epa_support(pt, wi, geom1, geom2, geomtype1, geomtype2, pt.face_v[idx] / lower)
+    i1, i2 = _epa_support(pt, wi, geom1, geom2, geomtype1, geomtype2, pt.face_v[idx] / lower)
+    geom1.index = i1
+    geom2.index = i2
     pt.nverts += 1
 
     # upper bound for kth iteration

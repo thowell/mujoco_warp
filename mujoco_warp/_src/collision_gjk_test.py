@@ -59,6 +59,7 @@ def _geom_dist(m: Model, d: Data, gid1: int, gid2: int, iterations: int):
     MESHGEOM = int(GeomType.MESH.value)
 
     geom1 = Geom()
+    geom1.index = -1
     geomtype1 = geom_type[gid1]
     geom1.pos = geom_xpos_in[0, gid1]
     geom1.rot = geom_xmat_in[0, gid1]
@@ -72,6 +73,7 @@ def _geom_dist(m: Model, d: Data, gid1: int, gid2: int, iterations: int):
       geom1.vert = mesh_vert
 
     geom2 = Geom()
+    geom2.index = -1
     geomtype2 = geom_type[gid2]
     geom2.pos = geom_xpos_in[0, gid2]
     geom2.rot = geom_xmat_in[0, gid2]
