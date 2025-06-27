@@ -1274,7 +1274,7 @@ class Model:
   actuator_trntype_body_adr: wp.array(dtype=int)  # warp only
   geompair2hfgeompair: wp.array(dtype=int)  # warp only
   block_dim: BlockDim  # warp only
-  geom_type_pair: tuple[int, ...]  # warp only
+  geom_type_pair: wp.array2d(dtype=int)
 
 
 @dataclasses.dataclass

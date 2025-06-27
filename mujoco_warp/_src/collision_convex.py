@@ -1004,13 +1004,15 @@ def ccd_kernel_builder(
 
 @event_scope
 def convex_narrowphase(m: Model, d: Data):
-  for geom_pair in zip(m.geom_type_pair[::2], m.geom_type_pair[1::2]):
-    if geom_pair in _CONVEX_COLLISION:
+  for pair in _CONVEX_COLLISION:
+    geom_type1 = int(pair[0])
+    geom_type2 = int(pair[1])
+    if m.geom_type_pair[geom_type1, geom_type2]:
       wp.launch(
         ccd_kernel_builder(
           False,
-          int(geom_pair[0]),
-          int(geom_pair[1]),
+          geom_type1,
+          geom_type2,
           m.opt.gjk_iterations,
           m.opt.epa_iterations,
           m.opt.epa_exact_neg_distance,
