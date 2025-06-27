@@ -347,7 +347,8 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
   for type1 in range(len(types.GeomType)):
     for type2 in range(type1, len(types.GeomType)):
       if (geom1_types[type1] and geom2_types[type2]) or (geom1_types[type2] and geom2_types[type1]):
-        geom_type_pair.append((type1, type2))
+        geom_type_pair.append(type1)
+        geom_type_pair.append(type2)
 
   def create_nmodel_batched_array(mjm_array, dtype, expand_dim=True):
     array = wp.array(mjm_array, dtype=dtype)
