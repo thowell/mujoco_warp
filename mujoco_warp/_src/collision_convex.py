@@ -1007,7 +1007,7 @@ def convex_narrowphase(m: Model, d: Data):
   for pair in _CONVEX_COLLISION:
     geom_type1 = int(pair[0])
     geom_type2 = int(pair[1])
-    if m.geom_type_pair[geom_type1, geom_type2]:
+    if (geom_type1, geom_type2) in m.geom_type_pair:
       wp.launch(
         ccd_kernel_builder(
           False,
