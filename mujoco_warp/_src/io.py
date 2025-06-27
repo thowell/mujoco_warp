@@ -336,15 +336,15 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
 
     nxn_pairid[pairid] = i
 
-  geom_type_pair = np.zeros((len(types.GeomType), len(types.GeomType)), dtype=int)
+  geom_type_pair = np.zeros((len(types.GeomType), len(types.GeomType)), dtype=bool)
   for g1 in geom1:
     for g2 in geom2:
-      type1 = int(mjm.geom_type[g1])
-      type2 = int(mjm.geom_type[g2])
-      if type1 <= type2:
-        geom_type_pair[type1, type2] = 1
+      geom_type1 = int(mjm.geom_type[g1])
+      geom_type2 = int(mjm.geom_type[g2])
+      if geom_type1 <= geom_type2:
+        geom_type_pair[geom_type1, geom_type2] = True
       else:
-        geom_type_pair[type2, type1] = 1
+        geom_type_pair[geom_type2, geom_type1] = True
 
   def create_nmodel_batched_array(mjm_array, dtype, expand_dim=True):
     array = wp.array(mjm_array, dtype=dtype)

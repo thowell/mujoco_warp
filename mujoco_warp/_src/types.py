@@ -16,6 +16,7 @@ import dataclasses
 import enum
 
 import mujoco
+import numpy as np
 import warp as wp
 
 MJ_MINVAL = mujoco.mjMINVAL
@@ -1274,7 +1275,7 @@ class Model:
   actuator_trntype_body_adr: wp.array(dtype=int)  # warp only
   geompair2hfgeompair: wp.array(dtype=int)  # warp only
   block_dim: BlockDim  # warp only
-  geom_type_pair: wp.array2d(dtype=int)  # warp only
+  geom_type_pair: np.ndarray(shape=(len(GeomType), len(GeomType)), dtype=bool)  # warp only
 
 
 @dataclasses.dataclass
