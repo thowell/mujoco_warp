@@ -16,7 +16,6 @@ import dataclasses
 import enum
 
 import mujoco
-import numpy as np
 import warp as wp
 
 MJ_MINVAL = mujoco.mjMINVAL
