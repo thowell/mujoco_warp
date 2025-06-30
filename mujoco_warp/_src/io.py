@@ -336,6 +336,7 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
 
     nxn_pairid[pairid] = i
 
+  # contact pair types
   geom_type_pair = []
   geom1_types = np.zeros(len(types.GeomType), dtype=bool)
   for g1 in geom1:
