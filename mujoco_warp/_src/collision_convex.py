@@ -33,7 +33,9 @@ from .types import Data
 from .types import GeomType
 from .types import Model
 from .types import vec5
+from .warp_util import cache_kernel
 from .warp_util import event_scope
+from .warp_util import kernel as nested_kernel
 
 # TODO(team): improve compile time to enable backward pass
 wp.config.enable_backward = False
@@ -239,6 +241,7 @@ def _max_contacts_height_field(
   return False
 
 
+@cache_kernel
 def ccd_kernel_builder(
   default_gjk: bool,
   geomtype1: int,
@@ -771,7 +774,7 @@ def ccd_kernel_builder(
     return contact_count, contact_points
 
   # runs GJK and EPA on a set of sparse geom pairs per env
-  @wp.kernel
+  @nested_kernel
   def gjk_epa_sparse(
     # Model:
     ngeom: int,
