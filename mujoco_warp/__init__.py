@@ -21,11 +21,11 @@ from ._src.types import Model as Model
 from ._src.types import Data as Data
 # isort: on
 
-from ._src import collision_sdf as collision_sdf
 from ._src.collision_driver import collision as collision
 from ._src.collision_driver import nxn_broadphase as nxn_broadphase
 from ._src.collision_driver import sap_broadphase as sap_broadphase
 from ._src.collision_primitive import primitive_narrowphase as primitive_narrowphase
+from ._src.collision_sdf import sdf_narrowphase as sdf_narrowphase
 from ._src.constraint import make_constraint as make_constraint
 from ._src.derivative import deriv_smooth_vel as deriv_smooth_vel
 from ._src.forward import euler as euler
