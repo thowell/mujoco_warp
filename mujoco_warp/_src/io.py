@@ -353,9 +353,12 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
 
   def create_nmodel_batched_array(mjm_array, dtype, expand_dim=True):
     array = wp.array(mjm_array, dtype=dtype)
-    array.strides = (0,) + array.strides
+    # add private attribute for JAX to determine which fields are batched
+    array._is_batched = True
     if not expand_dim:
+      array.strides = (0,) + array.strides[1:]
       return array
+    array.strides = (0,) + array.strides
     array.ndim += 1
     array.shape = (1,) + array.shape
     return array
