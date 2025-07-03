@@ -25,6 +25,7 @@ from .math import gjk_normalize
 from .math import make_frame
 from .math import orthonormal
 from .math import upper_tri_index
+from .math import upper_trid_index
 from .support import all_same
 from .support import any_different
 from .types import MJ_MAXCONPAIR
@@ -75,6 +76,7 @@ _CONVEX_COLLISION_PAIRS = {
   (GeomType.SPHERE.value, GeomType.MESH.value),
   (GeomType.CAPSULE.value, GeomType.CYLINDER.value),
   (GeomType.CAPSULE.value, GeomType.ELLIPSOID.value),
+  (GeomType.CAPSULE.value, GeomType.CYLINDER.value),
   (GeomType.CAPSULE.value, GeomType.MESH.value),
   (GeomType.ELLIPSOID.value, GeomType.ELLIPSOID.value),
   (GeomType.ELLIPSOID.value, GeomType.CYLINDER.value),
@@ -1007,8 +1009,8 @@ def ccd_kernel_builder(
 
 @event_scope
 def convex_narrowphase(m: Model, d: Data):
-  for geom_pair in zip(m.geom_type_pair[::2], m.geom_type_pair[1::2]):
-    if geom_pair in _CONVEX_COLLISION_PAIRS:
+  for geom_pair in _CONVEX_COLLISION_PAIRS:
+    if m.geom_pair_type_count[upper_trid_index(len(GeomType), geom_pair[0], geom_pair[1])]:
       wp.launch(
         ccd_kernel_builder(
           False,
