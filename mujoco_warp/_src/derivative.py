@@ -15,6 +15,8 @@
 
 import warp as wp
 
+from .support import _mul_m_dense
+from .support import _mul_m_sparse
 from .types import BiasType
 from .types import Data
 from .types import DisableBit
@@ -32,9 +34,8 @@ def _qderiv_actuator_passive(
   # Model:
   nu: int,
   opt_timestep: wp.array(dtype=float),
+  opt_is_sparse: bool,
   dof_damping: wp.array2d(dtype=float),
-  dof_tri_row: wp.array(dtype=int),
-  dof_tri_col: wp.array(dtype=int),
   actuator_dyntype: wp.array(dtype=int),
   actuator_gaintype: wp.array(dtype=int),
   actuator_biastype: wp.array(dtype=int),
@@ -48,14 +49,16 @@ def _qderiv_actuator_passive(
   actuator_moment_in: wp.array3d(dtype=float),
   qM_in: wp.array3d(dtype=float),
   # In:
+  qMi: wp.array(dtype=int),
+  qMj: wp.array(dtype=int),
   actuation_enabled: bool,
   passive_enabled: bool,
   # Data out:
   qM_integration_out: wp.array3d(dtype=float),
 ):
   worldid, elemid = wp.tid()
-  dofiid = dof_tri_row[elemid]
-  dofjid = dof_tri_col[elemid]
+  dofiid = qMi[elemid]
+  dofjid = qMj[elemid]
 
   qderiv = float(0.0)
   for actid in range(nu):
@@ -84,10 +87,13 @@ def _qderiv_actuator_passive(
 
   qderiv *= opt_timestep[worldid]
 
-  qM = qM_in[worldid, dofiid, dofjid] - qderiv
-  qM_integration_out[worldid, dofiid, dofjid] = qM
-  if dofiid != dofjid:
-    qM_integration_out[worldid, dofjid, dofiid] = qM
+  if opt_is_sparse:
+    qM_integration_out[worldid, 0, elemid] = qM_in[worldid, 0, elemid] - qderiv
+  else:
+    qM = qM_in[worldid, dofiid, dofjid] - qderiv
+    qM_integration_out[worldid, dofiid, dofjid] = qM
+    if dofiid != dofjid:
+      qM_integration_out[worldid, dofjid, dofiid] = qM
 
 
 @wp.kernel
@@ -95,26 +101,31 @@ def _qderiv_tendon_damping(
   # Model:
   ntendon: int,
   opt_timestep: wp.array(dtype=float),
-  dof_tri_row: wp.array(dtype=int),
-  dof_tri_col: wp.array(dtype=int),
+  opt_is_sparse: bool,
   tendon_damping: wp.array2d(dtype=float),
   # Data in:
   ten_J_in: wp.array3d(dtype=float),
+  # In:
+  qMi: wp.array(dtype=int),
+  qMj: wp.array(dtype=int),
   # Data out:
   qM_integration_out: wp.array3d(dtype=float),
 ):
   worldid, elemid = wp.tid()
-  dofiid = dof_tri_row[elemid]
-  dofjid = dof_tri_col[elemid]
+  dofiid = qMi[elemid]
+  dofjid = qMj[elemid]
 
   qderiv = float(0.0)
   for tenid in range(ntendon):
     qderiv -= ten_J_in[worldid, tenid, dofiid] * ten_J_in[worldid, tenid, dofjid] * tendon_damping[worldid, tenid]
   qderiv *= opt_timestep[worldid]
 
-  qM_integration_out[worldid, dofiid, dofjid] -= qderiv
-  if dofiid != dofjid:
-    qM_integration_out[worldid, dofjid, dofiid] -= qderiv
+  if opt_is_sparse:
+    qM_integration_out[worldid, 0, elemid] -= qderiv
+  else:
+    qM_integration_out[worldid, dofiid, dofjid] -= qderiv
+    if dofiid != dofjid:
+      qM_integration_out[worldid, dofjid, dofiid] -= qderiv
 
 
 @wp.kernel
@@ -127,19 +138,6 @@ def _qfrc_forward(
 ):
   worldid, dofid = wp.tid()
   qfrc_integration_out[worldid, dofid] = qfrc_smooth_in[worldid, dofid] + qfrc_constraint_in[worldid, dofid]
-
-
-@wp.kernel
-def _qfrc_inverse(
-  # Data in:
-  qacc_in: wp.array2d(dtype=float),
-  qM_integration_in: wp.array3d(dtype=float),
-  # Data out:
-  qfrc_integration_out: wp.array2d(dtype=float),
-):
-  worldid, dofiid, dofjid = wp.tid()
-  qfrcij = qM_integration_in[worldid, dofiid, dofjid] * qacc_in[worldid, dofjid]
-  wp.atomic_add(qfrc_integration_out[worldid], dofiid, qfrcij)
 
 
 @event_scope
@@ -155,16 +153,17 @@ def deriv_smooth_vel(m: Model, d: Data, flg_forward: bool = True):
   actuation_enabled = not (m.opt.disableflags & DisableBit.ACTUATION)
   passive_enabled = not (m.opt.disableflags & DisableBit.PASSIVE)
 
+  qMi = m.qM_fullm_i if m.opt.is_sparse else m.dof_tri_row
+  qMj = m.qM_fullm_j if m.opt.is_sparse else m.dof_tri_col
   if actuation_enabled or passive_enabled:
     wp.launch(
       _qderiv_actuator_passive,
-      dim=(d.nworld, m.dof_tri_row.size),
+      dim=(d.nworld, qMi.size),
       inputs=[
         m.nu,
         m.opt.timestep,
+        m.opt.is_sparse,
         m.dof_damping,
-        m.dof_tri_row,
-        m.dof_tri_col,
         m.actuator_dyntype,
         m.actuator_gaintype,
         m.actuator_biastype,
@@ -176,6 +175,8 @@ def deriv_smooth_vel(m: Model, d: Data, flg_forward: bool = True):
         d.ctrl,
         d.actuator_moment,
         d.qM,
+        qMi,
+        qMj,
         actuation_enabled,
         passive_enabled,
       ],
@@ -185,8 +186,8 @@ def deriv_smooth_vel(m: Model, d: Data, flg_forward: bool = True):
   if passive_enabled:
     wp.launch(
       _qderiv_tendon_damping,
-      dim=(d.nworld, m.dof_tri_row.size),
-      inputs=[m.ntendon, m.opt.timestep, m.dof_tri_row, m.dof_tri_col, m.tendon_damping, d.ten_J],
+      dim=(d.nworld, qMi.size),
+      inputs=[m.ntendon, m.opt.timestep, m.opt.is_sparse, m.tendon_damping, d.ten_J, qMi, qMj],
       outputs=[d.qM_integration],
     )
 
@@ -198,12 +199,29 @@ def deriv_smooth_vel(m: Model, d: Data, flg_forward: bool = True):
       outputs=[d.qfrc_integration],
     )
   else:
-    d.qfrc_integration.zero_()
-    wp.launch(
-      _qfrc_inverse,
-      dim=(d.nworld, m.nv, m.nv),
-      inputs=[d.qacc, d.qM_integration],
-      outputs=[d.qfrc_integration],
-    )
+    # qfrc = qM @ qacc
+    if m.opt.is_sparse:
+      _mul_m_sparse(
+        m.nv,
+        m.qM_mulm_i,
+        m.qM_mulm_j,
+        m.qM_madr_ij,
+        m.dof_Madr,
+        d.nworld,
+        d.qM_integration,
+        d.qacc,
+        d.inverse_mul_m_skip,
+        d.qfrc_integration,
+      )
+    else:
+      _mul_m_dense(
+        m.qM_tiles,
+        m.block_dim.mul_m_dense,
+        d.nworld,
+        d.qM_integration,
+        d.qacc,
+        d.inverse_mul_m_skip,
+        d.qfrc_integration,
+      )
 
   # TODO(team): rne derivative

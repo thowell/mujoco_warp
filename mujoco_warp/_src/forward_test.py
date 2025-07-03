@@ -188,17 +188,14 @@ class ForwardTest(parameterized.TestCase):
 
     _assert_eq(rk_step().numpy()[0], rk_step().numpy()[0], "qpos")
 
-  @parameterized.parameters(
-    0,
-    DisableBit.PASSIVE.value,
-    DisableBit.ACTUATION.value,
-    DisableBit.PASSIVE.value & DisableBit.ACTUATION.value,
-  )
-  def test_implicit(self, dsblflgs):
+  @parameterized.product(actuation=[True, False], passive=[True, False], sparse=[True, False])
+  def test_implicit(self, actuation, passive, sparse):
     mjm, mjd, _, _ = test_util.fixture(
       "pendula.xml",
       integrator=IntegratorType.IMPLICITFAST,
-      disableflags=dsblflgs,
+      actuation=actuation,
+      passive=passive,
+      sparse=sparse,
     )
 
     mjm.actuator_gainprm[:, 2] = np.random.uniform(low=0.01, high=10.0, size=mjm.actuator_gainprm[:, 2].shape)
