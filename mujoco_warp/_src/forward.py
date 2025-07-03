@@ -145,7 +145,7 @@ def _next_velocity(
 @wp.func
 def _next_act(
   # Model:
-  opt_timestep: float,
+  opt_timestep: float,  # kernel_analyzer: ignore
   actuator_dyntype: int,  # kernel_analyzer: ignore
   actuator_dynprm: vec10f,  # kernel_analyzer: ignore
   actuator_actrange: wp.vec2,  # kernel_analyzer: ignore
