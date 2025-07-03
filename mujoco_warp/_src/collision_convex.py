@@ -65,7 +65,7 @@ VECI1 = vec6(0, 0, 0, 1, 1, 2)
 VECI2 = vec6(1, 2, 3, 2, 3, 3)
 
 
-_CONVEX_COLLISION_PAIRS = {
+_CONVEX_COLLISION_PAIRS = [
   (GeomType.HFIELD.value, GeomType.SPHERE.value),
   (GeomType.HFIELD.value, GeomType.CAPSULE.value),
   (GeomType.HFIELD.value, GeomType.ELLIPSOID.value),
@@ -74,7 +74,6 @@ _CONVEX_COLLISION_PAIRS = {
   (GeomType.HFIELD.value, GeomType.MESH.value),
   (GeomType.SPHERE.value, GeomType.ELLIPSOID.value),
   (GeomType.SPHERE.value, GeomType.MESH.value),
-  (GeomType.CAPSULE.value, GeomType.CYLINDER.value),
   (GeomType.CAPSULE.value, GeomType.ELLIPSOID.value),
   (GeomType.CAPSULE.value, GeomType.CYLINDER.value),
   (GeomType.CAPSULE.value, GeomType.MESH.value),
@@ -87,7 +86,20 @@ _CONVEX_COLLISION_PAIRS = {
   (GeomType.CYLINDER.value, GeomType.MESH.value),
   (GeomType.BOX.value, GeomType.MESH.value),
   (GeomType.MESH.value, GeomType.MESH.value),
-}
+]
+
+
+def _check_convex_collision_pairs():
+  prev_idx = -1
+  for pair in _CONVEX_COLLISION_PAIRS:
+    idx = upper_trid_index(len(GeomType), pair[0], pair[1])
+    if pair[1] < pair[0] or idx <= prev_idx:
+      return False
+    prev_idx = idx
+  return True
+
+
+assert _check_convex_collision_pairs(), "_CONVEX_COLLISION_PAIRS is in invalid order."
 
 
 @wp.func
