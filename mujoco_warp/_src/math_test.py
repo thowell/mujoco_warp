@@ -125,6 +125,7 @@ class ClosestSegmentSegmentPointsTest(absltest.TestCase):
     """Tests upper_trid_index works with symmetric matrix"""
     self.assertEqual(upper_trid_index(10, 1, 5), upper_trid_index(10, 5, 1))
 
+
 if __name__ == "__main__":
   wp.init()
   absltest.main()
