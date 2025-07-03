@@ -227,6 +227,24 @@ class ForwardTest(parameterized.TestCase):
     _assert_eq(d.qpos.numpy()[0], mjd.qpos, "qpos")
     _assert_eq(d.act.numpy()[0], mjd.act, "act")
 
+  def test_implicit_position(self):
+    mjm, mjd, m, d = test_util.fixture("actuation/position.xml", keyframe=0, integrator=IntegratorType.IMPLICITFAST, kick=True)
+
+    mujoco.mj_implicit(mjm, mjd)
+    mjwarp.implicit(m, d)
+
+    _assert_eq(d.qpos.numpy()[0], mjd.qpos, "qpos")
+    _assert_eq(d.qvel.numpy()[0], mjd.qvel, "qvel")
+
+  def test_implicit_tendon_damping(self):
+    mjm, mjd, m, d = test_util.fixture("tendon/damping.xml", keyframe=0, integrator=IntegratorType.IMPLICITFAST, kick=True)
+
+    mujoco.mj_implicit(mjm, mjd)
+    mjwarp.implicit(m, d)
+
+    _assert_eq(d.qpos.numpy()[0], mjd.qpos, "qpos")
+    _assert_eq(d.qvel.numpy()[0], mjd.qvel, "qvel")
+
   @parameterized.parameters("humanoid/humanoid.xml", "pendula.xml", "constraints.xml", "collision.xml")
   def test_graph_capture(self, xml):
     # TODO(team): test more environments
