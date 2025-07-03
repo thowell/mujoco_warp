@@ -17,7 +17,6 @@ from typing import Tuple
 
 import warp as wp
 
-from .math import normalize_with_norm
 from .types import MJ_MINVAL
 from .types import Data
 from .types import GeomType
@@ -830,21 +829,24 @@ def ray(
   geomgroup: vec6 = None,
   flg_static: bool = True,
   bodyexclude: int = -1,
-) -> Tuple[wp.array2d(dtype=float), wp.array2d(dtype=int)]:
+) -> tuple[wp.array2d(dtype=float), wp.array2d(dtype=int)]:
   """Returns the distance at which rays intersect with primitive geoms.
 
   Args:
-      m: MuJoCo model
-      d: MuJoCo data
-      pnt: ray origin points
-      vec: ray directions
-      geomgroup: group inclusion/exclusion mask (6,), or all zeros to ignore
-      flg_static: if True, allows rays to intersect with static geoms
-      bodyexclude: ignore geoms on specified body id (-1 to disable)
+      m (Model): The model containing kinematic and dynamic information (device).
+      d (Data): The data object containing the current state and output arrays (device).
+      pnt (wp.array2d(dtype=wp.vec3)): Ray origin points.
+      vec (wp.array2d(dtype=wp.vec3)): Ray directions.
+      geomgroup (vec6, optional): Group inclusion/exclusion mask.
+                                  If all are wp.inf, ignore.
+      flg_static (bool, optional): If True, allows rays to intersect with static geoms.
+                                   Defaults to True.
+      bodyexclude (int, optional): Ignore geoms on specified body id (-1 to disable).
+                                   Defaults to -1.
 
   Returns:
-      dist: distances from ray origins to geom surfaces
-      geomid: IDs of intersected geoms (-1 if none)
+      wp.array2d(dtype=float): Distances from ray origins to geom surfaces.
+      wp.array2d(dtype=int): IDs of intersected geoms (-1 if none).
   """
 
   assert pnt.shape[0] == vec.shape[0]

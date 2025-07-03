@@ -23,6 +23,7 @@ from . import support
 from . import types
 from .block_cholesky import create_blocked_cholesky_func
 from .block_cholesky import create_blocked_cholesky_solve_func
+from .warp_util import cache_kernel
 from .warp_util import event_scope
 from .warp_util import kernel as nested_kernel
 
@@ -1067,6 +1068,7 @@ def linesearch_zero_jv(
   efc_jv_out[efcid] = 0.0
 
 
+@cache_kernel
 def linesearch_jv_fused(nv: int, dofs_per_thread: int):
   @nested_kernel
   def kernel(
@@ -2201,6 +2203,7 @@ def update_gradient_JTCJ(
     efc_h_out[worldid, dof1id, dof2id] += efc_h
 
 
+@cache_kernel
 def update_gradient_cholesky(tile_size: int):
   @nested_kernel
   def kernel(
@@ -2226,6 +2229,7 @@ def update_gradient_cholesky(tile_size: int):
   return kernel
 
 
+@cache_kernel
 def update_gradient_cholesky_blocked(tile_size: int):
   @nested_kernel
   def kernel(
@@ -2633,12 +2637,21 @@ def create_context(m: types.Model, d: types.Data, grad: bool = True):
     _update_gradient(m, d)
 
 
+def _copy_acc(m: types.Model, d: types.Data):
+  wp.copy(d.qacc, d.qacc_smooth)
+  wp.copy(d.qacc_warmstart, d.qacc_smooth)
+  d.solver_niter.fill_(0)
+
+
 @event_scope
 def solve(m: types.Model, d: types.Data):
   if m.opt.graph_conditional:
-    wp.capture_if(condition=d.nefc, on_true=_solve, on_false=None, m=m, d=d)
+    wp.capture_if(condition=d.nefc, on_true=_solve, on_false=_copy_acc, m=m, d=d)
   else:
-    _solve(m, d)
+    if d.njmax == 0:
+      _copy_acc(m, d)
+    else:
+      _solve(m, d)
 
 
 def _solve(m: types.Model, d: types.Data):

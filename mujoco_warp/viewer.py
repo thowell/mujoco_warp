@@ -38,6 +38,8 @@ _VIEWER_GLOBAL_STATE = {
   "running": True,
   "step_once": False,
 }
+_NCONMAX = flags.DEFINE_integer("nconmax", None, "Maximum number of contacts.")
+_NJMAX = flags.DEFINE_integer("njmax", None, "Maximum number of constraints.")
 
 
 def key_callback(key: int) -> None:
@@ -50,6 +52,11 @@ def key_callback(key: int) -> None:
 
 def _load_model():
   spec = mujoco.MjSpec.from_file(_MODEL_PATH.value)
+  # check if the file has any mujoco.sdf test plugins
+  if any(p.plugin_name.startswith("mujoco.sdf") for p in spec.plugins):
+    from mujoco_warp.test_data.collision_sdf.utils import register_sdf_plugins as register_sdf_plugins
+
+    register_sdf_plugins(mjwarp.collision_sdf)
   return spec.compile()
 
 
@@ -87,7 +94,7 @@ def _main(argv: Sequence[str]) -> None:
     mjm_hash = pickle.dumps(mjm)
     m = mjwarp.put_model(mjm)
     m.opt.ls_parallel = _LS_PARALLEL.value
-    d = mjwarp.put_data(mjm, mjd)
+    d = mjwarp.put_data(mjm, mjd, nconmax=_NCONMAX.value, njmax=_NJMAX.value)
 
     if _CLEAR_KERNEL_CACHE.value:
       wp.clear_kernel_cache()
