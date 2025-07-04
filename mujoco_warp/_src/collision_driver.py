@@ -33,6 +33,32 @@ from .warp_util import event_scope
 wp.set_module_options({"enable_backward": False})
 
 
+@wp.kernel
+def _zero_collision_arrays(
+  # Data in:
+  nworld_in: int,
+  # In:
+  hfield_geom_pair_in: int,
+  # Data out:
+  ncon_out: wp.array(dtype=int),
+  ncon_hfield_out: wp.array(dtype=int),  # kernel_analyzer: ignore
+  collision_hftri_index_out: wp.array(dtype=int),
+  ncollision_out: wp.array(dtype=int),
+):
+  tid = wp.tid()
+
+  if tid == 0:
+    # Zero the single collision counter
+    ncollision_out[0] = 0
+    ncon_out[0] = 0
+
+  if tid < hfield_geom_pair_in * nworld_in:
+    ncon_hfield_out[tid] = 0
+
+  # Zero collision pair indices
+  collision_hftri_index_out[tid] = 0
+
+
 @wp.func
 def _sphere_filter(
   # Model:
@@ -486,10 +512,19 @@ def narrowphase(m, d):
 def collision(m: Model, d: Data):
   """Collision detection."""
 
-  d.ncollision.zero_()
-  d.ncon.zero_()
-  d.ncon_hfield.zero_()
-  d.collision_hftri_index.zero_()
+  # zero collision-related arrays
+  wp.launch(
+    _zero_collision_arrays,
+    dim=d.nconmax,
+    inputs=[
+      d.nworld,
+      d.ncon_hfield.shape[1],
+      d.ncon,
+      d.ncon_hfield.reshape(-1),
+      d.collision_hftri_index,
+      d.ncollision,
+    ],
+  )
 
   if d.nconmax == 0:
     return
