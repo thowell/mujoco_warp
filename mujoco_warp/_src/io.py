@@ -815,7 +815,7 @@ def make_data(mjm: mujoco.MjModel, nworld: int = 1, nconmax: int = -1, njmax: in
     mjm (mujoco.MjModel): The model containing kinematic and dynamic information (host).
     nworld (int, optional): Number of worlds. Defaults to 1.
     nconmax (int, optional): Maximum number of contacts for all worlds. Defaults to -1.
-    njmax (int, optional): Maximum number of constraints for all worlds. Defaults to -1.
+    njmax (int, optional): Maximum number of constraints per world. Defaults to -1.
 
   Returns:
     Data: The data object containing the current state and output arrays (device).
@@ -1093,7 +1093,7 @@ def put_data(
     mjd (mujoco.MjData): The data object containing current state and output arrays (host).
     nworld (int, optional): The number of worlds. Defaults to 1.
     nconmax (int, optional): The maximum number of contacts for all worlds. Defaults to -1.
-    njmax (int, optional): The maximum number of constraints for all worlds. Defaults to -1.
+    njmax (int, optional): The maximum number of constraints per world. Defaults to -1.
 
   Returns:
     Data: The data object containing the current state and output arrays (device).
@@ -1611,3 +1611,168 @@ def get_data_into(
 
   # sensors
   result.sensordata[:] = d.sensordata.numpy()
+
+
+def reset(d: types.Data):
+  """Clear data, set defaults."""
+
+  nworld: int  # warp only
+  nconmax: int  # warp only
+  njmax: int  # warp only
+  solver_niter: wp.array(dtype=int)
+  ncon: wp.array(dtype=int)
+  ncon_hfield: wp.array2d(dtype=int)  # warp only
+  ne: wp.array(dtype=int)
+  ne_connect: wp.array(dtype=int)  # warp only
+  ne_weld: wp.array(dtype=int)  # warp only
+  ne_jnt: wp.array(dtype=int)  # warp only
+  ne_ten: wp.array(dtype=int)  # warp only
+  nf: wp.array(dtype=int)
+  nl: wp.array(dtype=int)
+  nefc: wp.array(dtype=int)
+  nsolving: wp.array(dtype=int)  # warp only
+  time: wp.array(dtype=float)
+  energy: wp.array(dtype=wp.vec2)
+  qpos: wp.array2d(dtype=float)
+  qvel: wp.array2d(dtype=float)
+  act: wp.array2d(dtype=float)
+  qacc_warmstart: wp.array2d(dtype=float)
+  qacc_discrete: wp.array2d(dtype=float)  # warp only
+  ctrl: wp.array2d(dtype=float)
+  qfrc_applied: wp.array2d(dtype=float)
+  xfrc_applied: wp.array2d(dtype=wp.spatial_vector)
+  fluid_applied: wp.array2d(dtype=wp.spatial_vector)  # warp only
+  eq_active: wp.array2d(dtype=bool)
+  mocap_pos: wp.array2d(dtype=wp.vec3)
+  mocap_quat: wp.array2d(dtype=wp.quat)
+  qacc: wp.array2d(dtype=float)
+  act_dot: wp.array2d(dtype=float)
+  xpos: wp.array2d(dtype=wp.vec3)
+  xquat: wp.array2d(dtype=wp.quat)
+  xmat: wp.array2d(dtype=wp.mat33)
+  xipos: wp.array2d(dtype=wp.vec3)
+  ximat: wp.array2d(dtype=wp.mat33)
+  xanchor: wp.array2d(dtype=wp.vec3)
+  xaxis: wp.array2d(dtype=wp.vec3)
+  geom_skip: wp.array(dtype=bool)  # warp only
+  geom_xpos: wp.array2d(dtype=wp.vec3)
+  geom_xmat: wp.array2d(dtype=wp.mat33)
+  site_xpos: wp.array2d(dtype=wp.vec3)
+  site_xmat: wp.array2d(dtype=wp.mat33)
+  cam_xpos: wp.array2d(dtype=wp.vec3)
+  cam_xmat: wp.array2d(dtype=wp.mat33)
+  light_xpos: wp.array2d(dtype=wp.vec3)
+  light_xdir: wp.array2d(dtype=wp.vec3)
+  subtree_com: wp.array2d(dtype=wp.vec3)
+  cdof: wp.array2d(dtype=wp.spatial_vector)
+  cinert: wp.array2d(dtype=vec10)
+  flexvert_xpos: wp.array2d(dtype=wp.vec3)
+  flexedge_length: wp.array2d(dtype=float)
+  flexedge_velocity: wp.array2d(dtype=float)
+  actuator_length: wp.array2d(dtype=float)
+  actuator_moment: wp.array3d(dtype=float)
+  crb: wp.array2d(dtype=vec10)
+  qM: wp.array3d(dtype=float)
+  qLD: wp.array3d(dtype=float)
+  qLDiagInv: wp.array2d(dtype=float)
+  ten_velocity: wp.array2d(dtype=float)
+  actuator_velocity: wp.array2d(dtype=float)
+  cvel: wp.array2d(dtype=wp.spatial_vector)
+  cdof_dot: wp.array2d(dtype=wp.spatial_vector)
+  qfrc_bias: wp.array2d(dtype=float)
+  qfrc_spring: wp.array2d(dtype=float)
+  qfrc_damper: wp.array2d(dtype=float)
+  qfrc_gravcomp: wp.array2d(dtype=float)
+  qfrc_fluid: wp.array2d(dtype=float)
+  qfrc_passive: wp.array2d(dtype=float)
+  subtree_linvel: wp.array2d(dtype=wp.vec3)
+  subtree_angmom: wp.array2d(dtype=wp.vec3)
+  subtree_bodyvel: wp.array2d(dtype=wp.spatial_vector)  # warp only
+  actuator_force: wp.array2d(dtype=float)
+  qfrc_actuator: wp.array2d(dtype=float)
+  qfrc_smooth: wp.array2d(dtype=float)
+  qacc_smooth: wp.array2d(dtype=float)
+  qfrc_constraint: wp.array2d(dtype=float)
+  qfrc_inverse: wp.array2d(dtype=float)
+  contact: Contact
+  efc: Constraint
+
+  # RK4
+  qpos_t0: wp.array2d(dtype=float)
+  qvel_t0: wp.array2d(dtype=float)
+  act_t0: wp.array2d(dtype=float)
+  qvel_rk: wp.array2d(dtype=float)
+  qacc_rk: wp.array2d(dtype=float)
+  act_dot_rk: wp.array2d(dtype=float)
+
+  # euler + implicit integration
+  qfrc_integration: wp.array2d(dtype=float)
+  qacc_integration: wp.array2d(dtype=float)
+  act_vel_integration: wp.array2d(dtype=float)
+  qM_integration: wp.array3d(dtype=float)
+  qLD_integration: wp.array3d(dtype=float)
+  qLDiagInv_integration: wp.array2d(dtype=float)
+
+  # sweep-and-prune broadphase
+  sap_projection_lower: wp.array3d(dtype=float)
+  sap_projection_upper: wp.array2d(dtype=float)
+  sap_sort_index: wp.array3d(dtype=int)
+  sap_range: wp.array2d(dtype=int)
+  sap_cumulative_sum: wp.array2d(dtype=int)
+  sap_segment_index: wp.array2d(dtype=int)
+
+  # collision driver
+  collision_pair: wp.array(dtype=wp.vec2i)
+  collision_hftri_index: wp.array(dtype=int)
+  collision_pairid: wp.array(dtype=int)
+  collision_worldid: wp.array(dtype=int)
+  ncollision: wp.array(dtype=int)
+
+  # narrowphase collision (EPA polytope)
+  epa_vert: wp.array2d(dtype=wp.vec3)
+  epa_vert1: wp.array2d(dtype=wp.vec3)
+  epa_vert2: wp.array2d(dtype=wp.vec3)
+  epa_vert_index1: wp.array2d(dtype=int)
+  epa_vert_index2: wp.array2d(dtype=int)
+  epa_face: wp.array2d(dtype=wp.vec3i)
+  epa_pr: wp.array2d(dtype=wp.vec3)
+  epa_norm2: wp.array2d(dtype=float)
+  epa_index: wp.array2d(dtype=int)
+  epa_map: wp.array2d(dtype=int)
+  epa_horizon: wp.array2d(dtype=int)
+
+  # rne_postconstraint
+  cacc: wp.array2d(dtype=wp.spatial_vector)
+  cfrc_int: wp.array2d(dtype=wp.spatial_vector)
+  cfrc_ext: wp.array2d(dtype=wp.spatial_vector)
+
+  # tendon
+  ten_length: wp.array2d(dtype=float)
+  ten_J: wp.array3d(dtype=float)
+  ten_Jdot: wp.array3d(dtype=float)  # warp only
+  ten_bias_coef: wp.array2d(dtype=float)  # warp only
+  ten_wrapadr: wp.array2d(dtype=int)
+  ten_wrapnum: wp.array2d(dtype=int)
+  ten_actfrc: wp.array2d(dtype=float)  # warp only
+  wrap_obj: wp.array2d(dtype=wp.vec2i)
+  wrap_xpos: wp.array2d(dtype=wp.spatial_vector)
+  wrap_geom_xpos: wp.array2d(dtype=wp.spatial_vector)
+
+  # sensors
+  sensordata: wp.array2d(dtype=float)
+  sensor_rangefinder_pnt: wp.array2d(dtype=wp.vec3)  # warp only
+  sensor_rangefinder_vec: wp.array2d(dtype=wp.vec3)  # warp only
+  sensor_rangefinder_dist: wp.array2d(dtype=float)  # warp only
+  sensor_rangefinder_geomid: wp.array2d(dtype=int)  # warp only
+
+  # ray
+  ray_bodyexclude: wp.array(dtype=int)  # warp only
+  ray_dist: wp.array2d(dtype=float)  # warp only
+  ray_geomid: wp.array2d(dtype=int)  # warp only
+
+  # mul_m
+  energy_vel_mul_m_skip: wp.array(dtype=bool)
+  inverse_mul_m_skip: wp.array(dtype=bool)  # warp only
+
+  # actuator
+  actuator_trntype_body_ncon: wp.array2d(dtype=int)
