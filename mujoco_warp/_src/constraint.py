@@ -87,8 +87,7 @@ def _update_efc_row(
   mid = solimp[3]
   power = solimp[4]
 
-  # TODO(team): wp.static?
-  if not refsafe:
+  if not refsafe and timeconst > 0.0:
     timeconst = wp.max(timeconst, 2.0 * timestep)
 
   dmin = wp.clamp(dmin, types.MJ_MINIMP, types.MJ_MAXIMP)
@@ -98,21 +97,40 @@ def _update_efc_row(
   power = wp.max(1.0, power)
 
   # See https://mujoco.readthedocs.io/en/latest/modeling.html#solver-parameters
-  k = 1.0 / (dmax * dmax * timeconst * timeconst * dampratio * dampratio)
-  b = 2.0 / (dmax * timeconst)
-  k = wp.where(solref[0] <= 0, -solref[0] / (dmax * dmax), k)
-  b = wp.where(solref[1] <= 0, -solref[1] / dmax, b)
+  if timeconst > 0:
+    k = math.safe_div(1.0, dmax * dmax * timeconst * timeconst * dampratio * dampratio)
+  else:
+    k = -math.safe_div(timeconst, dmax * dmax)
 
-  imp_x = wp.abs(pos_imp) / width
-  imp_a = (1.0 / wp.pow(mid, power - 1.0)) * wp.pow(imp_x, power)
-  imp_b = 1.0 - (1.0 / wp.pow(1.0 - mid, power - 1.0)) * wp.pow(1.0 - imp_x, power)
-  imp_y = wp.where(imp_x < mid, imp_a, imp_b)
-  imp = dmin + imp_y * (dmax - dmin)
-  imp = wp.clamp(imp, dmin, dmax)
-  imp = wp.where(imp_x > 1.0, dmax, imp)
+  if dampratio > 0.0:
+    b = math.safe_div(2.0, dmax * timeconst)
+  else:
+    b = -math.safe_div(dampratio, dmax)
+
+  if (dmin == dmax) or width <= types.MJ_MINVAL:
+    imp = 0.5 * (dmin + dmax)
+  else:
+    x = wp.abs(pos_imp / width)
+
+    # fully saturated
+    if (x >= 1.0) or (x <= 0.0):
+      if x >= 1.0:
+        imp = dmax
+      else:
+        imp = dmin
+    else:
+      # linear
+      if power == 1.0:
+        y = x
+      elif x <= mid:
+        y = math.safe_div(1.0, wp.pow(mid, power - 1.0)) * wp.pow(x, power)
+      else:
+        y = 1.0 - math.safe_div(1.0, wp.pow(1.0 - mid, power - 1.0)) * wp.pow(1.0 - x, power)
+
+      imp = dmin + y * (dmax - dmin)
 
   # Update constraints
-  efc_D_out[worldid, efcid] = 1.0 / wp.max(invweight * (1.0 - imp) / imp, types.MJ_MINVAL)
+  efc_D_out[worldid, efcid] = math.safe_div(imp, invweight * (1.0 - imp))
   efc_vel_out[worldid, efcid] = vel
   efc_aref_out[worldid, efcid] = -k * imp * pos_aref - b * vel
   efc_pos_out[worldid, efcid] = pos_aref + margin
@@ -1311,9 +1329,9 @@ def _efc_contact_elliptic(
   if conid >= ncon_in[0]:
     return
 
-  condim = condim_in[conid]
+  dim = condim_in[conid]
 
-  if dimid > condim - 1:
+  if dimid >= dim:
     return
 
   includemargin = includemargin_in[conid]
@@ -1398,8 +1416,9 @@ def _efc_contact_elliptic(
         invweight *= fri
 
       pos_aref = 0.0
+      includemargin = 0.0
 
-    if condim == 1:
+    if dim == 1:
       efc_type = int(ConstraintType.CONTACT_FRICTIONLESS.value)
     else:
       efc_type = int(ConstraintType.CONTACT_ELLIPTIC.value)
