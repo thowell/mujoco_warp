@@ -600,14 +600,69 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
   return m
 
 
-def make_data(mjm: mujoco.MjModel, nworld: int = 1, nconmax: int = -1, njmax: int = -1) -> types.Data:
-  # TODO(team): move to Model?
-  if nconmax == -1:
-    # TODO(team): heuristic for nconmax
-    nconmax = nworld * 20
-  if njmax == -1:
-    # TODO(team): heuristic for njmax
-    njmax = nworld * 20 * 6
+def _get_padded_sizes(nv: int, njmax: int, nworld: int, is_sparse: bool, tile_size: int):
+  # if dense - we just pad to the next multiple of 4 for nv, to get the fast load path.
+  #            we pad to the next multiple of tile_size for njmax to avoid out of bounds accesses.
+  # if sparse - we pad to the next multiple of tile_size for njmax, and nv.
+
+  def round_up(x, multiple):
+    return ((x + multiple - 1) // multiple) * multiple
+
+  njmax_padded = round_up(njmax, tile_size)
+
+  if is_sparse:
+    nv_padded = round_up(nv, tile_size)
+  else:
+    nv_padded = round_up(nv, 4)
+
+  return njmax_padded, nv_padded
+
+
+def make_data(
+  mjm: mujoco.MjModel,
+  nworld: int = 1,
+  nconmax: Optional[int] = None,
+  njmax: Optional[int] = None,
+  naconmax: Optional[int] = None,
+) -> types.Data:
+  """
+  Creates a data object on device.
+
+  Args:
+    mjm (mujoco.MjModel): The model containing kinematic and dynamic information (host).
+    nworld (int, optional): Number of worlds. Defaults to 1.
+    nworld (int, optional): The number of worlds. Defaults to 1.
+    nconmax (int, optional): Number of contacts to allocate per world.  Contacts exist in large
+                             heterogenous arrays: one world may have more than nconmax contacts.
+    njmax (int, optional): Number of constraints to allocate per world.  Constraint arrays are
+                           batched by world: no world may have more than njmax constraints.
+    naconmax (int, optional): Number of contacts to allocate for all worlds.  Overrides nconmax.
+
+  Returns:
+    Data: The data object containing the current state and output arrays (device).
+  """
+
+  # TODO(team): move nconmax, njmax to Model?
+  # TODO(team): improve heuristic for nconmax and njmax
+  nconmax = nconmax or 20
+  njmax = njmax or nconmax * 6
+
+  if nworld < 1:
+    raise ValueError(f"nworld must be >= 1")
+
+  # check for total number of contacts for all worlds
+  if naconmax is None:
+    # check for valid per-world number of contacts
+    if nconmax < 0:
+      raise ValueError("nconmax must be >= 0")
+    naconmax = max(512, nworld * nconmax)
+  # check for valid total number of contacts for all worlds
+  elif naconmax < 0:
+    raise ValueError("naconmax must be >= 0")
+
+  # check for valid per-world number of constraints
+  if njmax < 0:
+    raise ValueError("njmax must be >= 0")
 
   if mujoco.mj_isSparse(mjm):
     qM = wp.zeros((nworld, 1, mjm.nM), dtype=float)
@@ -828,17 +883,23 @@ def put_data(
   if nworld < 1:
     raise ValueError("nworld must be >= 1")
 
-  if nconmax < 1:
-    raise ValueError("nconmax must be >= 1")
+  # check for total number of contacts for all worlds
+  if naconmax is None:
+    # check for valid per-world number of contacts
+    if nconmax < 0:
+      raise ValueError("nconmax must be >= 0")
+    elif mjd.ncon > nconmax:
+      raise ValueError(f"nconmax overflow (nconmax must be >= {mjd.ncon})")
+    naconmax = max(512, nworld * nconmax)
+  # check for valid total number of contacts for all worlds
+  elif naconmax < mjd.ncon * nworld:
+    raise ValueError(f"naconmax overflow (naconmax must be >= {mjd.ncon * nworld})")
 
-  if njmax < 1:
-    raise ValueError("njmax must be >= 1")
-
-  if nworld * mjd.ncon > nconmax:
-    raise ValueError(f"nconmax overflow (nconmax must be >= {nworld * mjd.ncon})")
-
-  if nworld * mjd.nefc > njmax:
-    raise ValueError(f"njmax overflow (njmax must be >= {nworld * mjd.nefc})")
+  # check for valid per-world number of constraints
+  if njmax < 0:
+    raise ValueError("njmax must be >= 0")
+  elif mjd.nefc > njmax:
+    raise ValueError(f"njmax overflow (njmax must be >= {mjd.nefc})")
 
   # calculate some fields that cannot be easily computed inline:
   if mujoco.mj_isSparse(mjm):
