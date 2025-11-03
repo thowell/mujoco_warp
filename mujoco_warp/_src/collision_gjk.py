@@ -18,6 +18,8 @@ from typing import Tuple
 import warp as wp
 
 from .collision_primitive import Geom
+from .types import MJ_MAX_EPAFACES
+from .types import MJ_MAX_EPAHORIZON
 from .types import MJ_MINVAL
 from .types import GeomType
 
@@ -1905,231 +1907,236 @@ def _set_edge(
 
 
 # recover multiple contacts from EPA polytope
-@wp.func
-def _multicontact(
-  # In:
-  polygon: wp.array(dtype=wp.vec3),
-  clipped: wp.array(dtype=wp.vec3),
-  plane_normal: wp.array(dtype=wp.vec3),
-  plane_dist: wp.array(dtype=float),
-  idx1: wp.array(dtype=int),
-  idx2: wp.array(dtype=int),
-  n1: wp.array(dtype=wp.vec3),
-  n2: wp.array(dtype=wp.vec3),
-  endvert: wp.array(dtype=wp.vec3),
-  face1: wp.array(dtype=wp.vec3),
-  face2: wp.array(dtype=wp.vec3),
-  pt: Polytope,
-  face: wp.vec3i,
-  x1: wp.vec3,
-  x2: wp.vec3,
-  geom1: Geom,
-  geom2: Geom,
-  geomtype1: int,
-  geomtype2: int,
-) -> Tuple[int, mat3c, mat3c]:
-  witness1 = mat3c()
-  witness2 = mat3c()
-  witness1[0] = x1
-  witness2[0] = x2
+def _multicontact(nmaxpolygon: int, nmaxmeshdeg: int):
+  @wp.func
+  def multicontact(
+    # In:
+    pt: Polytope,
+    face: wp.vec3i,
+    x1: wp.vec3,
+    x2: wp.vec3,
+    geom1: Geom,
+    geom2: Geom,
+    geomtype1: int,
+    geomtype2: int,
+  ) -> Tuple[int, mat3c, mat3c]:
+    # TODO(team): replace allocations with wp.empty
+    polygon = wp.zeros(shape=(wp.static(2 * nmaxpolygon),), dtype=wp.vec3)
+    clipped = wp.zeros(shape=(wp.static(2 * nmaxpolygon),), dtype=wp.vec3)
+    plane_normal = wp.zeros(shape=(wp.static(nmaxpolygon),), dtype=wp.vec3)
+    plane_dist = wp.zeros(shape=(wp.static(nmaxpolygon),), dtype=float)
+    idx1 = wp.zeros(shape=(wp.static(nmaxmeshdeg),), dtype=int)
+    idx2 = wp.zeros(shape=(wp.static(nmaxmeshdeg),), dtype=int)
+    n1 = wp.zeros(shape=(wp.static(nmaxmeshdeg),), dtype=wp.vec3)
+    n2 = wp.zeros(shape=(wp.static(nmaxmeshdeg),), dtype=wp.vec3)
+    endvert = wp.zeros(shape=(wp.static(nmaxmeshdeg),), dtype=wp.vec3)
+    face1 = wp.zeros(shape=(wp.static(nmaxpolygon),), dtype=wp.vec3)
+    face2 = wp.zeros(shape=(wp.static(nmaxpolygon),), dtype=wp.vec3)
 
-  if geomtype1 == GeomType.MESH:
-    vert = geom1.vert
-    polynormal = geom1.mesh_polynormal
-    polyvertadr = geom1.mesh_polyvertadr
-    polyvertnum = geom1.mesh_polyvertnum
-    polyvert = geom1.mesh_polyvert
-    polymapadr = geom1.mesh_polymapadr
-    polymapnum = geom1.mesh_polymapnum
-    polymap = geom1.mesh_polymap
-  elif geomtype2 == GeomType.MESH:
-    vert = geom2.vert
-    polynormal = geom2.mesh_polynormal
-    polyvertadr = geom2.mesh_polyvertadr
-    polyvertnum = geom2.mesh_polyvertnum
-    polyvert = geom2.mesh_polyvert
-    polymapadr = geom2.mesh_polymapadr
-    polymapnum = geom2.mesh_polymapnum
-    polymap = geom2.mesh_polymap
+    witness1 = mat3c()
+    witness2 = mat3c()
+    witness1[0] = x1
+    witness2[0] = x2
 
-  # get dimensions of features of geoms 1 and 2
-  nface1, feature_index1, feature_vertex1 = _feature_dim(face, pt.vert_index1, pt.vert1)
-  nface2, feature_index2, feature_vertex2 = _feature_dim(face, pt.vert_index2, pt.vert2)
+    if geomtype1 == GeomType.MESH:
+      vert = geom1.vert
+      polynormal = geom1.mesh_polynormal
+      polyvertadr = geom1.mesh_polyvertadr
+      polyvertnum = geom1.mesh_polyvertnum
+      polyvert = geom1.mesh_polyvert
+      polymapadr = geom1.mesh_polymapadr
+      polymapnum = geom1.mesh_polymapnum
+      polymap = geom1.mesh_polymap
+    elif geomtype2 == GeomType.MESH:
+      vert = geom2.vert
+      polynormal = geom2.mesh_polynormal
+      polyvertadr = geom2.mesh_polyvertadr
+      polyvertnum = geom2.mesh_polyvertnum
+      polyvert = geom2.mesh_polyvert
+      polymapadr = geom2.mesh_polymapadr
+      polymapnum = geom2.mesh_polymapnum
+      polymap = geom2.mesh_polymap
 
-  dir = x2 - x1
-  dir_neg = -dir
+    # get dimensions of features of geoms 1 and 2
+    nface1, feature_index1, feature_vertex1 = _feature_dim(face, pt.vert_index1, pt.vert1)
+    nface2, feature_index2, feature_vertex2 = _feature_dim(face, pt.vert_index2, pt.vert2)
 
-  # get all possible face normals for each geom
-  if geomtype1 == GeomType.BOX:
-    nnorms1 = _box_normals(nface1, feature_index1, geom1.rot, dir_neg, n1, idx1)
-  elif geomtype1 == GeomType.MESH:
-    nnorms1 = _mesh_normals(
-      nface1,
-      feature_index1,
-      geom1.rot,
-      geom1.vertadr,
-      geom1.mesh_polyadr,
-      polynormal,
-      polymapadr,
-      polymapnum,
-      polymap,
-      n1,
-      idx1,
-    )
-  if geomtype2 == GeomType.BOX:
-    nnorms2 = _box_normals(nface2, feature_index2, geom2.rot, dir, n2, idx2)
-  elif geomtype2 == GeomType.MESH:
-    nnorms2 = _mesh_normals(
-      nface2,
-      feature_index2,
-      geom2.rot,
-      geom2.vertadr,
-      geom2.mesh_polyadr,
-      polynormal,
-      polymapadr,
-      polymapnum,
-      polymap,
-      n2,
-      idx2,
-    )
+    dir = x2 - x1
+    dir_neg = -dir
 
-  # determine if any two face normals match
-  is_edge_contact_geom1 = 0
-  is_edge_contact_geom2 = 0
-  nres, res = _aligned_faces(n1, nnorms1, n2, nnorms2)
-  if not nres:
-    # check if edge-face collision
-    if nface1 < 3 and nface1 <= nface2:
-      nnorms1 = 0
+    # get all possible face normals for each geom
+    if geomtype1 == GeomType.BOX:
+      nnorms1 = _box_normals(nface1, feature_index1, geom1.rot, dir_neg, n1, idx1)
+    elif geomtype1 == GeomType.MESH:
+      nnorms1 = _mesh_normals(
+        nface1,
+        feature_index1,
+        geom1.rot,
+        geom1.vertadr,
+        geom1.mesh_polyadr,
+        polynormal,
+        polymapadr,
+        polymapnum,
+        polymap,
+        n1,
+        idx1,
+      )
+    if geomtype2 == GeomType.BOX:
+      nnorms2 = _box_normals(nface2, feature_index2, geom2.rot, dir, n2, idx2)
+    elif geomtype2 == GeomType.MESH:
+      nnorms2 = _mesh_normals(
+        nface2,
+        feature_index2,
+        geom2.rot,
+        geom2.vertadr,
+        geom2.mesh_polyadr,
+        polynormal,
+        polymapadr,
+        polymapnum,
+        polymap,
+        n2,
+        idx2,
+      )
+
+    # determine if any two face normals match
+    is_edge_contact_geom1 = 0
+    is_edge_contact_geom2 = 0
+    nres, res = _aligned_faces(n1, nnorms1, n2, nnorms2)
+    if not nres:
+      # check if edge-face collision
+      if nface1 < 3 and nface1 <= nface2:
+        nnorms1 = 0
+        if geomtype1 == GeomType.BOX:
+          nnorms1 = _box_edge_normals(
+            nface1, geom1.rot, geom1.pos, geom1.size, feature_vertex1[0], feature_vertex1[1], feature_index1[0], n1, endvert
+          )
+        elif geomtype1 == GeomType.MESH:
+          nnorms1 = _mesh_edge_normals(
+            nface1,
+            geom1.rot,
+            geom1.pos,
+            geom1.vertadr,
+            geom1.mesh_polyadr,
+            geom1.vert,
+            polyvertadr,
+            polyvertnum,
+            polyvert,
+            polymapadr,
+            polymapnum,
+            polymap,
+            feature_vertex1[0],
+            feature_vertex1[1],
+            feature_index1[0],
+            n1,
+            endvert,
+          )
+        nres, res = _aligned_face_edge(n1, nnorms1, n2, nnorms2)
+        if not nres:
+          return 1, witness1, witness2
+        is_edge_contact_geom1 = 1
+
+      # check if face-edge collision
+      elif nface2 < 3:
+        nnorms2 = 0
+        if geomtype2 == GeomType.BOX:
+          nnorms2 = _box_edge_normals(
+            nface2, geom2.rot, geom2.pos, geom2.size, feature_vertex2[0], feature_vertex2[1], feature_index2[0], n2, endvert
+          )
+        elif geomtype2 == GeomType.MESH:
+          nnorms2 = _mesh_edge_normals(
+            nface2,
+            geom2.rot,
+            geom2.pos,
+            geom2.vertadr,
+            geom2.mesh_polyadr,
+            geom2.vert,
+            polyvertadr,
+            polyvertnum,
+            polyvert,
+            polymapadr,
+            polymapnum,
+            polymap,
+            feature_vertex2[0],
+            feature_vertex2[1],
+            feature_index2[0],
+            n2,
+            endvert,
+          )
+        nres, res = _aligned_face_edge(n2, nnorms2, n1, nnorms1)
+        if not nres:
+          return 1, witness1, witness2
+        is_edge_contact_geom2 = 1
+      else:
+        # no multi-contact
+        return 1, witness1, witness2
+
+    i = res[0]
+    j = res[1]
+
+    # recover geom1 matching edge or face
+    if is_edge_contact_geom1:
+      nface1 = _set_edge(pt.vert1, endvert, face[0], i, face1)
+    else:
+      ind = wp.where(is_edge_contact_geom2, idx1[j], idx1[i])
       if geomtype1 == GeomType.BOX:
-        nnorms1 = _box_edge_normals(
-          nface1, geom1.rot, geom1.pos, geom1.size, feature_vertex1[0], feature_vertex1[1], feature_index1[0], n1, endvert
-        )
+        nface1 = _box_face(geom1.rot, geom1.pos, geom1.size, ind, face1)
       elif geomtype1 == GeomType.MESH:
-        nnorms1 = _mesh_edge_normals(
-          nface1,
+        nface1 = _mesh_face(
           geom1.rot,
           geom1.pos,
           geom1.vertadr,
           geom1.mesh_polyadr,
-          geom1.vert,
+          vert,
           polyvertadr,
           polyvertnum,
           polyvert,
-          polymapadr,
-          polymapnum,
-          polymap,
-          feature_vertex1[0],
-          feature_vertex1[1],
-          feature_index1[0],
-          n1,
-          endvert,
+          ind,
+          face1,
         )
-      nres, res = _aligned_face_edge(n1, nnorms1, n2, nnorms2)
-      if not nres:
-        return 1, witness1, witness2
-      is_edge_contact_geom1 = 1
 
-    # check if face-edge collision
-    elif nface2 < 3:
-      nnorms2 = 0
+    # recover geom2 matching edge or face
+    if is_edge_contact_geom2:
+      nface2 = _set_edge(pt.vert2, endvert, face[0], i, face2)
+    else:
       if geomtype2 == GeomType.BOX:
-        nnorms2 = _box_edge_normals(
-          nface2, geom2.rot, geom2.pos, geom2.size, feature_vertex2[0], feature_vertex2[1], feature_index2[0], n2, endvert
-        )
+        nface2 = _box_face(geom2.rot, geom2.pos, geom2.size, idx2[j], face2)
       elif geomtype2 == GeomType.MESH:
-        nnorms2 = _mesh_edge_normals(
-          nface2,
+        nface2 = _mesh_face(
           geom2.rot,
           geom2.pos,
           geom2.vertadr,
           geom2.mesh_polyadr,
-          geom2.vert,
+          vert,
           polyvertadr,
           polyvertnum,
           polyvert,
-          polymapadr,
-          polymapnum,
-          polymap,
-          feature_vertex2[0],
-          feature_vertex2[1],
-          feature_index2[0],
-          n2,
-          endvert,
+          idx2[j],
+          face2,
         )
-      nres, res = _aligned_face_edge(n2, nnorms2, n1, nnorms1)
-      if not nres:
-        return 1, witness1, witness2
-      is_edge_contact_geom2 = 1
-    else:
-      # no multi-contact
-      return 1, witness1, witness2
 
-  i = res[0]
-  j = res[1]
+    # TODO(kbayes): this approximates the contact direction, by scaling the face normal by the
+    # single contact direction's magnitude. This is effective, but polygonClip should compute
+    # this for each contact point.
+    approx_dir = wp.vec3()
 
-  # recover geom1 matching edge or face
-  if is_edge_contact_geom1:
-    nface1 = _set_edge(pt.vert1, endvert, face[0], i, face1)
-  else:
-    ind = wp.where(is_edge_contact_geom2, idx1[j], idx1[i])
-    if geomtype1 == GeomType.BOX:
-      nface1 = _box_face(geom1.rot, geom1.pos, geom1.size, ind, face1)
-    elif geomtype1 == GeomType.MESH:
-      nface1 = _mesh_face(
-        geom1.rot,
-        geom1.pos,
-        geom1.vertadr,
-        geom1.mesh_polyadr,
-        vert,
-        polyvertadr,
-        polyvertnum,
-        polyvert,
-        ind,
-        face1,
-      )
+    # face1 is an edge; clip face1 against face2
+    if is_edge_contact_geom1:
+      approx_dir = wp.norm_l2(dir) * n2[j]
+      return _polygon_clip(False, plane_normal, plane_dist, face2, nface2, face1, nface1, n2[j], approx_dir, polygon, clipped)
 
-  # recover geom2 matching edge or face
-  if is_edge_contact_geom2:
-    nface2 = _set_edge(pt.vert2, endvert, face[0], i, face2)
-  else:
-    if geomtype2 == GeomType.BOX:
-      nface2 = _box_face(geom2.rot, geom2.pos, geom2.size, idx2[j], face2)
-    elif geomtype2 == GeomType.MESH:
-      nface2 = _mesh_face(
-        geom2.rot,
-        geom2.pos,
-        geom2.vertadr,
-        geom2.mesh_polyadr,
-        vert,
-        polyvertadr,
-        polyvertnum,
-        polyvert,
-        idx2[j],
-        face2,
-      )
+    # face2 is an edge; clip face2 against face1
+    if is_edge_contact_geom2:
+      approx_dir = -wp.norm_l2(dir) * n1[j]
+      return _polygon_clip(False, plane_normal, plane_dist, face1, nface1, face2, nface2, n1[j], approx_dir, polygon, clipped)
 
-  # TODO(kbayes): this approximates the contact direction, by scaling the face normal by the
-  # single contact direction's magnitude. This is effective, but polygonClip should compute
-  # this for each contact point.
-  approx_dir = wp.vec3()
-
-  # face1 is an edge; clip face1 against face2
-  if is_edge_contact_geom1:
+    # face-face collision
     approx_dir = wp.norm_l2(dir) * n2[j]
-    return _polygon_clip(False, plane_normal, plane_dist, face2, nface2, face1, nface1, n2[j], approx_dir, polygon, clipped)
 
-  # face2 is an edge; clip face2 against face1
-  if is_edge_contact_geom2:
-    approx_dir = -wp.norm_l2(dir) * n1[j]
-    return _polygon_clip(False, plane_normal, plane_dist, face1, nface1, face2, nface2, n1[j], approx_dir, polygon, clipped)
+    # don't prune box-box collisions (expect up to 8 contacts)
+    prune = not (geomtype1 == GeomType.BOX and geomtype2 == GeomType.BOX)
+    return _polygon_clip(prune, plane_normal, plane_dist, face1, nface1, face2, nface2, n1[i], approx_dir, polygon, clipped)
 
-  # face-face collision
-  approx_dir = wp.norm_l2(dir) * n2[j]
-
-  # don't prune box-box collisions (expect up to 8 contacts)
-  prune = not (geomtype1 == GeomType.BOX and geomtype2 == GeomType.BOX)
-  return _polygon_clip(prune, plane_normal, plane_dist, face1, nface1, face2, nface2, n1[i], approx_dir, polygon, clipped)
+  return multicontact
 
 
 @wp.func
@@ -2144,215 +2151,176 @@ def _inflate(dist: float, x1: wp.vec3, x2: wp.vec3, margin1: float, margin2: flo
   return dist, x1, x2
 
 
-@wp.func
-def ccd(
-  # In:
-  multiccd: bool,
-  tolerance: float,
-  cutoff: float,
-  ccd_iterations: int,
-  geom1: Geom,
-  geom2: Geom,
-  geomtype1: int,
-  geomtype2: int,
-  x_1: wp.vec3,
-  x_2: wp.vec3,
-  vert: wp.array(dtype=wp.vec3),
-  vert1: wp.array(dtype=wp.vec3),
-  vert2: wp.array(dtype=wp.vec3),
-  vert_index1: wp.array(dtype=int),
-  vert_index2: wp.array(dtype=int),
-  face: wp.array(dtype=wp.vec3i),
-  face_pr: wp.array(dtype=wp.vec3),
-  face_norm2: wp.array(dtype=float),
-  face_index: wp.array(dtype=int),
-  face_map: wp.array(dtype=int),
-  horizon: wp.array(dtype=int),
-  polygon: wp.array(dtype=wp.vec3),
-  clipped: wp.array(dtype=wp.vec3),
-  plane_normal: wp.array(dtype=wp.vec3),
-  plane_dist: wp.array(dtype=float),
-  idx1: wp.array(dtype=int),
-  idx2: wp.array(dtype=int),
-  n1: wp.array(dtype=wp.vec3),
-  n2: wp.array(dtype=wp.vec3),
-  endvert: wp.array(dtype=wp.vec3),
-  face1: wp.array(dtype=wp.vec3),
-  face2: wp.array(dtype=wp.vec3),
-) -> Tuple[float, int, mat3c, mat3c]:
-  """General convex collision detection via GJK/EPA."""
-  witness1 = mat3c()
-  witness2 = mat3c()
-  full_margin1 = 0.0
-  full_margin2 = 0.0
-  size1 = 0.0
-  size2 = 0.0
+def ccd(multiccd: bool, iterations: int, nmaxpolygon: int, nmaxmeshdeg: int):
+  @wp.func
+  def _ccd(
+    # In:
+    tolerance: float,
+    cutoff: float,
+    geom1: Geom,
+    geom2: Geom,
+    geomtype1: int,
+    geomtype2: int,
+    x_1: wp.vec3,
+    x_2: wp.vec3,
+  ) -> Tuple[float, int, mat3c, mat3c]:
+    """General convex collision detection via GJK/EPA."""
+    witness1 = mat3c()
+    witness2 = mat3c()
+    full_margin1 = 0.0
+    full_margin2 = 0.0
+    size1 = 0.0
+    size2 = 0.0
 
-  # determine if the geoms being tested are discrete
-  is_discrete = _discrete_geoms(geomtype1, geomtype2) and (geom1.margin == 0.0 and geom2.margin == 0.0)
+    # determine if the geoms being tested are discrete
+    is_discrete = _discrete_geoms(geomtype1, geomtype2) and (geom1.margin == 0.0 and geom2.margin == 0.0)
 
-  if geomtype1 == GeomType.SPHERE or geomtype1 == GeomType.CAPSULE:
-    size1 = geom1.size[0]
-    full_margin1 = size1 + 0.5 * geom1.margin
-    geom1.margin = 0.0
-    geom1.size = wp.vec3(0.0, geom1.size[1], geom1.size[2])
+    if geomtype1 == GeomType.SPHERE or geomtype1 == GeomType.CAPSULE:
+      size1 = geom1.size[0]
+      full_margin1 = size1 + 0.5 * geom1.margin
+      geom1.margin = 0.0
+      geom1.size = wp.vec3(0.0, geom1.size[1], geom1.size[2])
 
-  if geomtype2 == GeomType.SPHERE or geomtype2 == GeomType.CAPSULE:
-    size2 = geom2.size[0]
-    full_margin2 = size2 + 0.5 * geom2.margin
-    geom2.margin = 0.0
-    geom2.size = wp.vec3(0.0, geom2.size[1], geom2.size[2])
+    if geomtype2 == GeomType.SPHERE or geomtype2 == GeomType.CAPSULE:
+      size2 = geom2.size[0]
+      full_margin2 = size2 + 0.5 * geom2.margin
+      geom2.margin = 0.0
+      geom2.size = wp.vec3(0.0, geom2.size[1], geom2.size[2])
 
-  # special handling for sphere and capsule (shrink to point and line respectively)
-  if size1 + size2 > 0.0:
-    cutoff += full_margin1 + full_margin2
-    result = gjk(tolerance, ccd_iterations, geom1, geom2, x_1, x_2, geomtype1, geomtype2, cutoff, is_discrete)
+    # special handling for sphere and capsule (shrink to point and line respectively)
+    if size1 + size2 > 0.0:
+      cutoff += full_margin1 + full_margin2
+      result = gjk(tolerance, iterations, geom1, geom2, x_1, x_2, geomtype1, geomtype2, cutoff, is_discrete)
 
-    # shallow penetration, inflate contact
-    if result.dist > tolerance:
-      if result.dist == FLOAT_MAX:
-        witness1[0] = result.x1
-        witness2[0] = result.x2
-        return result.dist, 1, witness1, witness2
-      dist, x1, x2 = _inflate(result.dist, result.x1, result.x2, full_margin1, full_margin2)
-      witness1[0] = x1
-      witness2[0] = x2
-      return dist, 1, witness1, witness2
+      # shallow penetration, inflate contact
+      if result.dist > tolerance:
+        if result.dist == FLOAT_MAX:
+          witness1[0] = result.x1
+          witness2[0] = result.x2
+          return result.dist, 1, witness1, witness2
+        dist, x1, x2 = _inflate(result.dist, result.x1, result.x2, full_margin1, full_margin2)
+        witness1[0] = x1
+        witness2[0] = x2
+        return dist, 1, witness1, witness2
 
-    # deep penetration, reset initial conditions and rerun GJK + EPA
-    geom1.margin = full_margin1 - size1
-    geom1.size = wp.vec3(size1, geom1.size[1], geom1.size[2])
-    geom2.margin = full_margin2 - size2
-    geom2.size = wp.vec3(size2, geom2.size[1], geom2.size[2])
-    cutoff -= full_margin1 + full_margin2
+      # deep penetration, reset initial conditions and rerun GJK + EPA
+      geom1.margin = full_margin1 - size1
+      geom1.size = wp.vec3(size1, geom1.size[1], geom1.size[2])
+      geom2.margin = full_margin2 - size2
+      geom2.size = wp.vec3(size2, geom2.size[1], geom2.size[2])
+      cutoff -= full_margin1 + full_margin2
 
-  result = gjk(tolerance, ccd_iterations, geom1, geom2, x_1, x_2, geomtype1, geomtype2, cutoff, is_discrete)
+    result = gjk(tolerance, iterations, geom1, geom2, x_1, x_2, geomtype1, geomtype2, cutoff, is_discrete)
 
-  # no penetration depth to recover
-  if result.dist > tolerance or result.dim < 2:
-    witness1[0] = result.x1
-    witness2[0] = result.x2
-    return result.dist, 1, witness1, witness2
+    # no penetration depth to recover
+    if result.dist > tolerance or result.dim < 2:
+      witness1[0] = result.x1
+      witness2[0] = result.x2
+      return result.dist, 1, witness1, witness2
 
-  pt = Polytope()
-  pt.nface = 0
-  pt.nmap = 0
-  pt.nvert = 0
-  pt.nhorizon = 0
-  pt.vert = vert
-  pt.vert1 = vert1
-  pt.vert2 = vert2
-  pt.vert_index1 = vert_index1
-  pt.vert_index2 = vert_index2
-  pt.face = face
-  pt.face_pr = face_pr
-  pt.face_norm2 = face_norm2
-  pt.face_index = face_index
-  pt.face_map = face_map
-  pt.horizon = horizon
-
-  if result.dim == 2:
-    pt, new_result = _polytope2(
-      pt,
-      result.dist,
-      result.simplex,
-      result.simplex1,
-      result.simplex2,
-      result.simplex_index1,
-      result.simplex_index2,
-      geom1,
-      geom2,
-      geomtype1,
-      geomtype2,
-    )
-    if pt.status == -1:
-      result.simplex = new_result.simplex
-      result.simplex1 = new_result.simplex1
-      result.simplex2 = new_result.simplex2
-      result.simplex_index1 = new_result.simplex_index1
-      result.simplex_index2 = new_result.simplex_index2
-      result.dim = 3
-  elif result.dim == 4:
-    pt, new_result = _polytope4(
-      pt,
-      result.dist,
-      result.simplex,
-      result.simplex1,
-      result.simplex2,
-      result.simplex_index1,
-      result.simplex_index2,
-      geom1,
-      geom2,
-      geomtype1,
-      geomtype2,
-    )
-    if pt.status == -1:
-      result.simplex = new_result.simplex
-      result.simplex1 = new_result.simplex1
-      result.simplex2 = new_result.simplex2
-      result.simplex_index1 = new_result.simplex_index1
-      result.simplex_index2 = new_result.simplex_index2
-      result.dim = 3
-
-  # polytope2 and polytope4 may need to fallback here
-  if result.dim == 3:
-    pt = _polytope3(
-      pt,
-      result.dist,
-      result.simplex,
-      result.simplex1,
-      result.simplex2,
-      result.simplex_index1,
-      result.simplex_index2,
-      geom1,
-      geom2,
-      geomtype1,
-      geomtype2,
+    # TODO(team): change allocations to wp.empty
+    pt = Polytope(
+      0,  # status
+      wp.zeros(shape=(wp.static(5 + iterations),), dtype=wp.vec3),  # vert
+      wp.zeros(shape=(wp.static(5 + iterations),), dtype=wp.vec3),  # vert1
+      wp.zeros(shape=(wp.static(5 + iterations),), dtype=wp.vec3),  # vert2
+      wp.zeros(shape=(wp.static(5 + iterations),), dtype=int),  # vert_index1
+      wp.zeros(shape=(wp.static(5 + iterations),), dtype=int),  # vert_index2
+      0,  # nvert
+      wp.zeros(shape=(wp.static(6 + MJ_MAX_EPAFACES * iterations),), dtype=wp.vec3i),  # face
+      wp.zeros(shape=(wp.static(6 + MJ_MAX_EPAFACES * iterations),), dtype=wp.vec3),  # face_pr
+      wp.zeros(shape=(wp.static(6 + MJ_MAX_EPAFACES * iterations),), dtype=float),  # face_norm2
+      wp.zeros(shape=(wp.static(6 + MJ_MAX_EPAFACES * iterations),), dtype=int),  # face_index
+      0,  # nface
+      wp.zeros(shape=(wp.static(6 + MJ_MAX_EPAFACES * iterations),), dtype=int),  # face_map
+      0,  # nmap
+      wp.zeros(shape=(wp.static(2 * MJ_MAX_EPAHORIZON),), dtype=int),  # horizon
+      0,  # nhorizon
     )
 
-  # origin on boundary (objects are not considered penetrating)
-  if pt.status:
-    witness1[0] = result.x1
-    witness2[0] = result.x2
-    return result.dist, 1, witness1, witness2
+    if result.dim == 2:
+      pt, new_result = _polytope2(
+        pt,
+        result.dist,
+        result.simplex,
+        result.simplex1,
+        result.simplex2,
+        result.simplex_index1,
+        result.simplex_index2,
+        geom1,
+        geom2,
+        geomtype1,
+        geomtype2,
+      )
+      if pt.status == -1:
+        result.simplex = new_result.simplex
+        result.simplex1 = new_result.simplex1
+        result.simplex2 = new_result.simplex2
+        result.simplex_index1 = new_result.simplex_index1
+        result.simplex_index2 = new_result.simplex_index2
+        result.dim = 3
+    elif result.dim == 4:
+      pt, new_result = _polytope4(
+        pt,
+        result.dist,
+        result.simplex,
+        result.simplex1,
+        result.simplex2,
+        result.simplex_index1,
+        result.simplex_index2,
+        geom1,
+        geom2,
+        geomtype1,
+        geomtype2,
+      )
+      if pt.status == -1:
+        result.simplex = new_result.simplex
+        result.simplex1 = new_result.simplex1
+        result.simplex2 = new_result.simplex2
+        result.simplex_index1 = new_result.simplex_index1
+        result.simplex_index2 = new_result.simplex_index2
+        result.dim = 3
 
-  dist, x1, x2, idx = _epa(tolerance, ccd_iterations, pt, geom1, geom2, geomtype1, geomtype2, is_discrete)
-  if idx == -1:
-    return FLOAT_MAX, 0, witness1, witness2
+    # polytope2 and polytope4 may need to fallback here
+    if result.dim == 3:
+      pt = _polytope3(
+        pt,
+        result.dist,
+        result.simplex,
+        result.simplex1,
+        result.simplex2,
+        result.simplex_index1,
+        result.simplex_index2,
+        geom1,
+        geom2,
+        geomtype1,
+        geomtype2,
+      )
 
-  # multiccd is always on for box-box collisions
-  if geomtype1 == GeomType.BOX and geomtype2 == GeomType.BOX:
-    multiccd = True
+    # origin on boundary (objects are not considered penetrating)
+    if pt.status:
+      witness1[0] = result.x1
+      witness2[0] = result.x2
+      return result.dist, 1, witness1, witness2
 
-  if (
-    multiccd
-    and (geom1.margin == 0.0 and geom2.margin == 0.0)
-    and (geomtype1 == GeomType.BOX or (geomtype1 == GeomType.MESH and geom1.mesh_polyadr > -1))
-    and (geomtype2 == GeomType.BOX or (geomtype2 == GeomType.MESH and geom2.mesh_polyadr > -1))
-  ):
-    num, w1, w2 = _multicontact(
-      polygon,
-      clipped,
-      plane_normal,
-      plane_dist,
-      idx1,
-      idx2,
-      n1,
-      n2,
-      endvert,
-      face1,
-      face2,
-      pt,
-      pt.face[idx],
-      x1,
-      x2,
-      geom1,
-      geom2,
-      geomtype1,
-      geomtype2,
-    )
-    if num > 0:
-      return dist, num, w1, w2
-  witness1[0] = x1
-  witness2[0] = x2
-  return dist, 1, witness1, witness2
+    dist, x1, x2, idx = _epa(tolerance, iterations, pt, geom1, geom2, geomtype1, geomtype2, is_discrete)
+    if idx == -1:
+      return FLOAT_MAX, 0, witness1, witness2
+
+    if wp.static(multiccd):
+      if (
+        (geom1.margin == 0.0 and geom2.margin == 0.0)
+        and (geomtype1 == GeomType.BOX or (geomtype1 == GeomType.MESH and geom1.mesh_polyadr > -1))
+        and (geomtype2 == GeomType.BOX or (geomtype2 == GeomType.MESH and geom2.mesh_polyadr > -1))
+      ):
+        num, w1, w2 = wp.static(_multicontact(nmaxpolygon, nmaxmeshdeg))(
+          pt, pt.face[idx], x1, x2, geom1, geom2, geomtype1, geomtype2
+        )
+        if num > 0:
+          return dist, num, w1, w2
+
+    witness1[0] = x1
+    witness2[0] = x2
+    return dist, 1, witness1, witness2
+
+  return _ccd
