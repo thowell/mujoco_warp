@@ -393,10 +393,10 @@ def _tile_euler_dense(tile: TileSet):
 
 
 @event_scope
-def euler(m: Model, d: Data):
+def euler(m: Model, d: Data, skip_deriv: bool = False):
   """Euler integrator, semi-implicit in velocity."""
   # integrate damping implicitly
-  if not (m.opt.disableflags & (DisableBit.EULERDAMP | DisableBit.DAMPER)):
+  if not skip_deriv and not (m.opt.disableflags & (DisableBit.EULERDAMP | DisableBit.DAMPER)):
     qacc = wp.empty((d.nworld, m.nv), dtype=float)
 
     # Compute damping derivative
@@ -574,9 +574,9 @@ def rungekutta4(m: Model, d: Data):
 
 
 @event_scope
-def implicit(m: Model, d: Data):
+def implicit(m: Model, d: Data, skip_deriv: bool = False):
   """Integrates fully implicit in velocity."""
-  if ~(m.opt.disableflags | ~(DisableBit.ACTUATION | DisableBit.SPRING | DisableBit.DAMPER)):
+  if not skip_deriv and ~(m.opt.disableflags | ~(DisableBit.ACTUATION | DisableBit.SPRING | DisableBit.DAMPER)):
     if m.is_sparse:
       qDeriv = wp.empty((d.nworld, 1, m.nM), dtype=float)
       qLD = wp.empty((d.nworld, 1, m.nC), dtype=float)
@@ -1261,6 +1261,83 @@ def forward(m: Model, d: Data):
 def step(m: Model, d: Data):
   """Advance simulation."""
   forward(m, d)
+
+  if m.opt.integrator == IntegratorType.EULER:
+    euler(m, d)
+  elif m.opt.integrator == IntegratorType.RK4:
+    rungekutta4(m, d)
+  elif m.opt.integrator == IntegratorType.IMPLICITFAST:
+    implicit(m, d)
+  else:
+    raise NotImplementedError(f"integrator {m.opt.integrator} not implemented.")
+
+
+# skip-stage levels matching mjtStage
+_STAGE_NONE = 0  # recompute everything
+_STAGE_POS = 1  # skip fwd_position (position-dependent already computed)
+_STAGE_VEL = 2  # skip fwd_position + fwd_velocity
+
+
+@event_scope
+def forward_skip(m: Model, d: Data, skipstage: int = 0, skipsensor: bool = False):
+  """Forward dynamics with optional stage skipping.
+
+  Mirrors mj_forwardSkip in the C engine.
+
+  Args:
+    m: Model.
+    d: Data.
+    skipstage: Skip stages below this level.
+      0 = STAGE_NONE: full recompute.
+      1 = STAGE_POS: skip fwd_position (e.g. for qvel perturbation).
+      2 = STAGE_VEL: skip fwd_position + fwd_velocity (e.g. for ctrl/act).
+    skipsensor: If True, skip sensor evaluation.
+  """
+  energy = m.opt.enableflags & EnableBit.ENERGY
+
+  if skipstage < _STAGE_POS:
+    fwd_position(m, d, factorize=False)
+  if not skipsensor:
+    d.sensordata.zero_()
+    sensor.sensor_pos(m, d)
+    if energy:
+      if m.sensor_e_potential == 0:
+        sensor.energy_pos(m, d)
+  elif not energy:
+    d.energy.zero_()
+
+  if skipstage < _STAGE_VEL:
+    fwd_velocity(m, d)
+  if not skipsensor:
+    sensor.sensor_vel(m, d)
+    if energy:
+      if m.sensor_e_kinetic == 0:
+        sensor.energy_vel(m, d)
+
+  if not (m.opt.disableflags & DisableBit.ACTUATION):
+    if m.callback.control:
+      m.callback.control(m, d)
+  fwd_actuation(m, d)
+  fwd_acceleration(m, d, factorize=True)
+
+  solver.solve(m, d)
+  if not skipsensor:
+    sensor.sensor_acc(m, d)
+
+
+@event_scope
+def step_skip(m: Model, d: Data, skipstage: int = 0, skipsensor: bool = False):
+  """Advance simulation with optional stage skipping.
+
+  Mirrors mj_stepSkip in the C engine.
+
+  Args:
+    m: Model.
+    d: Data.
+    skipstage: Skip stages below this level (see forward_skip).
+    skipsensor: If True, skip sensor evaluation.
+  """
+  forward_skip(m, d, skipstage, skipsensor)
 
   if m.opt.integrator == IntegratorType.EULER:
     euler(m, d)
