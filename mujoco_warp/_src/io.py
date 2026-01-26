@@ -95,6 +95,7 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
     (mjm.eq_type, types.EqType, mujoco.mjtEq),
     (mjm.geom_type, types.GeomType, mujoco.mjtGeom),
     (mjm.sensor_type, types.SensorType, mujoco.mjtSensor),
+    (mjm.tree_sleep_policy, types.SleepPolicy, mujoco.mjtSleepPolicy),
     (mjm.wrap_type, types.WrapType, mujoco.mjtWrap),
   ):
     missing = ~np.isin(field, field_type)
@@ -1047,6 +1048,10 @@ def make_data(
     # island arrays
     "nisland": None,
     "tree_island": None,
+    # sleep state: all trees start fully awake
+    "tree_asleep": wp.array(np.full((nworld, mjm.ntree), -(1 + types.MJ_MINAWAKE)), dtype=int),
+    "tree_awake": wp.array(np.ones((nworld, mjm.ntree)), dtype=int),
+    "body_awake": wp.array(np.ones((nworld, mjm.nbody)), dtype=int),
   }
   for f in dataclasses.fields(types.Data):
     if f.name in d_kwargs:
@@ -1265,6 +1270,10 @@ def put_data(
     # island arrays
     "nisland": None,
     "tree_island": None,
+    # sleep state: all trees start fully awake
+    "tree_asleep": wp.array(np.full((nworld, mjm.ntree), -(1 + types.MJ_MINAWAKE)), dtype=int),
+    "tree_awake": wp.array(np.ones((nworld, mjm.ntree)), dtype=int),
+    "body_awake": wp.array(np.ones((nworld, mjm.nbody)), dtype=int),
   }
   for f in dataclasses.fields(types.Data):
     if f.name in d_kwargs:
