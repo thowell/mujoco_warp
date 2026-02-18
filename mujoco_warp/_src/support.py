@@ -604,11 +604,13 @@ def get_state(m: Model, d: Data, state: wp.array2d[float], sig: int, active: Opt
     nbody: int,
     neq: int,
     nmocap: int,
+    nhistory: int,
     # Data in:
     time_in: wp.array[float],
     qpos_in: wp.array2d[float],
     qvel_in: wp.array2d[float],
     act_in: wp.array2d[float],
+    history_in: wp.array2d[float],
     qacc_warmstart_in: wp.array2d[float],
     ctrl_in: wp.array2d[float],
     qfrc_applied_in: wp.array2d[float],
@@ -647,6 +649,10 @@ def get_state(m: Model, d: Data, state: wp.array2d[float], sig: int, active: Opt
           for j in range(na):
             state_out[worldid, adr + j] = act_in[worldid, j]
           adr += na
+        elif element == State.HISTORY:
+          for j in range(nhistory):
+            state_out[worldid, adr + j] = history_in[worldid, j]
+          adr += nhistory
         elif element == State.WARMSTART:
           for j in range(nv):
             state_out[worldid, adr + j] = qacc_warmstart_in[worldid, j]
@@ -700,10 +706,12 @@ def get_state(m: Model, d: Data, state: wp.array2d[float], sig: int, active: Opt
       m.nbody,
       m.neq,
       m.nmocap,
+      m.nhistory,
       d.time,
       d.qpos,
       d.qvel,
       d.act,
+      d.history,
       d.qacc_warmstart,
       d.ctrl,
       d.qfrc_applied,
@@ -743,6 +751,7 @@ def set_state(m: Model, d: Data, state: wp.array2d[float], sig: int, active: Opt
     nbody: int,
     neq: int,
     nmocap: int,
+    nhistory: int,
     # In:
     sig_in: int,
     active_in: wp.array[bool],
@@ -752,6 +761,7 @@ def set_state(m: Model, d: Data, state: wp.array2d[float], sig: int, active: Opt
     qpos_out: wp.array2d[float],
     qvel_out: wp.array2d[float],
     act_out: wp.array2d[float],
+    history_out: wp.array2d[float],
     qacc_warmstart_out: wp.array2d[float],
     ctrl_out: wp.array2d[float],
     qfrc_applied_out: wp.array2d[float],
@@ -785,6 +795,10 @@ def set_state(m: Model, d: Data, state: wp.array2d[float], sig: int, active: Opt
           for j in range(na):
             act_out[worldid, j] = state_in[worldid, adr + j]
           adr += na
+        elif element == State.HISTORY:
+          for j in range(nhistory):
+            history_out[worldid, j] = state_in[worldid, adr + j]
+          adr += nhistory
         elif element == State.WARMSTART:
           for j in range(nv):
             qacc_warmstart_out[worldid, j] = state_in[worldid, adr + j]
@@ -844,6 +858,7 @@ def set_state(m: Model, d: Data, state: wp.array2d[float], sig: int, active: Opt
       m.nbody,
       m.neq,
       m.nmocap,
+      m.nhistory,
       int(sig),
       active or wp.ones(d.nworld, dtype=bool),
       state,
@@ -853,6 +868,7 @@ def set_state(m: Model, d: Data, state: wp.array2d[float], sig: int, active: Opt
       d.qpos,
       d.qvel,
       d.act,
+      d.history,
       d.qacc_warmstart,
       d.ctrl,
       d.qfrc_applied,
