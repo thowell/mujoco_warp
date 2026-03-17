@@ -2193,7 +2193,7 @@ def _contact_elliptic(
 
 
 @event_scope
-def make_constraint(m: types.Model, d: types.Data):
+def make_constraint(m: types.Model, d: types.Data, skip_contact: bool = False):
   """Creates constraint jacobians and other supporting data."""
   efc_nnz = wp.empty((d.nworld,), dtype=int)
 
@@ -2640,7 +2640,7 @@ def make_constraint(m: types.Model, d: types.Data):
       )
 
     # contact
-    if not (m.opt.disableflags & types.DisableBit.CONTACT):
+    if not skip_contact and not (m.opt.disableflags & types.DisableBit.CONTACT):
       if m.opt.cone == types.ConeType.PYRAMIDAL:
         wp.launch(
           _contact_pyramidal,

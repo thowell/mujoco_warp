@@ -35,6 +35,7 @@ from mujoco_warp._src.collision_driver import sap_broadphase as sap_broadphase
 from mujoco_warp._src.collision_primitive import primitive_narrowphase as primitive_narrowphase
 from mujoco_warp._src.collision_sdf import sdf_narrowphase as sdf_narrowphase
 from mujoco_warp._src.constraint import make_constraint as make_constraint
+from mujoco_warp._src.contact_force import passive_contact as passive_contact
 from mujoco_warp._src.derivative import deriv_smooth_vel as deriv_smooth_vel
 from mujoco_warp._src.forward import euler as euler
 from mujoco_warp._src.forward import forward as forward
@@ -95,6 +96,7 @@ from mujoco_warp._src.types import BroadphaseType as BroadphaseType
 from mujoco_warp._src.types import ConeType as ConeType
 from mujoco_warp._src.types import Constraint as Constraint
 from mujoco_warp._src.types import Contact as Contact
+from mujoco_warp._src.types import ContactSolverType as ContactSolverType
 from mujoco_warp._src.types import DisableBit as DisableBit
 from mujoco_warp._src.types import DynType as DynType
 from mujoco_warp._src.types import EnableBit as EnableBit

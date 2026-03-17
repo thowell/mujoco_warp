@@ -31,6 +31,7 @@ from mujoco_warp._src.support import xfrc_accumulate
 from mujoco_warp._src.types import MJ_MINVAL
 from mujoco_warp._src.types import SPARSE_CONSTRAINT_JACOBIAN
 from mujoco_warp._src.types import BiasType
+from mujoco_warp._src.types import ContactSolverType
 from mujoco_warp._src.types import Data
 from mujoco_warp._src.types import DisableBit
 from mujoco_warp._src.types import DynType
@@ -559,7 +560,8 @@ def fwd_position(m: Model, d: Data, factorize: bool = True):
     smooth.factor_m(m, d)
   if m.opt.run_collision_detection:
     collision_driver.collision(m, d)
-  constraint.make_constraint(m, d)
+  skip_contact = m.opt.contact_solver == ContactSolverType.PASSIVE
+  constraint.make_constraint(m, d, skip_contact=skip_contact)
   # TODO(team): remove False after island features are more complete
   if False and not (m.opt.disableflags & DisableBit.ISLAND):
     island.island(m, d)
@@ -1025,8 +1027,47 @@ def forward(m: Model, d: Data):
   fwd_actuation(m, d)
   fwd_acceleration(m, d, factorize=True)
 
-  solver.solve(m, d)
+  if m.opt.contact_solver == ContactSolverType.PASSIVE:
+    from mujoco_warp._src import contact_force as contact_force_module
+    solver.solve(m, d)  # solve non-contact constraints (limits, equality)
+    contact_force_module.passive_contact(m, d)
+    _passive_finalize(m, d)  # add contact forces on top
+  else:
+    solver.solve(m, d)
   sensor.sensor_acc(m, d)
+
+
+@wp.kernel
+def _passive_qacc(
+  # Data in:
+  delta_qacc_in: wp.array2d(dtype=float),
+  qfrc_contact_in: wp.array2d(dtype=float),
+  # Data in/out:
+  qacc_out: wp.array2d(dtype=float),
+  qfrc_constraint_out: wp.array2d(dtype=float),
+  efc_Ma_out: wp.array2d(dtype=float),
+):
+  worldid, dofid = wp.tid()
+  # add contact acceleration on top of solver's qacc (which has limits/equality)
+  qacc_out[worldid, dofid] = qacc_out[worldid, dofid] + delta_qacc_in[worldid, dofid]
+  # accumulate contact force into constraint force
+  qfrc_constraint_out[worldid, dofid] = qfrc_constraint_out[worldid, dofid] + qfrc_contact_in[worldid, dofid]
+  # add to efc.Ma so Euler integrator includes contact forces
+  efc_Ma_out[worldid, dofid] = efc_Ma_out[worldid, dofid] + qfrc_contact_in[worldid, dofid]
+
+
+@event_scope
+def _passive_finalize(m: Model, d: Data):
+  """Add passive contact forces on top of solver result."""
+  delta_qacc = wp.empty((d.nworld, m.nv), dtype=float)
+  smooth.solve_m(m, d, delta_qacc, d.qfrc_contact)
+
+  wp.launch(
+    _passive_qacc,
+    dim=(d.nworld, m.nv),
+    inputs=[delta_qacc, d.qfrc_contact],
+    outputs=[d.qacc, d.qfrc_constraint, d.efc.Ma],
+  )
 
 
 @event_scope

@@ -192,6 +192,10 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
   else:
     opt.contact_sensor_maxmatch = 64
 
+  opt.contact_solver = types.ContactSolverType.CONSTRAINT
+  opt.passive_kuser = 10.0
+  opt.passive_duser = 1.0
+
   # place opt on device
   for f in dataclasses.fields(types.Option):
     if isinstance(f.type, wp.array):
@@ -2322,6 +2326,7 @@ def override_model(model: types.Model | mujoco.MjModel, overrides: dict[str, Any
     "opt.broadphase": types.BroadphaseType,
     "opt.broadphase_filter": types.BroadphaseFilter,
     "opt.cone": types.ConeType,
+    "opt.contact_solver": types.ContactSolverType,
     "opt.disableflags": types.DisableBit,
     "opt.enableflags": types.EnableBit,
     "opt.integrator": types.IntegratorType,
@@ -2335,7 +2340,7 @@ def override_model(model: types.Model | mujoco.MjModel, overrides: dict[str, Any
       "AUTO": mujoco.mjtJacobian.mjJAC_AUTO,
     },
   }
-  mjw_only_fields = {"opt.broadphase", "opt.broadphase_filter", "opt.ls_parallel", "opt.graph_conditional"}
+  mjw_only_fields = {"opt.broadphase", "opt.broadphase_filter", "opt.contact_solver", "opt.ls_parallel", "opt.graph_conditional", "opt.passive_kuser", "opt.passive_duser"}
   mj_only_fields = {"opt.jacobian"}
 
   if not isinstance(overrides, dict):

@@ -388,6 +388,18 @@ class SolverType(enum.IntEnum):
   # unsupported: PGS
 
 
+class ContactSolverType(enum.IntEnum):
+  """Contact solver backend.
+
+  Attributes:
+    CONSTRAINT: default constraint solver (CG or Newton)
+    PASSIVE: analytical complementarity-free contact forces (no solver)
+  """
+
+  CONSTRAINT = 0
+  PASSIVE = 1
+
+
 class ConstraintState(enum.IntEnum):
   """State of constraint.
 
@@ -730,6 +742,9 @@ class Option:
       contacts during the physics step (as opposed to DisableBit.CONTACT which explicitly
       zeros out the contacts at each step)
     contact_sensor_maxmatch: max number of contacts considered by contact sensor matching criteria
+    contact_solver: contact solver backend (ContactSolverType)
+    passive_kuser: passive contact stiffness impedance parameter
+    passive_duser: passive contact damping impedance parameter
                              contacts matched after this value is exceded will be ignored
   """
 
@@ -761,6 +776,9 @@ class Option:
   graph_conditional: bool
   run_collision_detection: bool
   contact_sensor_maxmatch: int
+  contact_solver: int
+  passive_kuser: array("*", float)
+  passive_duser: array("*", float)
 
 
 @dataclasses.dataclass
@@ -1776,6 +1794,7 @@ class Data:
     njmax_nnz: number of non-zeros in constraint Jacobian
     nacon: number of detected contacts (across all worlds)      (1,)
     ncollision: collision count from broadphase                 (1,)
+    qfrc_contact: analytical contact generalized force          (nworld, nv)
   """
 
   solver_niter: array("nworld", int)
@@ -1870,6 +1889,7 @@ class Data:
   njmax_nnz: int
   nacon: array(1, int)
   ncollision: array(1, int)
+  qfrc_contact: array("nworld", "nv", float)
 
 
 @dataclasses.dataclass
