@@ -26,6 +26,7 @@ from mujoco_warp._src import passive
 from mujoco_warp._src import sensor
 from mujoco_warp._src import smooth
 from mujoco_warp._src import solver
+from mujoco_warp._src import types
 from mujoco_warp._src import util_misc
 from mujoco_warp._src.support import next_act
 from mujoco_warp._src.support import xfrc_accumulate
@@ -614,8 +615,7 @@ def fwd_position(m: Model, d: Data, factorize: bool = True):
   if m.opt.run_collision_detection:
     collision_driver.collision(m, d)
   constraint.make_constraint(m, d)
-  # TODO(team): remove False after island features are more complete
-  if False and not (m.opt.disableflags & DisableBit.ISLAND):
+  if m.ntree > 1 and not (m.opt.disableflags & types.DisableBit.ISLAND):
     island.island(m, d)
   smooth.transmission(m, d)
 

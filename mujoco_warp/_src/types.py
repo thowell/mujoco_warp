@@ -1755,6 +1755,20 @@ class Constraint:
     frictionloss: frictionloss (friction)             (nworld, njmax)
     force: constraint force in constraint space       (nworld, njmax)
     state: constraint state                           (nworld, njmax_pad)
+    island: island ID per constraint                  (nworld, njmax)
+    itype: island constraint type                     (nworld, njmax)
+    iid: island constraint id                         (nworld, njmax)
+    iJ_rownnz: island J_rownnz                        (nworld, njmax)
+    iJ_rowadr: island J_rowadr                        (nworld, njmax)
+    iJ_colind: island J_colind                        (nworld, 0, 0) dense
+                                                      (nworld, 1, njmax_nnz) sparse
+    iJ: island J                                      (nworld, njmax, nv) dense
+                                                      (nworld, 1, njmax_nnz) sparse
+    iD: island constraint mass                        (nworld, njmax_pad)
+    iaref: island aref                                (nworld, njmax)
+    ifrictionloss: island frictionloss                (nworld, njmax)
+    iforce: island force                              (nworld, njmax)
+    istate: island state                              (nworld, njmax_pad)
   warp only fields:
     Ma: M*qacc                                        (nworld, nv)
     Jqvel: J*qvel                                     (nworld, njmax)
@@ -1762,8 +1776,8 @@ class Constraint:
 
   type: array("nworld", "njmax", int)
   id: array("nworld", "njmax", int)
-  J_rownnz: wp.array2d[int]
-  J_rowadr: wp.array2d[int]
+  J_rownnz: array("nworld", "njmax", int)
+  J_rowadr: array("nworld", "njmax", int)
   J_colind: wp.array3d[int]
   J: wp.array3d[float]
   pos: array("nworld", "njmax", float)
@@ -1774,8 +1788,21 @@ class Constraint:
   frictionloss: array("nworld", "njmax", float)
   force: array("nworld", "njmax", float)
   state: array("nworld", "njmax_pad", int)
+  island: array("nworld", "njmax", int)
   Ma: array("nworld", "nv", float)
   Jqvel: array("nworld", "njmax", float)
+
+  itype: array("nworld", "njmax", int)
+  iid: array("nworld", "njmax", int)
+  iJ_rownnz: array("nworld", "njmax", int)
+  iJ_rowadr: array("nworld", "njmax", int)
+  iJ_colind: wp.array3d[int]
+  iJ: wp.array3d[float]
+  iD: array("nworld", "njmax_pad", float)
+  iaref: array("nworld", "njmax", float)
+  ifrictionloss: array("nworld", "njmax", float)
+  iforce: array("nworld", "njmax", float)
+  istate: array("nworld", "njmax_pad", int)
 
 
 @dataclasses.dataclass
@@ -1789,6 +1816,7 @@ class Data:
     nl: number of limit constraints                             (nworld,)
     nefc: number of constraints                                 (nworld,)
     nisland: number of constraint islands                       (nworld,)
+    nidof: total DOFs in islands                                (nworld,)
     time: simulation time                                       (nworld,)
     energy: potential, kinetic energy                           (nworld, 2)
     qpos: position                                              (nworld, nq)
@@ -1869,6 +1897,23 @@ class Data:
     contact: contact data
     efc: constraint data
     tree_island: island ID per tree (-1 if unconstrained)       (nworld, ntree)
+    dof_island: island ID per DOF (-1 if unconstrained)         (nworld, nv)
+    island_dofadr: island start address in dof vector           (nworld, ntree)
+    island_nv: DOFs per island                                  (nworld, ntree)
+    island_nefc: constraints per island                         (nworld, ntree)
+    island_ne: equality constraints per island                  (nworld, ntree)
+    island_nf: friction constraints per island                  (nworld, ntree)
+    island_efcadr: island start address in efc vector           (nworld, ntree)
+    map_dof2idof: global DOF -> island-local DOF                (nworld, nv)
+    map_idof2dof: island-local DOF -> global DOF                (nworld, nv)
+    map_efc2iefc: global EFC -> island-local EFC                (nworld, njmax)
+    map_iefc2efc: island-local EFC -> global EFC                (nworld, njmax)
+    dof_islandid: island ID per island-DOF                      (nworld, nv)
+    efc_islandid: island ID per island-EFC                      (nworld, njmax)
+    iqacc: island-local qacc                                    (nworld, nv)
+    iqacc_smooth: island-local qacc_smooth                      (nworld, nv)
+    iqfrc_smooth: island-local qfrc_smooth                      (nworld, nv)
+    iqfrc_constraint: island-local qfrc_constraint              (nworld, nv)
 
   warp only fields:
     nworld: number of worlds
@@ -1887,6 +1932,7 @@ class Data:
   nl: array("nworld", int)
   nefc: array("nworld", int)
   nisland: array("nworld", int)
+  nidof: array("nworld", int)
   time: array("nworld", float)
   energy: array("nworld", wp.vec2)
   qpos: array("nworld", "nq", float)
@@ -1963,6 +2009,23 @@ class Data:
   contact: Contact
   efc: Constraint
   tree_island: array("nworld", "ntree", int)
+  dof_island: array("nworld", "nv", int)
+  island_dofadr: array("nworld", "ntree", int)
+  island_nv: array("nworld", "ntree", int)
+  island_nefc: array("nworld", "ntree", int)
+  island_ne: array("nworld", "ntree", int)
+  island_nf: array("nworld", "ntree", int)
+  island_efcadr: array("nworld", "ntree", int)
+  map_dof2idof: array("nworld", "nv", int)
+  map_idof2dof: array("nworld", "nv", int)
+  map_efc2iefc: array("nworld", "njmax", int)
+  map_iefc2efc: array("nworld", "njmax", int)
+  dof_islandid: array("nworld", "nv", int)
+  efc_islandid: array("nworld", "njmax", int)
+  iqacc: wp.array2d[float]
+  iqacc_smooth: wp.array2d[float]
+  iqfrc_smooth: wp.array2d[float]
+  iqfrc_constraint: wp.array2d[float]
 
   # warp only fields:
   nworld: int
@@ -1973,6 +2036,77 @@ class Data:
   njmax_nnz: int
   nacon: array(1, int)
   ncollision: array(1, int)
+
+
+@dataclasses.dataclass
+class InverseContext:
+  """Workspace arrays for inverse dynamics."""
+
+  Jaref: wp.array2d[float]
+  search_dot: wp.array[float]
+  gauss: wp.array[float]
+  cost: wp.array[float]
+  prev_cost: wp.array[float]
+  done: wp.array[bool]
+  changed_efc_ids: wp.array2d[int]
+  changed_efc_count: wp.array[int]
+
+
+@dataclasses.dataclass
+class IslandSolverContext:
+  """Workspace arrays for island constraint solver."""
+
+  # Re-ordered workspace arrays (sized per-dof / per-constraint)
+  Jaref: wp.array2d[float]
+  jv: wp.array2d[float]
+  search: wp.array2d[float]
+  mv: wp.array2d[float]
+  grad: wp.array2d[float]
+  Mgrad: wp.array2d[float]
+  prev_grad: wp.array2d[float]
+  prev_Mgrad: wp.array2d[float]
+  h: wp.array3d[float]
+
+  # Per-island solver scalars (nworld, ntree)
+  cost: wp.array2d[float]
+  prev_cost: wp.array2d[float]
+  gauss: wp.array2d[float]
+  search_dot: wp.array2d[float]
+  grad_dot: wp.array2d[float]
+  done: wp.array2d[bool]  # per-island convergence
+  solver_niter: wp.array2d[int]  # iterations per island
+  beta: wp.array2d[float]
+  alpha: wp.array2d[float]
+  Ma: wp.array2d[float]  # island-local Ma (nworld, nv)
+
+
+@dataclasses.dataclass
+class SolverContext:
+  """Workspace arrays for constraint solver."""
+
+  Jaref: wp.array2d[float]
+  search_dot: wp.array[float]
+  gauss: wp.array[float]
+  cost: wp.array[float]
+  prev_cost: wp.array[float]
+  done: wp.array[bool]
+  grad: wp.array2d[float]
+  grad_dot: wp.array[float]
+  Mgrad: wp.array2d[float]
+  search: wp.array2d[float]
+  mv: wp.array2d[float]
+  jv: wp.array2d[float]
+  quad: wp.array2d[wp.vec3]
+  quad_gauss: wp.array[wp.vec3]
+  alpha: wp.array[float]
+  prev_grad: wp.array2d[float]
+  prev_Mgrad: wp.array2d[float]
+  beta: wp.array[float]
+  h: wp.array3d[float]
+  hfactor: wp.array3d[float]
+  # Incremental Hessian update (Newton only)
+  changed_efc_ids: wp.array2d[int]
+  changed_efc_count: wp.array[int]
 
 
 @dataclasses.dataclass
