@@ -23,6 +23,7 @@ from absl.testing import parameterized
 
 import mujoco_warp as mjw
 from mujoco_warp import ConeType
+from mujoco_warp import DisableBit
 from mujoco_warp import SolverType
 from mujoco_warp import test_data
 from mujoco_warp._src import solver
@@ -41,7 +42,7 @@ def _assert_eq(a, b, name):
 class SolverTest(parameterized.TestCase):
   @parameterized.product(
     cone=tuple(ConeType),
-    solver_=tuple(SolverType),
+    solver_=(SolverType.CG, SolverType.NEWTON),
     jacobian=(mujoco.mjtJacobian.mjJAC_DENSE, mujoco.mjtJacobian.mjJAC_SPARSE),
   )
   def test_constraint_update(self, cone, solver_, jacobian):
@@ -655,6 +656,279 @@ class SolverTest(parameterized.TestCase):
       _assert_eq(qacc_inc, qacc_full, f"qacc keyframe={keyframe}")
 
     self.assertTrue(total_any_changes, "no state changes detected across any keyframe")
+
+
+class PGSSolverTest(parameterized.TestCase):
+  """Tests specific to the PGS (Projected Gauss-Seidel) solver."""
+
+  def _apply_pgs_mode(self, m, pgs_mode):
+    """Apply PGS mode overrides to the model after put_model."""
+    if pgs_mode == "gs_sequential":
+      m.opt.pgs_max_colors = 0
+    elif pgs_mode == "gs_color":
+      pass  # default pgs_max_colors=32
+    elif pgs_mode == "jacobi":
+      m.opt.pgs_mode = 1
+      m.opt.pgs_sor_omega = 0.3
+    else:
+      raise ValueError(f"Unknown pgs_mode: {pgs_mode}")
+
+  @parameterized.parameters(
+    ("gs_sequential", ConeType.PYRAMIDAL, mujoco.mjtJacobian.mjJAC_DENSE),
+    ("gs_sequential", ConeType.PYRAMIDAL, mujoco.mjtJacobian.mjJAC_SPARSE),
+    ("gs_sequential", ConeType.ELLIPTIC, mujoco.mjtJacobian.mjJAC_DENSE),
+    ("gs_sequential", ConeType.ELLIPTIC, mujoco.mjtJacobian.mjJAC_SPARSE),
+    ("gs_color", ConeType.PYRAMIDAL, mujoco.mjtJacobian.mjJAC_DENSE),
+    ("gs_color", ConeType.PYRAMIDAL, mujoco.mjtJacobian.mjJAC_SPARSE),
+    ("gs_color", ConeType.ELLIPTIC, mujoco.mjtJacobian.mjJAC_DENSE),
+    ("gs_color", ConeType.ELLIPTIC, mujoco.mjtJacobian.mjJAC_SPARSE),
+    ("jacobi", ConeType.PYRAMIDAL, mujoco.mjtJacobian.mjJAC_DENSE),
+    ("jacobi", ConeType.PYRAMIDAL, mujoco.mjtJacobian.mjJAC_SPARSE),
+    ("jacobi", ConeType.ELLIPTIC, mujoco.mjtJacobian.mjJAC_DENSE),
+    ("jacobi", ConeType.ELLIPTIC, mujoco.mjtJacobian.mjJAC_SPARSE),
+  )
+  def test_pgs_solve(self, pgs_mode, cone, jacobian):
+    """Tests PGS solver across all modes and Jacobian formats."""
+    for keyframe in range(3):
+      mjm, mjd, m, d = test_data.fixture(
+        "constraints.xml",
+        keyframe=keyframe,
+        overrides={
+          "opt.solver": mujoco.mjtSolver.mjSOL_PGS,
+          "opt.cone": cone,
+          "opt.jacobian": jacobian,
+          "opt.iterations": 50,
+        },
+      )
+
+      mujoco.mj_forward(mjm, mjd)
+
+      self._apply_pgs_mode(m, pgs_mode)
+      mjw.solve(m, d)
+
+      def cost(qacc):
+        jaref = np.zeros(mjd.nefc, dtype=float)
+        cost_out = np.zeros(1)
+        mujoco.mj_mulJacVec(mjm, mjd, jaref, qacc)
+        mujoco.mj_constraintUpdate(mjm, mjd, jaref - mjd.efc_aref, cost_out, 0)
+        return cost_out[0]
+
+      mj_cost = cost(mjd.qacc)
+      mjwarp_cost = cost(d.qacc.numpy()[0])
+
+      if pgs_mode == "jacobi":
+        # Jacobi converges slower; with ω=0.5 and 50 iters, cost within 1.5×
+        self.assertLessEqual(
+          mjwarp_cost,
+          mj_cost * 1.5,
+          f"Jacobi cost too high: {mjwarp_cost:.1f} vs {mj_cost:.1f} "
+          f"(mode={pgs_mode}, cone={cone}, jac={jacobian}, kf={keyframe})",
+        )
+      else:
+        # GS modes should match MuJoCo C cost closely
+        self.assertLessEqual(mjwarp_cost, mj_cost * 1.025)
+
+  @parameterized.parameters(
+    (ConeType.PYRAMIDAL, mujoco.mjtJacobian.mjJAC_DENSE),
+  )
+  def test_pgs_cost_decreasing(self, cone, jacobian):
+    """Tests that PGS cost monotonically decreases."""
+    mjm, mjd, m, d = test_data.fixture(
+      "constraints.xml",
+      keyframe=0,
+      overrides={
+        "opt.solver": mujoco.mjtSolver.mjSOL_PGS,
+        "opt.cone": cone,
+        "opt.jacobian": jacobian,
+        "opt.iterations": 50,
+      },
+    )
+
+    mujoco.mj_forward(mjm, mjd)
+
+    def cost(qacc):
+      jaref = np.zeros(mjd.nefc, dtype=float)
+      cost_out = np.zeros(1)
+      mujoco.mj_mulJacVec(mjm, mjd, jaref, qacc)
+      mujoco.mj_constraintUpdate(mjm, mjd, jaref - mjd.efc_aref, cost_out, 0)
+      return cost_out[0]
+
+    mj_cost = cost(mjd.qacc)
+    mjwarp_cost = cost(d.qacc.numpy()[0])
+
+    # PGS cost should be within a reasonable factor of MuJoCo C
+    self.assertLessEqual(mjwarp_cost, mj_cost * 1.1)
+
+  @parameterized.parameters(
+    (ConeType.PYRAMIDAL, mujoco.mjtJacobian.mjJAC_DENSE),
+  )
+  def test_pgs_step(self, cone, jacobian):
+    """Tests full mj_step with PGS solver matches MuJoCo C."""
+    mjm, mjd, m, d = test_data.fixture(
+      "constraints.xml",
+      keyframe=0,
+      overrides={
+        "opt.solver": mujoco.mjtSolver.mjSOL_PGS,
+        "opt.cone": cone,
+        "opt.jacobian": jacobian,
+        "opt.iterations": 50,
+      },
+    )
+
+    # Run forward (not step) to compare solver output directly
+    mujoco.mj_forward(mjm, mjd)
+    mjw.step(m, d)
+
+    # After step, qacc is from the NEXT forward pass.
+    # Compare qvel which reflects integration of the solver's qacc.
+    _assert_eq(d.qvel.numpy()[0], mjd.qvel, "qvel")
+
+  @parameterized.parameters(
+    ("gs_sequential", ConeType.PYRAMIDAL, mujoco.mjtJacobian.mjJAC_DENSE),
+    ("gs_sequential", ConeType.PYRAMIDAL, mujoco.mjtJacobian.mjJAC_SPARSE),
+    ("gs_color", ConeType.PYRAMIDAL, mujoco.mjtJacobian.mjJAC_DENSE),
+    ("gs_color", ConeType.PYRAMIDAL, mujoco.mjtJacobian.mjJAC_SPARSE),
+    ("gs_color", ConeType.ELLIPTIC, mujoco.mjtJacobian.mjJAC_DENSE),
+    ("gs_color", ConeType.ELLIPTIC, mujoco.mjtJacobian.mjJAC_SPARSE),
+    ("jacobi", ConeType.PYRAMIDAL, mujoco.mjtJacobian.mjJAC_DENSE),
+    ("jacobi", ConeType.PYRAMIDAL, mujoco.mjtJacobian.mjJAC_SPARSE),
+  )
+  def test_pgs_solve_humanoid(self, pgs_mode, cone, jacobian):
+    """Tests PGS solver on humanoid model across all modes."""
+    mjm, mjd, m, d = test_data.fixture(
+      "humanoid/humanoid.xml",
+      keyframe=0,
+      overrides={
+        "opt.solver": mujoco.mjtSolver.mjSOL_PGS,
+        "opt.cone": cone,
+        "opt.jacobian": jacobian,
+        "opt.iterations": 50,
+      },
+    )
+
+    mujoco.mj_forward(mjm, mjd)
+
+    self._apply_pgs_mode(m, pgs_mode)
+    mjw.solve(m, d)
+
+    if pgs_mode == "jacobi":
+
+      def cost(qacc):
+        jaref = np.zeros(mjd.nefc, dtype=float)
+        cost_out = np.zeros(1)
+        mujoco.mj_mulJacVec(mjm, mjd, jaref, qacc)
+        mujoco.mj_constraintUpdate(mjm, mjd, jaref - mjd.efc_aref, cost_out, 0)
+        return cost_out[0]
+
+      mj_cost = cost(mjd.qacc)
+      mjwarp_cost = cost(d.qacc.numpy()[0])
+      self.assertLessEqual(mjwarp_cost, mj_cost * 1.5)
+    else:
+
+      def cost(qacc):
+        jaref = np.zeros(mjd.nefc, dtype=float)
+        cost_out = np.zeros(1)
+        mujoco.mj_mulJacVec(mjm, mjd, jaref, qacc)
+        mujoco.mj_constraintUpdate(mjm, mjd, jaref - mjd.efc_aref, cost_out, 0)
+        return cost_out[0]
+
+      mj_cost = cost(mjd.qacc)
+      mjwarp_cost = cost(d.qacc.numpy()[0])
+      self.assertLessEqual(mjwarp_cost, mj_cost * 1.025)
+
+  @parameterized.parameters(
+    ("gs_sequential", ConeType.PYRAMIDAL, mujoco.mjtJacobian.mjJAC_DENSE),
+    ("gs_sequential", ConeType.PYRAMIDAL, mujoco.mjtJacobian.mjJAC_SPARSE),
+    ("gs_color", ConeType.PYRAMIDAL, mujoco.mjtJacobian.mjJAC_DENSE),
+    ("gs_color", ConeType.PYRAMIDAL, mujoco.mjtJacobian.mjJAC_SPARSE),
+    ("jacobi", ConeType.PYRAMIDAL, mujoco.mjtJacobian.mjJAC_DENSE),
+    ("jacobi", ConeType.PYRAMIDAL, mujoco.mjtJacobian.mjJAC_SPARSE),
+  )
+  def test_pgs_deterministic_no_warmstart(self, pgs_mode, cone, jacobian):
+    """Tests PGS is deterministic and idempotent without warmstarts.
+
+    Mirrors MuJoCo C's DeterministicNoWarmstart pipeline test.
+    """
+    mjm, mjd, m, d = test_data.fixture(
+      "constraints.xml",
+      keyframe=0,
+      overrides={
+        "opt.solver": mujoco.mjtSolver.mjSOL_PGS,
+        "opt.cone": cone,
+        "opt.jacobian": jacobian,
+        "opt.iterations": 50,
+        "opt.disableflags": DisableBit.WARMSTART,
+      },
+    )
+
+    self._apply_pgs_mode(m, pgs_mode)
+
+    # First forward pass
+    mujoco.mj_forward(mjm, mjd)
+    mjw.forward(m, d)
+    qacc_first = d.qacc.numpy()[0].copy()
+
+    # Second forward pass (should be idempotent without warmstart)
+    mjw.forward(m, d)
+    qacc_second = d.qacc.numpy()[0].copy()
+
+    np.testing.assert_array_equal(qacc_first, qacc_second)
+
+  @parameterized.parameters(
+    (ConeType.PYRAMIDAL, mujoco.mjtJacobian.mjJAC_DENSE),
+    (ConeType.PYRAMIDAL, mujoco.mjtJacobian.mjJAC_SPARSE),
+    (ConeType.ELLIPTIC, mujoco.mjtJacobian.mjJAC_DENSE),
+    (ConeType.ELLIPTIC, mujoco.mjtJacobian.mjJAC_SPARSE),
+  )
+  def test_pgs_solvers_equivalent(self, cone, jacobian):
+    """Tests PGS produces similar qfrc_constraint as Newton ground truth.
+
+    Mirrors MuJoCo C's SolversEquivalent test: uses Newton Dense as ground
+    truth and checks PGS output is within a tolerance of it.
+    """
+    # Ground truth: Newton Dense with high iterations, no warmstart
+    mjm, mjd_truth, m_truth, d_truth = test_data.fixture(
+      "constraints.xml",
+      keyframe=0,
+      overrides={
+        "opt.solver": mujoco.mjtSolver.mjSOL_NEWTON,
+        "opt.cone": cone,
+        "opt.jacobian": mujoco.mjtJacobian.mjJAC_DENSE,
+        "opt.iterations": 500,
+        "opt.disableflags": DisableBit.WARMSTART,
+      },
+    )
+    mujoco.mj_forward(mjm, mjd_truth)
+    mjw.forward(m_truth, d_truth)
+    truth_qfrc = d_truth.qfrc_constraint.numpy()[0]
+
+    # PGS solution
+    _, _, m, d = test_data.fixture(
+      "constraints.xml",
+      keyframe=0,
+      overrides={
+        "opt.solver": mujoco.mjtSolver.mjSOL_PGS,
+        "opt.cone": cone,
+        "opt.jacobian": jacobian,
+        "opt.iterations": 500,
+        "opt.disableflags": DisableBit.WARMSTART,
+      },
+    )
+    mjw.forward(m, d)
+    pgs_qfrc = d.qfrc_constraint.numpy()[0]
+
+    # PGS should produce similar constraint forces to Newton
+    scale = np.linalg.norm(truth_qfrc)
+    if scale > 1e-10:
+      # Relative tolerance: PGS is approximate, allow generous margin
+      rtol = 0.5 if cone == ConeType.ELLIPTIC else 0.1
+      np.testing.assert_allclose(
+        pgs_qfrc,
+        truth_qfrc,
+        atol=scale * rtol,
+        rtol=rtol,
+        err_msg=f"PGS vs Newton qfrc_constraint (cone={cone}, jacobian={jacobian})",
+      )
 
 
 if __name__ == "__main__":

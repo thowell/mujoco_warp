@@ -390,13 +390,14 @@ class SolverType(enum.IntEnum):
   """Constraint solver algorithm.
 
   Attributes:
+    PGS: Projected Gauss-Seidel (dual)
     CG: Conjugate gradient (primal)
     NEWTON: Newton (primal)
   """
 
+  PGS = mujoco.mjtSolver.mjSOL_PGS
   CG = mujoco.mjtSolver.mjSOL_CG
   NEWTON = mujoco.mjtSolver.mjSOL_NEWTON
-  # unsupported: PGS
 
 
 class ConstraintState(enum.IntEnum):
@@ -753,6 +754,9 @@ class Option:
       zeros out the contacts at each step)
     contact_sensor_maxmatch: max number of contacts considered by contact sensor matching criteria
                              contacts matched after this value is exceded will be ignored
+    pgs_max_colors: maximum number of colors for constraint graph coloring in PGS solver
+    pgs_mode: PGS iteration mode (0 = Gauss-Seidel, 1 = Jacobi)
+    pgs_sor_omega: SOR relaxation parameter for Jacobi PGS (0 < omega <= 1.0, default 0.5)
   """
 
   timestep: array("*", float)
@@ -783,6 +787,9 @@ class Option:
   graph_conditional: bool
   run_collision_detection: bool
   contact_sensor_maxmatch: int
+  pgs_max_colors: int
+  pgs_mode: int
+  pgs_sor_omega: float
 
 
 @dataclasses.dataclass
