@@ -2848,7 +2848,7 @@ def _cholesky_factorize_solve(m: types.Model, d: types.Data, ctx: SolverContext,
       outputs=[ctx.h],
     )
 
-    if skip_unchanged:
+    if skip_unchanged and wp.get_device().is_cuda:
       wp.launch_tiled(
         update_gradient_cholesky_blocked_skip_unchanged(types.TILE_SIZE_JTDAJ_DENSE, m.nv_pad),
         dim=d.nworld,
