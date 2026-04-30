@@ -604,12 +604,13 @@ def _flex_elasticity(
   flex_elemadr: wp.array[int],
   flex_elemnum: wp.array[int],
   flex_elemdataadr: wp.array[int],
+  flex_stiffnessadr: wp.array[int],
   flex_elemedgeadr: wp.array[int],
   flex_vertbodyid: wp.array[int],
   flex_elem: wp.array[int],
   flex_elemedge: wp.array[int],
   flexedge_length0: wp.array[float],
-  flex_stiffness: wp.array2d[float],
+  flex_stiffness: wp.array[float],
   flex_damping: wp.array[float],
   # Data in:
   flexvert_xpos_in: wp.array2d[wp.vec3],
@@ -669,11 +670,13 @@ def _flex_elasticity(
     elongation[e] = deformed * deformed - reference * reference + (deformed * deformed - previous * previous) * kD
 
   metric = wp.matrix(0.0, shape=(6, 6))
+  stiffness_size = nedge * (nedge + 1) / 2
+  stiffness_adr = flex_stiffnessadr[f] + local_elemid * stiffness_size
   id = int(0)
   for ed1 in range(nedge):
     for ed2 in range(ed1, nedge):
-      metric[ed1, ed2] = flex_stiffness[elemid, id]
-      metric[ed2, ed1] = flex_stiffness[elemid, id]
+      metric[ed1, ed2] = flex_stiffness[stiffness_adr + id]
+      metric[ed2, ed1] = flex_stiffness[stiffness_adr + id]
       id += 1
 
   force = wp.matrix(0.0, shape=(6, 3))
@@ -827,6 +830,7 @@ def passive(m: Model, d: Data):
         m.flex_elemadr,
         m.flex_elemnum,
         m.flex_elemdataadr,
+        m.flex_stiffnessadr,
         m.flex_elemedgeadr,
         m.flex_vertbodyid,
         m.flex_elem,
