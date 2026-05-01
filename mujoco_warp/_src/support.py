@@ -862,3 +862,28 @@ def set_state(m: Model, d: Data, state: wp.array2d[float], sig: int, active: Opt
       d.mocap_quat,
     ],
   )
+
+
+@wp.func
+def _phi(s: float, i: int) -> float:
+  """1D trilinear basis function (order=1 only).
+
+  phi(s, 0) = 1 - s
+  phi(s, 1) = s
+  """
+  if i == 0:
+    return 1.0 - s
+  return s
+
+
+@wp.func
+def eval_basis_trilinear(local: wp.vec3, node_idx: int) -> float:
+  """Evaluate trilinear basis function for node_idx at local coords [0,1]^3.
+
+  For order=1 (trilinear), node_idx encodes (i,j,k) via bits:
+    k = node_idx & 1, j = (node_idx >> 1) & 1, i = (node_idx >> 2) & 1
+  """
+  k = node_idx & 1
+  j = (node_idx >> 1) & 1
+  i = (node_idx >> 2) & 1
+  return _phi(local[0], i) * _phi(local[1], j) * _phi(local[2], k)

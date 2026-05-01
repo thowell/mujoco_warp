@@ -236,6 +236,19 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
   m.is_sparse = is_sparse(mjm)
   m.has_fluid = mjm.opt.wind.any() or mjm.opt.density > 0 or mjm.opt.viscosity > 0
 
+  # Compute total interpolated (non-strain) cells for passive interp kernel
+  nflexintcell = 0
+  if mjm.nflex > 0 and hasattr(mjm, "flex_interp"):
+    for fi in range(mjm.nflex):
+      order = abs(int(mjm.flex_interp[fi]))
+      if order == 0:
+        continue
+      if hasattr(mjm, "flex_edgeequality") and mjm.flex_edgeequality[fi] == 3:
+        continue
+      cx, cy, cz = mjm.flex_cellnum[fi]
+      nflexintcell += int(cx) * int(cy) * int(cz)
+  m.nflexintcell = nflexintcell
+
   m.max_ten_J_rownnz = int(mjm.ten_J_rownnz.max()) if mjm.ntendon else 0
 
   # body ids grouped by tree level (depth-based traversal)
@@ -469,6 +482,7 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
   m.eq_jnt_adr = np.nonzero(mjm.eq_type == types.EqType.JOINT)[0]
   m.eq_ten_adr = np.nonzero(mjm.eq_type == types.EqType.TENDON)[0]
   m.eq_flex_adr = np.nonzero(mjm.eq_type == types.EqType.FLEX)[0]
+  m.eq_flexstrain_adr = np.nonzero(mjm.eq_type == types.EqType.FLEXSTRAIN)[0]
 
   # fixed tendon
   m.tendon_jnt_adr, m.wrap_jnt_adr = [], []
@@ -788,6 +802,15 @@ def _default_njmax_nnz(mjm: mujoco.MjModel, nconmax: int, njmax: int) -> int:
         for e in range(edge_count):
           total_nnz += mjm.flexedge_J_rownnz[edge_start + e]
 
+    elif eq_type == mujoco.mjtEq.mjEQ_FLEXSTRAIN:
+      # strain constraints: each cell produces neig rows, each dense (nv)
+      obj1id = mjm.eq_obj1id[i]
+      if obj1id < mjm.nflex and hasattr(mjm, "flex_stiffnessadr"):
+        # estimate neig from stiffness data
+        adr = mjm.flex_stiffnessadr[obj1id]
+        neig = int(mjm.flex_stiffness[adr])
+        total_nnz += neig * mjm.nv
+
   # friction constraints
   total_nnz += (mjm.dof_frictionloss > 0).sum()
   for i in range(mjm.ntendon):
@@ -950,6 +973,19 @@ def make_data(
   sizes["nworld"] = nworld
   sizes["naconmax"] = naconmax
   sizes["njmax"] = njmax
+
+  # Compute total interpolated (non-strain) cells for passive interp kernel
+  nflexintcell = 0
+  if mjm.nflex > 0 and hasattr(mjm, "flex_interp"):
+    for fi in range(mjm.nflex):
+      order = abs(int(mjm.flex_interp[fi]))
+      if order == 0:
+        continue
+      if hasattr(mjm, "flex_edgeequality") and mjm.flex_edgeequality[fi] == 3:
+        continue
+      cx, cy, cz = mjm.flex_cellnum[fi]
+      nflexintcell += int(cx) * int(cy) * int(cz)
+  sizes["nflexintcell"] = nflexintcell
 
   if njmax_nnz is None:
     if is_sparse(mjm):
@@ -1624,6 +1660,7 @@ def reset_data(m: types.Model, d: types.Data, reset: Optional[wp.array] = None):
     contact_geom_out: wp.array[wp.vec2i],
     contact_flex_out: wp.array[wp.vec2i],
     contact_vert_out: wp.array[wp.vec2i],
+    contact_elem_out: wp.array[wp.vec2i],
     contact_efc_address_out: wp.array2d[int],
     contact_worldid_out: wp.array[int],
     contact_type_out: wp.array[int],
@@ -1652,6 +1689,7 @@ def reset_data(m: types.Model, d: types.Data, reset: Optional[wp.array] = None):
     contact_geom_out[conid] = wp.vec2i(0, 0)
     contact_flex_out[conid] = wp.vec2i(0, 0)
     contact_vert_out[conid] = wp.vec2i(0, 0)
+    contact_elem_out[conid] = wp.vec2i(0, 0)
     for i in range(nefcaddress):
       contact_efc_address_out[conid, i] = -1
     contact_worldid_out[conid] = 0
@@ -1694,6 +1732,7 @@ def reset_data(m: types.Model, d: types.Data, reset: Optional[wp.array] = None):
       d.contact.geom,
       d.contact.flex,
       d.contact.vert,
+      d.contact.elem,
       d.contact.efc_address,
       d.contact.worldid,
       d.contact.type,

@@ -17,6 +17,7 @@ import warp as wp
 
 from mujoco_warp._src import collision_primitive_core
 from mujoco_warp._src.math import make_frame
+from mujoco_warp._src.types import MJ_MAXCONPAIR
 from mujoco_warp._src.types import MJ_MAXVAL
 from mujoco_warp._src.types import MJ_MINMU
 from mujoco_warp._src.types import MJ_MINVAL
@@ -132,6 +133,7 @@ def _write_flex_contact(
   geom: int,
   flexid: int,
   vertid: int,
+  elemid: int,
   worldid: int,
   # Data out:
   contact_dist_out: wp.array[float],
@@ -146,6 +148,7 @@ def _write_flex_contact(
   contact_geom_out: wp.array[wp.vec2i],
   contact_flex_out: wp.array[wp.vec2i],
   contact_vert_out: wp.array[wp.vec2i],
+  contact_elem_out: wp.array[wp.vec2i],
   contact_worldid_out: wp.array[int],
   contact_type_out: wp.array[int],
   contact_geomcollisionid_out: wp.array[int],
@@ -170,6 +173,7 @@ def _write_flex_contact(
   contact_geom_out[id_] = wp.vec2i(geom, -1)
   contact_flex_out[id_] = wp.vec2i(-1, flexid)
   contact_vert_out[id_] = wp.vec2i(-1, vertid)
+  contact_elem_out[id_] = wp.vec2i(-1, elemid)
   contact_worldid_out[id_] = worldid
   contact_type_out[id_] = 1
   contact_geomcollisionid_out[id_] = 0
@@ -196,6 +200,7 @@ def _collide_geom_triangle(
   geomid: int,
   flexid: int,
   vertex_id: int,
+  elemid: int,
   worldid: int,
   # Data out:
   contact_dist_out: wp.array[float],
@@ -210,6 +215,7 @@ def _collide_geom_triangle(
   contact_geom_out: wp.array[wp.vec2i],
   contact_flex_out: wp.array[wp.vec2i],
   contact_vert_out: wp.array[wp.vec2i],
+  contact_elem_out: wp.array[wp.vec2i],
   contact_worldid_out: wp.array[int],
   contact_type_out: wp.array[int],
   contact_geomcollisionid_out: wp.array[int],
@@ -232,6 +238,7 @@ def _collide_geom_triangle(
         geomid,
         flexid,
         vertex_id,
+        elemid,
         worldid,
         contact_dist_out,
         contact_pos_out,
@@ -245,6 +252,7 @@ def _collide_geom_triangle(
         contact_geom_out,
         contact_flex_out,
         contact_vert_out,
+        contact_elem_out,
         contact_worldid_out,
         contact_type_out,
         contact_geomcollisionid_out,
@@ -291,6 +299,7 @@ def _collide_geom_triangle(
       geomid,
       flexid,
       vertex_id,
+      elemid,
       worldid,
       contact_dist_out,
       contact_pos_out,
@@ -304,6 +313,7 @@ def _collide_geom_triangle(
       contact_geom_out,
       contact_flex_out,
       contact_vert_out,
+      contact_elem_out,
       contact_worldid_out,
       contact_type_out,
       contact_geomcollisionid_out,
@@ -325,6 +335,7 @@ def _collide_geom_triangle(
       geomid,
       flexid,
       vertex_id,
+      elemid,
       worldid,
       contact_dist_out,
       contact_pos_out,
@@ -338,6 +349,7 @@ def _collide_geom_triangle(
       contact_geom_out,
       contact_flex_out,
       contact_vert_out,
+      contact_elem_out,
       contact_worldid_out,
       contact_type_out,
       contact_geomcollisionid_out,
@@ -389,6 +401,7 @@ def _flex_plane_narrowphase(
   contact_geom_out: wp.array[wp.vec2i],
   contact_flex_out: wp.array[wp.vec2i],
   contact_vert_out: wp.array[wp.vec2i],
+  contact_elem_out: wp.array[wp.vec2i],
   contact_worldid_out: wp.array[int],
   contact_type_out: wp.array[int],
   contact_geomcollisionid_out: wp.array[int],
@@ -452,6 +465,7 @@ def _flex_plane_narrowphase(
         geomid,
         flexid,
         local_vertid,
+        -1,
         worldid,
         contact_dist_out,
         contact_pos_out,
@@ -465,6 +479,7 @@ def _flex_plane_narrowphase(
         contact_geom_out,
         contact_flex_out,
         contact_vert_out,
+        contact_elem_out,
         contact_worldid_out,
         contact_type_out,
         contact_geomcollisionid_out,
@@ -525,6 +540,7 @@ def _flex_narrowphase_dim2(
   contact_geom_out: wp.array[wp.vec2i],
   contact_flex_out: wp.array[wp.vec2i],
   contact_vert_out: wp.array[wp.vec2i],
+  contact_elem_out: wp.array[wp.vec2i],
   contact_worldid_out: wp.array[int],
   contact_type_out: wp.array[int],
   contact_geomcollisionid_out: wp.array[int],
@@ -617,7 +633,8 @@ def _flex_narrowphase_dim2(
       solimp,
       geomid,
       flexid,
-      v0_local,
+      -1,
+      elemid,
       worldid,
       contact_dist_out,
       contact_pos_out,
@@ -631,6 +648,7 @@ def _flex_narrowphase_dim2(
       contact_geom_out,
       contact_flex_out,
       contact_vert_out,
+      contact_elem_out,
       contact_worldid_out,
       contact_type_out,
       contact_geomcollisionid_out,
@@ -667,9 +685,10 @@ def _flex_narrowphase_dim3(
   flex_gap: wp.array[float],
   flex_dim: wp.array[int],
   flex_vertadr: wp.array[int],
-  flex_shellnum: wp.array[int],
-  flex_shelldataadr: wp.array[int],
-  flex_shell: wp.array[int],
+  flex_elemadr: wp.array[int],
+  flex_elemnum: wp.array[int],
+  flex_elemdataadr: wp.array[int],
+  flex_elem: wp.array[int],
   flex_radius: wp.array[float],
   # Data in:
   geom_xpos_in: wp.array2d[wp.vec3],
@@ -690,23 +709,24 @@ def _flex_narrowphase_dim3(
   contact_geom_out: wp.array[wp.vec2i],
   contact_flex_out: wp.array[wp.vec2i],
   contact_vert_out: wp.array[wp.vec2i],
+  contact_elem_out: wp.array[wp.vec2i],
   contact_worldid_out: wp.array[int],
   contact_type_out: wp.array[int],
   contact_geomcollisionid_out: wp.array[int],
   nacon_out: wp.array[int],
 ):
-  worldid, shellid = wp.tid()
+  worldid, elemid = wp.tid()
 
+  # Find which flex owns this element
   flexid = int(-1)
-  shell_offset = int(0)
   for i in range(nflex):
     if flex_dim[i] != 3:
       continue
-    shell_num = flex_shellnum[i]
-    if shellid >= shell_offset and shellid < shell_offset + shell_num:
+    elem_adr = flex_elemadr[i]
+    elem_num = flex_elemnum[i]
+    if elemid >= elem_adr and elemid < elem_adr + elem_num:
       flexid = i
       break
-    shell_offset += shell_num
 
   if flexid < 0:
     return
@@ -715,17 +735,19 @@ def _flex_narrowphase_dim3(
   tri_radius = flex_radius[flexid]
   tri_margin = flex_margin[flexid]
 
-  shell_adr = flex_shelldataadr[flexid]
-  local_shellid = shellid - shell_offset
-  shell_data_idx = shell_adr + local_shellid * 3
+  # Extract 4 tet vertex indices (dim+1 = 4 for dim=3)
+  local_elemid = elemid - flex_elemadr[flexid]
+  edata_idx = flex_elemdataadr[flexid] + local_elemid * 4
+  v0 = flex_elem[edata_idx]
+  v1 = flex_elem[edata_idx + 1]
+  v2 = flex_elem[edata_idx + 2]
+  v3 = flex_elem[edata_idx + 3]
 
-  v0_local = flex_shell[shell_data_idx]
-  v1_local = flex_shell[shell_data_idx + 1]
-  v2_local = flex_shell[shell_data_idx + 2]
-
-  t1 = flexvert_xpos_in[worldid, vert_adr + v0_local]
-  t2 = flexvert_xpos_in[worldid, vert_adr + v1_local]
-  t3 = flexvert_xpos_in[worldid, vert_adr + v2_local]
+  # Fetch world-space vertex positions
+  p0 = flexvert_xpos_in[worldid, vert_adr + v0]
+  p1 = flexvert_xpos_in[worldid, vert_adr + v1]
+  p2 = flexvert_xpos_in[worldid, vert_adr + v2]
+  p3 = flexvert_xpos_in[worldid, vert_adr + v3]
 
   # TODO: Add a broadphase
   for geomid in range(ngeom):
@@ -769,42 +791,193 @@ def _flex_narrowphase_dim3(
       flex_gap[flexid],
     )
 
-    _collide_geom_triangle(
-      naconmax_in,
-      gtype,
-      geom_pos,
-      geom_rot,
-      geom_size_val,
-      t1,
-      t2,
-      t3,
-      tri_radius,
-      margin,
-      condim,
-      friction,
-      solref,
-      solimp,
-      geomid,
-      flexid,
-      v0_local,
-      worldid,
-      contact_dist_out,
-      contact_pos_out,
-      contact_frame_out,
-      contact_includemargin_out,
-      contact_friction_out,
-      contact_solref_out,
-      contact_solreffriction_out,
-      contact_solimp_out,
-      contact_dim_out,
-      contact_geom_out,
-      contact_flex_out,
-      contact_vert_out,
-      contact_worldid_out,
-      contact_type_out,
-      contact_geomcollisionid_out,
-      nacon_out,
-    )
+    # Test all 4 triangular faces of the tet against the geom.
+    # Face k is the triangle opposite vertex k:
+    #   Face 0: (v1, v2, v3)
+    #   Face 1: (v0, v2, v3)
+    #   Face 2: (v0, v1, v3)
+    #   Face 3: (v0, v1, v2)
+    for face in range(4):
+      if face == 0:
+        t1 = p1
+        t2 = p2
+        t3 = p3
+      elif face == 1:
+        t1 = p0
+        t2 = p2
+        t3 = p3
+      elif face == 2:
+        t1 = p0
+        t2 = p1
+        t3 = p3
+      else:
+        t1 = p0
+        t2 = p1
+        t3 = p2
+
+      _collide_geom_triangle(
+        naconmax_in,
+        gtype,
+        geom_pos,
+        geom_rot,
+        geom_size_val,
+        t1,
+        t2,
+        t3,
+        tri_radius,
+        margin,
+        condim,
+        friction,
+        solref,
+        solimp,
+        geomid,
+        flexid,
+        -1,
+        elemid,
+        worldid,
+        contact_dist_out,
+        contact_pos_out,
+        contact_frame_out,
+        contact_includemargin_out,
+        contact_friction_out,
+        contact_solref_out,
+        contact_solreffriction_out,
+        contact_solimp_out,
+        contact_dim_out,
+        contact_geom_out,
+        contact_flex_out,
+        contact_vert_out,
+        contact_elem_out,
+        contact_worldid_out,
+        contact_type_out,
+        contact_geomcollisionid_out,
+        nacon_out,
+      )
+
+
+# TODO(flex): improve parallelism, currently runs single-threaded per world
+@wp.kernel
+def _filter_flex_contacts(
+  # Data in:
+  contact_type_in: wp.array[int],
+  naconmax_in: int,
+  nacon_in: wp.array[int],
+  # In:
+  contact_pos_io: wp.array[wp.vec3],
+  contact_dist_io: wp.array[float],
+  contact_geom_io: wp.array[wp.vec2i],
+  contact_flex_io: wp.array[wp.vec2i],
+  # Data out:
+  contact_type_out: wp.array[int],
+):
+  """Filter flex contacts using greedy farthest-point selection.
+
+  For each (geom, flex) pair that has more than MJ_MAXCONPAIR contacts,
+  select the MJ_MAXCONPAIR most spatially diverse contacts (matching the
+  filterFlexContacts algorithm in MuJoCo C). Excluded contacts have their
+  type set to 0 so the constraint pipeline ignores them.
+  """
+  nacon = wp.min(nacon_in[0], naconmax_in)
+
+  # Iterate over all contacts to find (geom, flex) pair groups.
+  # Process each unique pair: for each contact i that is a flex contact
+  # and hasn't been processed yet, find all contacts with the same pair.
+  for i in range(nacon):
+    # Skip non-flex contacts or already-excluded contacts
+    if contact_flex_io[i][1] < 0:
+      continue
+    if contact_type_in[i] == 0:
+      continue
+
+    geom_id = contact_geom_io[i][0]
+    flex_id = contact_flex_io[i][1]
+
+    # Count contacts for this (geom, flex) pair
+    n = int(0)
+    for j in range(i, nacon):
+      if contact_type_in[j] == 0:
+        continue
+      if contact_geom_io[j][0] == geom_id and contact_flex_io[j][1] == flex_id:
+        n += 1
+
+    # If within limit, skip filtering for this pair
+    if n <= MJ_MAXCONPAIR:
+      continue
+
+    # Greedy farthest-point selection:
+    # 1. Find deepest penetrating contact as the first selection
+    best = int(-1)
+    bestdist = float(-1.0)
+    for j in range(i, nacon):
+      if contact_type_in[j] == 0:
+        continue
+      if contact_geom_io[j][0] == geom_id and contact_flex_io[j][1] == flex_id:
+        neg_dist = -contact_dist_io[j]
+        if neg_dist > bestdist:
+          bestdist = neg_dist
+          best = j
+
+    # 2. Greedy selection loop
+    nselected = int(0)
+    while nselected < MJ_MAXCONPAIR and best >= 0:
+      # mark as selected using flag bit
+      contact_type_out[best] = contact_type_in[best] | int(0x40000000)
+      bestpos = contact_pos_io[best]
+
+      # Find the unselected contact that is farthest from all selected contacts
+      nextbest = int(-1)
+      nextbestdist = float(-1.0)
+      for j in range(i, nacon):
+        if contact_type_in[j] == 0:
+          continue
+        if contact_geom_io[j][0] != geom_id or contact_flex_io[j][1] != flex_id:
+          continue
+        # Skip already selected
+        if contact_type_out[j] & int(0x40000000):
+          continue
+
+        dx = contact_pos_io[j][0] - bestpos[0]
+        dy = contact_pos_io[j][1] - bestpos[1]
+        dz = contact_pos_io[j][2] - bestpos[2]
+        d2 = dx * dx + dy * dy + dz * dz
+
+        # O(n*k) approach: for each candidate, compute its minimum distance
+        # to ALL selected contacts.
+        min_d2 = d2
+        for k in range(i, nacon):
+          if contact_type_in[k] == 0:
+            continue
+          if contact_geom_io[k][0] != geom_id or contact_flex_io[k][1] != flex_id:
+            continue
+          if not (contact_type_out[k] & int(0x40000000)):
+            continue
+          # k is a selected contact
+          sx = contact_pos_io[j][0] - contact_pos_io[k][0]
+          sy = contact_pos_io[j][1] - contact_pos_io[k][1]
+          sz = contact_pos_io[j][2] - contact_pos_io[k][2]
+          sd2 = sx * sx + sy * sy + sz * sz
+          if sd2 < min_d2:
+            min_d2 = sd2
+
+        if min_d2 > nextbestdist:
+          nextbestdist = min_d2
+          nextbest = j
+
+      nselected += 1
+      best = nextbest
+
+    # 3. Exclude non-selected contacts for this pair
+    for j in range(i, nacon):
+      if contact_type_in[j] == 0:
+        continue
+      if contact_geom_io[j][0] != geom_id or contact_flex_io[j][1] != flex_id:
+        continue
+      if contact_type_out[j] & int(0x40000000):
+        # Clear the selection flag
+        contact_type_out[j] = contact_type_out[j] & ~int(0x40000000)
+      else:
+        # Not selected: exclude this contact
+        contact_type_out[j] = 0
 
 
 @event_scope
@@ -867,6 +1040,7 @@ def flex_narrowphase(m: Model, d: Data):
       d.contact.geom,
       d.contact.flex,
       d.contact.vert,
+      d.contact.elem,
       d.contact.worldid,
       d.contact.type,
       d.contact.geomcollisionid,
@@ -876,7 +1050,7 @@ def flex_narrowphase(m: Model, d: Data):
 
   wp.launch(
     _flex_narrowphase_dim3,
-    dim=(d.nworld, m.nflexshelldata // 3),
+    dim=(d.nworld, m.nflexelem),
     inputs=[
       m.ngeom,
       m.nflex,
@@ -904,9 +1078,10 @@ def flex_narrowphase(m: Model, d: Data):
       m.flex_gap,
       m.flex_dim,
       m.flex_vertadr,
-      m.flex_shellnum,
-      m.flex_shelldataadr,
-      m.flex_shell,
+      m.flex_elemadr,
+      m.flex_elemnum,
+      m.flex_elemdataadr,
+      m.flex_elem,
       m.flex_radius,
       d.geom_xpos,
       d.geom_xmat,
@@ -927,6 +1102,7 @@ def flex_narrowphase(m: Model, d: Data):
       d.contact.geom,
       d.contact.flex,
       d.contact.vert,
+      d.contact.elem,
       d.contact.worldid,
       d.contact.type,
       d.contact.geomcollisionid,
@@ -979,9 +1155,29 @@ def flex_narrowphase(m: Model, d: Data):
       d.contact.geom,
       d.contact.flex,
       d.contact.vert,
+      d.contact.elem,
       d.contact.worldid,
       d.contact.type,
       d.contact.geomcollisionid,
       d.nacon,
+    ],
+  )
+
+  # Filter flex contacts: limit contacts per (geom, flex) pair to
+  # MJ_MAXCONPAIR (matching filterFlexContacts in MuJoCo C)
+  wp.launch(
+    _filter_flex_contacts,
+    dim=d.nworld,
+    inputs=[
+      d.contact.type,
+      d.naconmax,
+      d.nacon,
+      d.contact.pos,
+      d.contact.dist,
+      d.contact.geom,
+      d.contact.flex,
+    ],
+    outputs=[
+      d.contact.type,
     ],
   )

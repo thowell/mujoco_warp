@@ -650,6 +650,11 @@ def _flex_elasticity(
 
   elem_data_adr = flex_elemdataadr[f] + local_elemid * (dim + 1)
   vbase = flex_vertadr[f]
+
+  # skip trilinear/interp elements (vertbodyid == -1, no simplex stiffness)
+  vert0_check = flex_elem[elem_data_adr]
+  if flex_vertbodyid[vbase + vert0_check] < 0:
+    return
   gradient = wp.matrix(0.0, shape=(6, 6))
   for e in range(nedge):
     vert0 = flex_elem[elem_data_adr + edges[e, 0]]
@@ -758,6 +763,293 @@ def _flex_bending(
       wp.atomic_add(qfrc_spring_out, worldid, body_dofadr[bodyid] + x, force[i, x])
 
 
+@wp.kernel
+def _flex_passive_interp(
+  # Model:
+  nflex: int,
+  body_rootid: wp.array[int],
+  body_dofnum: wp.array[int],
+  body_dofadr: wp.array[int],
+  flex_interp: wp.array[int],
+  flex_cellnum: wp.array[wp.vec3i],
+  flex_nodeadr: wp.array[int],
+  flex_stiffnessadr: wp.array[int],
+  flex_nodebodyid: wp.array[int],
+  flex_node: wp.array[wp.vec3],
+  flex_node0: wp.array[wp.vec3],
+  flex_stiffness: wp.array[float],
+  flex_damping: wp.array[float],
+  flex_edgeequality: wp.array[int],
+  flex_centered: wp.array[bool],
+  # Data in:
+  subtree_com_in: wp.array2d[wp.vec3],
+  cvel_in: wp.array2d[wp.spatial_vector],
+  flexnode_xpos_in: wp.array2d[wp.vec3],
+  # In:
+  dsbl_spring: bool,
+  dsbl_damper: bool,
+  # Data out:
+  qfrc_spring_out: wp.array2d[float],
+  qfrc_damper_out: wp.array2d[float],
+  # Out:
+  displ_scratch_out: wp.array3d[wp.vec3],
+  vel_corot_scratch_out: wp.array3d[wp.vec3],
+):
+  """Corotational passive forces for interpolated flex (trilinear/quadratic)."""
+  worldid, cellid = wp.tid()
+
+  # Find which flex and which cell this thread handles
+  cell_offset = int(0)
+  f = int(0)
+  ci = int(0)
+  cj = int(0)
+  ck = int(0)
+  found = int(0)
+  for fi in range(nflex):
+    if found:
+      break
+    order_fi = flex_interp[fi]
+    if order_fi < 0:
+      order_fi = -order_fi
+    if order_fi == 0:
+      continue
+    # skip flex with strain constraints (stiffness in constraint solver)
+    if flex_edgeequality[fi] == 3:
+      continue
+    cellnum_fi = flex_cellnum[fi]
+    cx_fi = cellnum_fi[0]
+    cy_fi = cellnum_fi[1]
+    cz_fi = cellnum_fi[2]
+    ncells_fi = cx_fi * cy_fi * cz_fi
+    if cellid < cell_offset + ncells_fi:
+      f = fi
+      local_cell = cellid - cell_offset
+      ci = local_cell / (cy_fi * cz_fi)
+      cj = (local_cell - ci * cy_fi * cz_fi) / cz_fi
+      ck = local_cell - ci * cy_fi * cz_fi - cj * cz_fi
+      found = 1
+    cell_offset += ncells_fi
+
+  if not found:
+    return
+
+  order = flex_interp[f]
+  if order < 0:
+    order = -order
+
+  npc = (order + 1) * (order + 1) * (order + 1)
+  ndof_cell = 3 * npc
+
+  cellnum = flex_cellnum[f]
+  cy = cellnum[1]
+  cz = cellnum[2]
+  nstart = flex_nodeadr[f]
+  ny_g = cy * order + 1
+  nz_g = cz * order + 1
+
+  # Cell stiffness matrix address
+  cell_idx = ci * cy * cz + cj * cz + ck
+  k_base = flex_stiffnessadr[f] + cell_idx * ndof_cell * ndof_cell
+
+  # Skip empty cells (zero stiffness)
+  if flex_stiffness[k_base] == 0.0:
+    return
+
+  # Compute corotational frame via polar decomposition at cell center
+  F = wp.mat33(0.0)
+  idx = int(0)
+  for li in range(order + 1):
+    for lj in range(order + 1):
+      for lk in range(order + 1):
+        if idx < npc:
+          gi = ci * order + li
+          gj = cj * order + lj
+          gk = ck * order + lk
+          gidx = gi * ny_g * nz_g + gj * nz_g + gk
+
+          node_pos = flexnode_xpos_in[worldid, nstart + gidx]
+
+          # Shape function derivatives at center (0.5)
+          if order == 1:
+            dphi_x = float(-1) if li == 0 else float(1)
+            dphi_y = float(-1) if lj == 0 else float(1)
+            dphi_z = float(-1) if lk == 0 else float(1)
+            phi_x = float(0.5)
+            phi_y = float(0.5)
+            phi_z = float(0.5)
+          else:
+            if li == 0:
+              dphi_x = -1.0
+            elif li == 1:
+              dphi_x = 0.0
+            else:
+              dphi_x = 1.0
+            if lj == 0:
+              dphi_y = -1.0
+            elif lj == 1:
+              dphi_y = 0.0
+            else:
+              dphi_y = 1.0
+            if lk == 0:
+              dphi_z = -1.0
+            elif lk == 1:
+              dphi_z = 0.0
+            else:
+              dphi_z = 1.0
+            phi_x = 0.5 if li == 0 or li == 2 else 1.0
+            phi_y = 0.5 if lj == 0 or lj == 2 else 1.0
+            phi_z = 0.5 if lk == 0 or lk == 2 else 1.0
+
+          grad_x = dphi_x * phi_y * phi_z
+          grad_y = phi_x * dphi_y * phi_z
+          grad_z = phi_x * phi_y * dphi_z
+
+          for r in range(3):
+            F[r, 0] += node_pos[r] * grad_x
+            F[r, 1] += node_pos[r] * grad_y
+            F[r, 2] += node_pos[r] * grad_z
+
+          idx += 1
+
+  # Extract rotation via Müller et al. (2016) quaternion iteration (mju_mat2Rot)
+  cell_quat = wp.quat(0.0, 0.0, 0.0, 1.0)  # identity quaternion (x,y,z,w)
+  for _iter in range(10):
+    rot = wp.quat_to_matrix(cell_quat)
+
+    # columns of rot and F
+    col1_rot = wp.vec3(rot[0, 0], rot[1, 0], rot[2, 0])
+    col2_rot = wp.vec3(rot[0, 1], rot[1, 1], rot[2, 1])
+    col3_rot = wp.vec3(rot[0, 2], rot[1, 2], rot[2, 2])
+    col1_mat = wp.vec3(F[0, 0], F[1, 0], F[2, 0])
+    col2_mat = wp.vec3(F[0, 1], F[1, 1], F[2, 1])
+    col3_mat = wp.vec3(F[0, 2], F[1, 2], F[2, 2])
+
+    # omega = (cross(r1, m1) + cross(r2, m2) + cross(r3, m3)) / (|dot| + eps)
+    omega = wp.cross(col1_rot, col1_mat) + wp.cross(col2_rot, col2_mat) + wp.cross(col3_rot, col3_mat)
+    denom = wp.abs(wp.dot(col1_rot, col1_mat) + wp.dot(col2_rot, col2_mat) + wp.dot(col3_rot, col3_mat)) + 1.0e-10
+    omega = omega / denom
+
+    w = wp.length(omega)
+    if w < 1.0e-6:
+      break
+
+    # normalize axis
+    axis = omega / w
+
+    # axis-angle to quaternion
+    half_w = 0.5 * w
+    qrot = wp.quat(
+      axis[0] * wp.sin(half_w),
+      axis[1] * wp.sin(half_w),
+      axis[2] * wp.sin(half_w),
+      wp.cos(half_w),
+    )
+    cell_quat = wp.normalize(qrot * cell_quat)
+
+  # mju_negQuat: conjugate (R⁻¹) — negate xyz, keep w
+  cell_quat_inv = wp.quat(-cell_quat[0], -cell_quat[1], -cell_quat[2], cell_quat[3])
+
+  # Pre-compute displacements and velocities in corotational frame
+  # (matches C: rotate all positions/velocities once, then K*u)
+  idx_j = int(0)
+  for li_j in range(order + 1):
+    for lj_j in range(order + 1):
+      for lk_j in range(order + 1):
+        if idx_j < npc:
+          gi_j = ci * order + li_j
+          gj_j = cj * order + lj_j
+          gk_j = ck * order + lk_j
+          gidx_j = gi_j * ny_g * nz_g + gj_j * nz_g + gk_j
+
+          xpos_j = flexnode_xpos_in[worldid, nstart + gidx_j]
+
+          if not dsbl_spring:
+            refpos_j = flex_node0[nstart + gidx_j]
+            xrot_j = wp.quat_rotate(cell_quat_inv, xpos_j)
+            displ_scratch_out[worldid, cellid, idx_j] = xrot_j - refpos_j
+
+          if not dsbl_damper:
+            bodyid_j = flex_nodebodyid[nstart + gidx_j]
+            cvel_j = cvel_in[worldid, bodyid_j]
+            omega_j = wp.spatial_top(cvel_j)
+            vcom_j = wp.spatial_bottom(cvel_j)
+            com_j = subtree_com_in[worldid, body_rootid[bodyid_j]]
+            r_j = xpos_j - com_j
+            vel_world_j = vcom_j + wp.cross(omega_j, r_j)
+            vel_corot_scratch_out[worldid, cellid, idx_j] = wp.quat_rotate(cell_quat_inv, vel_world_j)
+
+          idx_j += 1
+
+  # Compute K*displacement and K*velocity per output node, then scatter forces
+  idx_i = int(0)
+  for li_i in range(order + 1):
+    for lj_i in range(order + 1):
+      for lk_i in range(order + 1):
+        if idx_i < npc:
+          gi_i = ci * order + li_i
+          gj_i = cj * order + lj_i
+          gk_i = ck * order + lk_i
+          gidx_i = gi_i * ny_g * nz_g + gj_i * nz_g + gk_i
+          bodyid_i = flex_nodebodyid[nstart + gidx_i]
+
+          frc_spring = wp.vec3(0.0)
+          frc_damper = wp.vec3(0.0)
+
+          for comp_i in range(3):
+            row = idx_i * 3 + comp_i
+            val_spring = float(0.0)
+            val_damper = float(0.0)
+
+            for idx_j in range(npc):
+              for comp_j in range(3):
+                col = idx_j * 3 + comp_j
+                K_ij = flex_stiffness[k_base + row * ndof_cell + col]
+
+                if not dsbl_spring:
+                  val_spring += K_ij * displ_scratch_out[worldid, cellid, idx_j][comp_j]
+
+                if not dsbl_damper:
+                  val_damper += K_ij * vel_corot_scratch_out[worldid, cellid, idx_j][comp_j]
+
+            frc_spring[comp_i] = val_spring
+            frc_damper[comp_i] = val_damper
+
+          # Rotate forces back to world frame (R)
+          frc_spring_world = wp.quat_rotate(cell_quat, frc_spring)
+          frc_damper_world = wp.quat_rotate(cell_quat, frc_damper)
+
+          # Scale damper force by damping coefficient
+          frc_damper_world = frc_damper_world * flex_damping[f]
+
+          # Apply forces to body DOFs (fast path: nodes at body origin)
+          dofnum_i = body_dofnum[bodyid_i]
+          dofadr_i = body_dofadr[bodyid_i]
+          if dofnum_i > 0:
+            centered = flex_centered[f]
+            node_local = flex_node[nstart + gidx_i]
+            at_origin = node_local[0] == 0.0 and node_local[1] == 0.0 and node_local[2] == 0.0
+
+            if centered or at_origin:
+              for x in range(3):
+                if x < dofnum_i:
+                  if not dsbl_spring:
+                    wp.atomic_add(
+                      qfrc_spring_out,
+                      worldid,
+                      dofadr_i + x,
+                      frc_spring_world[x],
+                    )
+                  if not dsbl_damper:
+                    wp.atomic_add(
+                      qfrc_damper_out,
+                      worldid,
+                      dofadr_i + x,
+                      frc_damper_world[x],
+                    )
+
+          idx_i += 1
+
+
 @event_scope
 def passive(m: Model, d: Data):
   """Adds all passive forces."""
@@ -862,6 +1154,43 @@ def passive(m: Model, d: Data):
         d.flexvert_xpos,
       ],
       outputs=[d.qfrc_spring],
+    )
+
+  # Launch passive interp kernel for interpolated flex (trilinear/quadratic)
+  if m.nflex and m.nflexintcell > 0:
+    displ_scratch = wp.empty((d.nworld, m.nflexintcell, 27), dtype=wp.vec3)
+    vel_corot_scratch = wp.empty((d.nworld, m.nflexintcell, 27), dtype=wp.vec3)
+    wp.launch(
+      _flex_passive_interp,
+      dim=(d.nworld, m.nflexintcell),
+      inputs=[
+        m.nflex,
+        m.body_rootid,
+        m.body_dofnum,
+        m.body_dofadr,
+        m.flex_interp,
+        m.flex_cellnum,
+        m.flex_nodeadr,
+        m.flex_stiffnessadr,
+        m.flex_nodebodyid,
+        m.flex_node,
+        m.flex_node0,
+        m.flex_stiffness,
+        m.flex_damping,
+        m.flex_edgeequality,
+        m.flex_centered,
+        d.subtree_com,
+        d.cvel,
+        d.flexnode_xpos,
+        dsbl_spring,
+        dsbl_damper,
+      ],
+      outputs=[
+        d.qfrc_spring,
+        d.qfrc_damper,
+        displ_scratch,
+        vel_corot_scratch,
+      ],
     )
 
   gravcomp = m.ngravcomp and not (m.opt.disableflags & DisableBit.GRAVITY)

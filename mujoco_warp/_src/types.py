@@ -576,6 +576,7 @@ class EqType(enum.IntEnum):
     WELD: fix relative position and orientation of two bodies
     TENDON: couple the lengths of two tendons with cubic
     FLEX: couple the edge lengths of a flex
+    FLEXSTRAIN: strain constraint for interpolated flex
   """
 
   CONNECT = mujoco.mjtEq.mjEQ_CONNECT
@@ -583,6 +584,7 @@ class EqType(enum.IntEnum):
   JOINT = mujoco.mjtEq.mjEQ_JOINT
   TENDON = mujoco.mjtEq.mjEQ_TENDON
   FLEX = mujoco.mjtEq.mjEQ_FLEX
+  FLEXSTRAIN = mujoco.mjtEq.mjEQ_FLEXSTRAIN
   # unsupported: DISTANCE
 
 
@@ -863,6 +865,7 @@ class Model:
     ncam: number of cameras
     nlight: number of lights
     nflex: number of flexes
+    nflexnode: number of nodes in all flexes
     nflexvert: number of vertices in all flexes
     nflexedge: number of edges in all flexes
     nflexelem: number of elements in all flexes
@@ -1016,6 +1019,10 @@ class Model:
     flex_margin: detect contact if dist<margin               (nflex,)
     flex_gap: include in solver if dist<margin-gap           (nflex,)
     flex_dim: 1: lines, 2: triangles, 3: tetrahedra          (nflex,)
+    flex_interp: interpolation order (0: vertex, 1+: nodes)  (nflex,)
+    flex_cellnum: cell count per dimension                   (nflex, 3)
+    flex_nodeadr: first node address                         (nflex,)
+    flex_nodenum: number of nodes                            (nflex,)
     flex_vertadr: first vertex address                       (nflex,)
     flex_vertnum: number of vertices                         (nflex,)
     flex_edgeadr: first edge address                         (nflex,)
@@ -1023,10 +1030,11 @@ class Model:
     flex_elemadr: first element address                      (nflex,)
     flex_elemnum: number of elements                         (nflex,)
     flex_elemdataadr: first element vertex id address        (nflex,)
-    flex_stiffnessadr: stiffness matrix address               (nflex,)
+    flex_stiffnessadr: stiffness matrix address              (nflex,)
     flex_elemedgeadr: first element edge id address          (nflex,)
     flex_shellnum: number of shells                          (nflex,)
     flex_shelldataadr: first shell data address              (nflex,)
+    flex_nodebodyid: node body ids                           (nflexnode,)
     flex_vertbodyid: vertex body ids                         (nflexvert,)
     flex_edge: edge vertex ids (2 per edge)                  (nflexedge, 2)
     flex_edgeflap: adjacent vertex ids (dim=2 only)          (nflexedge, 2)
@@ -1034,12 +1042,17 @@ class Model:
     flex_elemedge: element edge ids                          (nflexelemedge,)
     flex_shell: shell fragment vertex ids (dim per frag)     (nflexshelldata,)
     flex_vert: vertex local positions                        (nflexvert, 3)
+    flex_vert0: reference vertex positions in qpos0          (nflexvert, 3)
+    flex_node: node local positions                          (nflexnode, 3)
+    flex_node0: reference node positions in qpos0            (nflexnode, 3)
     flexedge_length0: edge lengths in qpos0                  (nflexedge,)
     flexedge_invweight0: inv. inertia for the edge           (nflexedge,)
     flex_radius: radius around primitive element             (nflex,)
     flex_stiffness: finite element stiffness matrix          (nflexstiffness,)
     flex_bending: bending stiffness                          (nflexedge, 17)
     flex_damping: Rayleigh's damping coefficient             (nflex,)
+
+    flex_edgeequality: edge equality type (0:none,1:edge,2:vert,3:strain) (nflex,)
     flex_centered: flex vertices are centered at body origin (nflex,)
     flexedge_J_rownnz: number of nonzeros in Jacobian row    (nflexedge,)
     flexedge_J_rowadr: row start address in colind array     (nflexedge,)
@@ -1168,6 +1181,7 @@ class Model:
     nrangefinder: number of rangefinder sensors
     nmaxcondim: maximum condim across geoms, pairs, and flexes
     nmaxpyramid: maximum number of pyramid directions
+    nflexintcell: total interp cells (non-strain) for passive forces
     nmaxpolygon: maximum number of verts per polygon
     nmaxmeshdeg: maximum number of polygons per vert
     is_sparse: whether to use sparse representations
@@ -1199,6 +1213,7 @@ class Model:
     eq_jnt_adr: eq_* addresses of type `JOINT`
     eq_ten_adr: eq_* addresses of type `TENDON`
     eq_flex_adr: eq * addresses of type `FLEX
+    eq_flexstrain_adr: eq_* addresses of type `FLEXSTRAIN`
     tendon_jnt_adr: joint tendon address
     tendon_site_pair_adr: site pair tendon address
     tendon_geom_adr: geom tendon address
@@ -1264,6 +1279,7 @@ class Model:
   ncam: int
   nlight: int
   nflex: int
+  nflexnode: int
   nflexvert: int
   nflexedge: int
   nflexelem: int
@@ -1417,6 +1433,10 @@ class Model:
   flex_margin: array("nflex", float)
   flex_gap: array("nflex", float)
   flex_dim: array("nflex", int)
+  flex_interp: array("nflex", int)
+  flex_cellnum: array("nflex", wp.vec3i)
+  flex_nodeadr: array("nflex", int)
+  flex_nodenum: array("nflex", int)
   flex_vertadr: array("nflex", int)
   flex_vertnum: array("nflex", int)
   flex_edgeadr: array("nflex", int)
@@ -1428,6 +1448,7 @@ class Model:
   flex_elemedgeadr: array("nflex", int)
   flex_shellnum: array("nflex", int)
   flex_shelldataadr: array("nflex", int)
+  flex_nodebodyid: array("nflexnode", int)
   flex_vertbodyid: array("nflexvert", int)
   flex_edge: array("nflexedge", wp.vec2i)
   flex_edgeflap: array("nflexedge", wp.vec2i)
@@ -1435,12 +1456,16 @@ class Model:
   flex_elemedge: array("nflexelemedge", int)
   flex_shell: array("nflexshelldata", int)
   flex_vert: array("nflexvert", wp.vec3)
+  flex_vert0: array("nflexvert", wp.vec3)
+  flex_node: array("nflexnode", wp.vec3)
+  flex_node0: array("nflexnode", wp.vec3)
   flexedge_length0: array("nflexedge", float)
   flexedge_invweight0: array("nflexedge", float)
   flex_radius: array("nflex", float)
   flex_stiffness: array("nflexstiffness", float)
   flex_bending: array("nflexedge", 17, float)
   flex_damping: array("nflex", float)
+  flex_edgeequality: array("nflex", int)
   flex_centered: array("nflex", bool)
   flexedge_J_rownnz: array("nflexedge", int)
   flexedge_J_rowadr: array("nflexedge", int)
@@ -1567,6 +1592,7 @@ class Model:
   nrangefinder: int
   nmaxcondim: int
   nmaxpyramid: int
+  nflexintcell: int  # total interp cells (non-strain) for passive forces
   nmaxpolygon: int
   nmaxmeshdeg: int
   is_sparse: bool
@@ -1594,6 +1620,7 @@ class Model:
   eq_jnt_adr: wp.array[int]
   eq_ten_adr: wp.array[int]
   eq_flex_adr: wp.array[int]
+  eq_flexstrain_adr: wp.array[int]
   tendon_jnt_adr: wp.array[int]
   tendon_site_pair_adr: wp.array[int]
   tendon_geom_adr: wp.array[int]
@@ -1666,6 +1693,7 @@ class Contact:
     solimp: constraint solver impedance                              (naconmax, 5)
     dim: contact space dimensionality: 1, 3, 4 or 6                  (naconmax,)
     geom: geom ids; -1 for flex                                      (naconmax, 2)
+    elem: element ids; -1 for geom or flex vertex                    (naconmax, 2)
     efc_address: address in efc; -1: not included                    (naconmax, nmaxpyramid)
     worldid: world id                                                (naconmax,)
     type: ContactType                                                (naconmax,)
@@ -1686,6 +1714,7 @@ class Contact:
   geom: array("naconmax", wp.vec2i)
   flex: array("naconmax", wp.vec2i)
   vert: array("naconmax", wp.vec2i)
+  elem: array("naconmax", wp.vec2i)
   efc_address: array("naconmax", "nmaxpyramid", int)
   worldid: array("naconmax", int)
   type: array("naconmax", int)
@@ -1839,6 +1868,7 @@ class Data:
     njmax_nnz: number of non-zeros in constraint Jacobian
     nacon: number of detected contacts (across all worlds)      (1,)
     ncollision: collision count from broadphase                 (1,)
+    flexnode_xpos: cartesian flex node positions                (nworld, nflexnode, 3)
   """
 
   solver_niter: array("nworld", int)
@@ -1933,6 +1963,7 @@ class Data:
   njmax_nnz: int
   nacon: array(1, int)
   ncollision: array(1, int)
+  flexnode_xpos: array("nworld", "nflexnode", wp.vec3)
 
 
 @dataclasses.dataclass
