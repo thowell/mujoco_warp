@@ -660,6 +660,14 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
   m.flexedge_J_rowadr = mjm.flexedge_J_rowadr
   m.flexedge_J_colind = mjm.flexedge_J_colind.reshape(-1)
 
+  # flex_bendingadr backward compat: flatten old (nflexedge, 17) to 1D
+  if not check_version("mujoco>=3.8.1.dev909088123"):
+    m.flex_bendingadr = (
+      np.array([mjm.flex_edgeadr[i] * 17 for i in range(mjm.nflex)], dtype=int) if mjm.nflex else np.zeros(0, dtype=int)
+    )
+    m.flex_bending = mjm.flex_bending.ravel()
+    m.nflexbending = len(m.flex_bending)
+
   # place m on device
   sizes = dict({"*": 1}, **{f.name: getattr(m, f.name) for f in dataclasses.fields(types.Model) if f.type is int})
   for f in dataclasses.fields(types.Model):

@@ -868,6 +868,7 @@ class Model:
     nflexelem: number of elements in all flexes
     nflexelemdata: number of element vertex ids in all flexes
     nflexstiffness: number of stiffness parameters in all flexes
+    nflexbending: number of bending parameters in all flexes
     nflexelemedge: number of element edge ids in all flexes
     nflexshelldata: number of shell fragment vertex ids in all flexes
     nJfe: number of non-zeros in sparse flexedge Jacobian
@@ -1025,6 +1026,7 @@ class Model:
     flex_elemdataadr: first element vertex id address        (nflex,)
     flex_stiffnessadr: stiffness matrix address               (nflex,)
     flex_elemedgeadr: first element edge id address          (nflex,)
+    flex_bendingadr: first bending data address              (nflex,)
     flex_shellnum: number of shells                          (nflex,)
     flex_shelldataadr: first shell data address              (nflex,)
     flex_vertbodyid: vertex body ids                         (nflexvert,)
@@ -1038,7 +1040,7 @@ class Model:
     flexedge_invweight0: inv. inertia for the edge           (nflexedge,)
     flex_radius: radius around primitive element             (nflex,)
     flex_stiffness: finite element stiffness matrix          (nflexstiffness,)
-    flex_bending: bending stiffness                          (nflexedge, 17)
+    flex_bending: bending stiffness                          (nflexbending,)
     flex_damping: Rayleigh's damping coefficient             (nflex,)
     flex_centered: flex vertices are centered at body origin (nflex,)
     flexedge_J_rownnz: number of nonzeros in Jacobian row    (nflexedge,)
@@ -1269,6 +1271,7 @@ class Model:
   nflexelem: int
   nflexelemdata: int
   nflexstiffness: int
+  nflexbending: int
   nflexelemedge: int
   nflexshelldata: int
   nJfe: int
@@ -1426,6 +1429,7 @@ class Model:
   flex_elemdataadr: array("nflex", int)
   flex_stiffnessadr: array("nflex", int)
   flex_elemedgeadr: array("nflex", int)
+  flex_bendingadr: array("nflex", int)
   flex_shellnum: array("nflex", int)
   flex_shelldataadr: array("nflex", int)
   flex_vertbodyid: array("nflexvert", int)
@@ -1439,7 +1443,7 @@ class Model:
   flexedge_invweight0: array("nflexedge", float)
   flex_radius: array("nflex", float)
   flex_stiffness: array("nflexstiffness", float)
-  flex_bending: array("nflexedge", 17, float)
+  flex_bending: array("nflexbending", float)
   flex_damping: array("nflex", float)
   flex_centered: array("nflex", bool)
   flexedge_J_rownnz: array("nflexedge", int)
