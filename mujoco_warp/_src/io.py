@@ -1267,14 +1267,21 @@ def put_data(
   d.solver_niter = wp.full((nworld,), mjd.solver_niter[0], dtype=int)
 
   if is_sparse(mjm):
-    qM_legacy = np.zeros(mjm.nM)
-    qM_legacy[mjm.mapM2M] = mjd.M
-    d.qM = wp.array(np.full((nworld, 1, mjm.nM), qM_legacy), dtype=float)
+    if check_version("mujoco>=3.8.1.dev910242375"):
+      qM_legacy = np.zeros(mjm.nM)
+      qM_legacy[mjm.mapM2M] = mjd.M
+      d.qM = wp.array(np.full((nworld, 1, mjm.nM), qM_legacy), dtype=float)
+    else:
+      d.qM = wp.array(np.full((nworld, 1, mjm.nM), mjd.qM), dtype=float)
     d.qLD = wp.array(np.full((nworld, 1, mjm.nC), mjd.qLD), dtype=float)
   else:
     qM = np.zeros((mjm.nv, mjm.nv))
-    mujoco.mju_sym2dense(qM, mjd.M, mjm.M_rownnz, mjm.M_rowadr, mjm.M_colind)
-    qLD = np.linalg.cholesky(qM) if (mjd.M != 0.0).any() and (mjd.qLD != 0.0).any() else np.zeros((mjm.nv, mjm.nv))
+    if check_version("mujoco>=3.8.1.dev910242375"):
+      mujoco.mju_sym2dense(qM, mjd.M, mjm.M_rownnz, mjm.M_rowadr, mjm.M_colind)
+      qLD = np.linalg.cholesky(qM) if (mjd.M != 0.0).any() and (mjd.qLD != 0.0).any() else np.zeros((mjm.nv, mjm.nv))
+    else:
+      mujoco.mj_fullM(mjm, qM, mjd.qM)
+      qLD = np.linalg.cholesky(qM) if (mjd.qM != 0.0).any() and (mjd.qLD != 0.0).any() else np.zeros((mjm.nv, mjm.nv))
     padding = sizes["nv_pad"] - mjm.nv
     qM_padded = np.pad(qM, ((0, padding), (0, padding)), mode="constant", constant_values=0.0)
     d.qM = wp.array(np.full((nworld, sizes["nv_pad"], sizes["nv_pad"]), qM_padded), dtype=float)
@@ -1430,16 +1437,28 @@ def get_data_into(
   result.contact.efc_address[:ncon] = contact_efc_address_ordered[:ncon]
 
   if is_sparse(mjm):
-    warp_qM = d.qM.numpy()[world_id, 0]
-    result.M[:] = warp_qM[mjm.mapM2M]
+    if check_version("mujoco>=3.8.1.dev910242375"):
+      warp_qM = d.qM.numpy()[world_id, 0]
+      result.M[:] = warp_qM[mjm.mapM2M]
+    else:
+      result.qM[:] = d.qM.numpy()[world_id, 0]
     result.qLD[:] = d.qLD.numpy()[world_id, 0]
   else:
     qM = d.qM.numpy()[world_id]
-    for i in range(mjm.nv):
-      adr = mjm.M_rowadr[i]
-      for k in range(mjm.M_rownnz[i]):
-        col = mjm.M_colind[adr + k]
-        result.M[adr + k] = qM[i, col]
+    if check_version("mujoco>=3.8.1.dev910242375"):
+      for i in range(mjm.nv):
+        adr = mjm.M_rowadr[i]
+        for k in range(mjm.M_rownnz[i]):
+          col = mjm.M_colind[adr + k]
+          result.M[adr + k] = qM[i, col]
+    else:
+      adr = 0
+      for i in range(mjm.nv):
+        j = i
+        while j >= 0:
+          result.qM[adr] = qM[i, j]
+          j = mjm.dof_parentid[j]
+          adr += 1
     mujoco.mj_factorM(mjm, result)
 
   if nefc > 0:
