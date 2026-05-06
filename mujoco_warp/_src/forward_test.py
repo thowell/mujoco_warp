@@ -436,9 +436,8 @@ class ForwardTest(parameterized.TestCase):
         mjd_arr = mjd_arr.reshape(-1)
         d_arr = d_arr.reshape(-1)
       elif arr == "qM":
-        qM = np.zeros((mjm.nv, mjm.nv))
-        mujoco.mj_fullM(mjm, qM, mjd.qM)
-        mjd_arr = qM
+        mjd_arr = np.zeros((mjm.nv, mjm.nv))
+        mujoco.mju_sym2dense(mjd_arr, mjd.M, mjm.M_rownnz, mjm.M_rowadr, mjm.M_colind)
         d_arr = d_arr[: mjm.nv, : mjm.nv]
       elif arr == "actuator_moment":
         actuator_moment = np.zeros((mjm.nu, mjm.nv))

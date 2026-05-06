@@ -509,11 +509,11 @@ class IOTest(parameterized.TestCase):
     d = mjwarp.put_data(mjm, mjd)
 
     mjd.qLD.fill(-123)
-    mjd.qM.fill(-123)
+    mjd.M.fill(-123)
 
     mjwarp.get_data_into(mjd, mjm, d)
     np.testing.assert_allclose(mjd.qLD, mjd_ref.qLD)
-    np.testing.assert_allclose(mjd.qM, mjd_ref.qM)
+    np.testing.assert_allclose(mjd.M, mjd_ref.M)
 
   @parameterized.named_parameters(
     dict(testcase_name="nworld=1", nworld=1, world_id=0),
@@ -782,7 +782,7 @@ class IOTest(parameterized.TestCase):
     self.assertTrue((d.qLD.numpy() == 0.0).all())
 
     mujoco.mj_forward(mjm, mjd)
-    mjd.qM[:] = 0.0
+    mjd.M[:] = 0.0
     d = mjwarp.put_data(mjm, mjd)
     self.assertTrue((d.qLD.numpy() == 0.0).all())
 

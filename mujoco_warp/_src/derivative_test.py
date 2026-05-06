@@ -124,7 +124,7 @@ class DerivativeTest(parameterized.TestCase):
     mujoco.mju_sparse2dense(mj_qDeriv, mjd.qDeriv, mjm.D_rownnz, mjm.D_rowadr, mjm.D_colind)
 
     mj_qM = np.zeros((m.nv, m.nv))
-    mujoco.mj_fullM(mjm, mj_qM, mjd.qM)
+    mujoco.mju_sym2dense(mj_qM, mjd.M, mjm.M_rownnz, mjm.M_rowadr, mjm.M_colind)
     mj_out = mj_qM - mjm.opt.timestep * mj_qDeriv
 
     _assert_eq(mjw_out, mj_out, "qM - dt * qDeriv")
@@ -194,7 +194,7 @@ class DerivativeTest(parameterized.TestCase):
     mj_qDeriv = np.zeros((mjm.nv, mjm.nv))
     mujoco.mju_sparse2dense(mj_qDeriv, mjd.qDeriv, mjm.D_rownnz, mjm.D_rowadr, mjm.D_colind)
     mj_qM = np.zeros((m.nv, m.nv))
-    mujoco.mj_fullM(mjm, mj_qM, mjd.qM)
+    mujoco.mju_sym2dense(mj_qM, mjd.M, mjm.M_rownnz, mjm.M_rowadr, mjm.M_colind)
     mj_out = mj_qM - mjm.opt.timestep * mj_qDeriv
 
     self.assertFalse(np.any(np.isnan(mjw_out)))
@@ -409,7 +409,7 @@ class DerivativeTest(parameterized.TestCase):
     mujoco.mju_sparse2dense(mj_qDeriv, mjd.qDeriv, mjm.D_rownnz, mjm.D_rowadr, mjm.D_colind)
 
     mj_qM = np.zeros((m.nv, m.nv))
-    mujoco.mj_fullM(mjm, mj_qM, mjd.qM)
+    mujoco.mju_sym2dense(mj_qM, mjd.M, mjm.M_rownnz, mjm.M_rowadr, mjm.M_colind)
     mj_out = mj_qM - mjm.opt.timestep * mj_qDeriv
 
     self.assertFalse(np.any(np.isnan(mjw_out)))
