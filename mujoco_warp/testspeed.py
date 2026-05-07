@@ -26,6 +26,7 @@ import inspect
 import json
 import shutil
 import sys
+import warnings
 from typing import Sequence
 
 import numpy as np
@@ -146,8 +147,7 @@ def _main(argv: Sequence[str]):
   wp.config.quiet = flags.FLAGS["verbosity"].value < 1
   wp.init()
   device = wp.get_device(cli.DEVICE.value)
-  if device == "cpu":
-    raise ValueError("testspeed available for gpu only")
+  is_cuda = device.is_cuda
 
   if _CLEAR_WARP_CACHE.value:
     wp.clear_kernel_cache()
@@ -163,7 +163,7 @@ def _main(argv: Sequence[str]):
     print(f"Loading model from: {path}...\n")
 
   mjm = cli.load_model(path)
-  free_mem_at_init = wp.get_device(device).free_memory
+  free_mem_at_init = device.free_memory if is_cuda else 0
   m, d, rc, ctrls = cli.init_structs(_FUNCS[_FUNCTION.value], mjm)
   timestep = m.opt.timestep.numpy()[0]
 
@@ -248,6 +248,9 @@ def _main(argv: Sequence[str]):
       f"Rolling out {cli.NSTEP.value} {_FUNCTION.value}s at dt = {f'{timestep:g}' if timestep < 0.001 else f'{timestep:.3f}'}..."
     )
 
+  if cli.EVENT_TRACE.value and not is_cuda:
+    warnings.warn("--event_trace is not supported on CPU, skipping")
+
   nacon, nefc, solver_niter = [], [], []
   runtime = 0.0
   trace = {}
@@ -307,7 +310,9 @@ Total converged worlds: {nconverged} / {d.nworld}""")
 
       _print_table(matrix, ("mean", "std", "min", "max"), "solver niter")
 
-    if _MEMORY.value:
+    if _MEMORY.value and not is_cuda:
+      warnings.warn("--memory is not supported on CPU, skipping")
+    elif _MEMORY.value:
       total_mem = wp.get_device(device).total_memory
       used_mem = total_mem - wp.get_device(device).free_memory
       other_mem = used_mem
@@ -332,7 +337,13 @@ Total converged worlds: {nconverged} / {d.nworld}""")
       "converged_worlds": int(nconverged),
       "model_memory": sum(c for _, c in model_mem),
       "data_memory": sum(c for _, c in data_mem),
-      "total_memory": free_mem_at_init - wp.get_device(device).free_memory,
+      **(
+        {
+          "total_memory": free_mem_at_init - device.free_memory,
+        }
+        if is_cuda
+        else {}
+      ),
       "ncon_mean": np.mean(nacon) / cli.NWORLD.value,
       "ncon_p95": np.percentile(nacon, 95) / cli.NWORLD.value,
       "nefc_mean": np.mean(nefc),

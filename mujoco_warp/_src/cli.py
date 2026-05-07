@@ -40,6 +40,7 @@ NCCDMAX = flags.DEFINE_integer("nccdmax", None, "override maximum number of CCD 
 OVERRIDE = flags.DEFINE_multi_string("override", [], "Model overrides (notation: foo.bar = baz)", short_name="o")
 KEYFRAME = flags.DEFINE_integer("keyframe", 0, "keyframe to initialize simulation.")
 EVENT_TRACE = flags.DEFINE_bool("event_trace", False, "print an event trace report")
+EAGER = flags.DEFINE_bool("eager", False, "run without CUDA graph capture (eager mode)")
 NOISE_STD = flags.DEFINE_float("noise_std", 0.01, "add noise to ctrl signal (standard deviation)")
 NOISE_RATE = flags.DEFINE_float("noise_rate", 0.1, "add noise to ctrl signal (noise rate)")
 
@@ -185,37 +186,48 @@ def unroll(
     jit_duration: Time to JIT capture the function.
   """
   with wp.ScopedDevice(wp.get_device(DEVICE.value)):
-    with warp_util.EventTracer(enabled=EVENT_TRACE.value) as tracer:
+    is_cuda = wp.get_device().is_cuda
+    use_graph = is_cuda and not EAGER.value
+
+    with warp_util.EventTracer(enabled=EVENT_TRACE.value and is_cuda) as tracer:
+      fn_args = (m, d) if rc is None else (m, d, rc)
+
       jit_beg = time.perf_counter()
-      with wp.ScopedCapture() as capture:
-        fn(*(m, d) if rc is None else (m, d, rc))
+      if use_graph:
+        with wp.ScopedCapture() as capture:
+          fn(*fn_args)
+      else:
+        fn(*fn_args)
+        wp.synchronize()
       jit_end = time.perf_counter()
 
       for i in range(NSTEP.value):
-        with wp.ScopedStream(wp.get_stream()):
-          if ctrls is not None:
-            center = wp.array(ctrls[i], dtype=wp.float32)
-            wp.launch(
-              _ctrl_noise,
-              dim=(d.nworld, m.nu),
-              inputs=[
-                m.opt.timestep,
-                m.actuator_ctrllimited,
-                m.actuator_ctrlrange,
-                d.ctrl,
-                center,
-                i,
-                NOISE_STD.value,
-                NOISE_RATE.value,
-              ],
-              outputs=[d.ctrl],
-            )
-            wp.synchronize()
-
-          run_beg = time.perf_counter()
-          wp.capture_launch(capture.graph)
+        if ctrls is not None:
+          center = wp.array(ctrls[i], dtype=wp.float32)
+          wp.launch(
+            _ctrl_noise,
+            dim=(d.nworld, m.nu),
+            inputs=[
+              m.opt.timestep,
+              m.actuator_ctrllimited,
+              m.actuator_ctrlrange,
+              d.ctrl,
+              center,
+              i,
+              NOISE_STD.value,
+              NOISE_RATE.value,
+            ],
+            outputs=[d.ctrl],
+          )
           wp.synchronize()
-          run_end = time.perf_counter()
+
+        run_beg = time.perf_counter()
+        if use_graph:
+          wp.capture_launch(capture.graph)
+        else:
+          fn(*fn_args)
+        wp.synchronize()
+        run_end = time.perf_counter()
 
         if callback:
           callback(i, tracer.trace(), run_end - run_beg)
