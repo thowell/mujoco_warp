@@ -352,12 +352,13 @@ class IntegratorType(enum.IntEnum):
     EULER: semi-implicit Euler
     RK4: 4th-order Runge Kutta
     IMPLICITFAST: implicit in velocity, no rne derivative
+    IMPLICIT: implicit in velocity, with rne derivative
   """
 
   EULER = mujoco.mjtIntegrator.mjINT_EULER
   RK4 = mujoco.mjtIntegrator.mjINT_RK4
   IMPLICITFAST = mujoco.mjtIntegrator.mjINT_IMPLICITFAST
-  # unsupported: IMPLICIT
+  IMPLICIT = mujoco.mjtIntegrator.mjINT_IMPLICIT
 
 
 class GeomType(enum.IntEnum):
@@ -1184,6 +1185,12 @@ class Model:
     M_rowadr: index of each row in M                         (nv,)
     M_colind: column indices of non-zeros in M               (nC,)
     mapM2M: index mapping from M (legacy) to M (CSR)         (nC)
+    D_rownnz: non-zeros per row in D-structure               (nv,)
+    D_rowadr: row start addresses in D-structure             (nv,)
+    D_diag: diagonal element index within each row           (nv,)
+    D_colind: column indices in D-structure                  (nD,)
+    mapM2D: index mapping from M to D                        (nD,)
+    mapD2M: index mapping from D to M                        (nC,)
     flex_vertflexid: flex id for each flex vertex            (nflexvert,)
 
   warp only fields:
@@ -1602,6 +1609,12 @@ class Model:
   M_rowadr: array("nv", int)
   M_colind: array("nC", int)
   mapM2M: array("nC", int)
+  D_rownnz: array("nv", int)
+  D_rowadr: array("nv", int)
+  D_diag: array("nv", int)
+  D_colind: array("nD", int)
+  mapM2D: array("nD", int)
+  mapD2M: array("nC", int)
   flex_vertflexid: array("nflexvert", int)
   # warp only fields:
   callback: Callback
@@ -1902,6 +1915,7 @@ class Data:
     qfrc_passive: total passive force                           (nworld, nv)
     subtree_linvel: linear velocity of subtree com              (nworld, nbody, 3)
     subtree_angmom: angular momentum about subtree com          (nworld, nbody, 3)
+    qLU: sparse LU factorization of (M - dt*qDeriv)             (nworld, 1, nD)
     actuator_force: actuator force in actuation space           (nworld, nu)
     qfrc_actuator: actuator force                               (nworld, nv)
     qfrc_smooth: net unconstrained force                        (nworld, nv)
@@ -2017,6 +2031,7 @@ class Data:
   qfrc_passive: array("nworld", "nv", float)
   subtree_linvel: array("nworld", "nbody", wp.vec3)
   subtree_angmom: array("nworld", "nbody", wp.vec3)
+  qLU: array("nworld", 1, "nD", float)
   actuator_force: array("nworld", "nu", float)
   qfrc_actuator: array("nworld", "nv", float)
   qfrc_smooth: array("nworld", "nv", float)
