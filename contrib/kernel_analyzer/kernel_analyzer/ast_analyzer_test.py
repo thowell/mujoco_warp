@@ -204,11 +204,53 @@ def kernel_factory(nv: int):
     return nested_kernel
 """
 
+_MISSING_CACHE_KERNEL_CODE = """
+import warp as wp
 
-def _analyze_str(code_str: str) -> List[Any]:
+def kernel_factory(nv: int):
+    @wp.kernel(module="unique")
+    def nested_kernel(x: int):
+        pass
+    return nested_kernel
+"""
+
+_WITH_CACHE_KERNEL_CODE = """
+import warp as wp
+
+@cache_kernel
+def kernel_factory(nv: int):
+    @wp.kernel(module="unique")
+    def nested_kernel(x: int):
+        pass
+    return nested_kernel
+"""
+
+_WITH_CACHE_KERNEL_EMBEDDED_CODE = """
+import warp as wp
+
+@event_scope
+def some_function(m, d):
+    @wp.kernel(module="unique")
+    def nested_kernel(x: int):
+        pass
+    wp.launch(nested_kernel, dim=1, inputs=[])
+"""
+
+_MISSING_CACHE_KERNEL_EXTRA_ARGS_CODE = """
+import warp as wp
+
+def kernel_factory(nv: int):
+    @wp.kernel(module="unique", enable_backward=False)
+    def nested_kernel(x: int):
+        pass
+    return nested_kernel
+"""
+
+
+def _analyze_str(code_str: str, filename: str = "somefile.py") -> List[Any]:
   full_path = os.path.realpath(__file__)
   path = pathlib.Path(full_path).parent / "../../../mujoco_warp/_src/types.py"
-  return ast_analyzer.analyze(code_str, "somefile.py", path.read_text())
+  return ast_analyzer.analyze(code_str, filename, path.read_text())
 
 
 def _assert_has_issue(issues, issue_type: Type):
@@ -310,18 +352,46 @@ class TestAnalyzer(absltest.TestCase):
     _assert_has_issue(issues, ast_analyzer.MissingModuleUnique)
 
   def test_nested_kernel_with_module_unique(self):
-    """Test that nested kernels with module='unique' don't raise an issue."""
+    """Test that nested kernels with module='unique' don't raise MissingModuleUnique."""
     issues = _analyze_str(_NESTED_KERNEL_WITH_UNIQUE_CODE)
-    # Filter out other issue types - we only care about MissingModuleUnique
     unique_issues = [i for i in issues if isinstance(i, ast_analyzer.MissingModuleUnique)]
     self.assertEqual(len(unique_issues), 0, unique_issues)
 
   def test_nested_kernel_with_module_unique_single_quotes(self):
-    """Test that nested kernels with module='unique' (single quotes) don't raise an issue."""
+    """Single-quoted module='unique' should not raise MissingModuleUnique."""
     issues = _analyze_str(_NESTED_KERNEL_WITH_UNIQUE_SINGLE_QUOTES_CODE)
-    # Filter out other issue types - we only care about MissingModuleUnique
     unique_issues = [i for i in issues if isinstance(i, ast_analyzer.MissingModuleUnique)]
     self.assertEqual(len(unique_issues), 0, unique_issues)
+
+  def test_missing_cache_kernel(self):
+    """Test that kernel factories without @cache_kernel raise an issue."""
+    issues = _analyze_str(_MISSING_CACHE_KERNEL_CODE)
+    cache_issues = [i for i in issues if isinstance(i, ast_analyzer.MissingCacheKernel)]
+    self.assertEqual(len(cache_issues), 1, cache_issues)
+
+  def test_with_cache_kernel(self):
+    """Test that kernel factories with @cache_kernel don't raise an issue."""
+    issues = _analyze_str(_WITH_CACHE_KERNEL_CODE)
+    cache_issues = [i for i in issues if isinstance(i, ast_analyzer.MissingCacheKernel)]
+    self.assertEqual(len(cache_issues), 0, cache_issues)
+
+  def test_embedded_kernel_missing_cache_kernel(self):
+    """Test that embedded kernels (not returned) are not flagged."""
+    issues = _analyze_str(_WITH_CACHE_KERNEL_EMBEDDED_CODE)
+    cache_issues = [i for i in issues if isinstance(i, ast_analyzer.MissingCacheKernel)]
+    self.assertEqual(len(cache_issues), 0, cache_issues)
+
+  def test_missing_cache_kernel_extra_decorator_args(self):
+    """Test that check works with extra kernel args like enable_backward=False."""
+    issues = _analyze_str(_MISSING_CACHE_KERNEL_EXTRA_ARGS_CODE)
+    cache_issues = [i for i in issues if isinstance(i, ast_analyzer.MissingCacheKernel)]
+    self.assertEqual(len(cache_issues), 1, cache_issues)
+
+  def test_cache_kernel_skipped_in_test_files(self):
+    """Test that MissingCacheKernel is not raised for test files."""
+    issues = _analyze_str(_MISSING_CACHE_KERNEL_CODE, filename="somefile_test.py")
+    cache_issues = [i for i in issues if isinstance(i, ast_analyzer.MissingCacheKernel)]
+    self.assertEqual(len(cache_issues), 0, cache_issues)
 
 
 _PARENTHESIZED_ARRAY_SYNTAX_CODE = """

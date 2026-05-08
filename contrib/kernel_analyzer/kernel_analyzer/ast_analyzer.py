@@ -107,6 +107,12 @@ class MissingModuleUnique(Issue):
 
 
 @dataclasses.dataclass
+class MissingCacheKernel(Issue):
+  def __str__(self):
+    return f'"{self.kernel}" kernel factory missing @cache_kernel decorator'
+
+
+@dataclasses.dataclass
 class ParenthesizedArraySyntax(Issue):
   def __str__(self):
     return f'"{self.node.arg}" uses parenthesized wp.array(dtype=X) syntax, use wp.array[X] instead'
@@ -229,6 +235,7 @@ def analyze(source: str, filename: str, type_source: str) -> List[Issue]:
 
   issues: List[Issue] = []
   source_lines = source.splitlines()
+  _is_test_file = filename.endswith("_test.py") or filename.endswith("test_.py") or "/test_" in filename
 
   def _is_kernel(name: str) -> bool:
     """Check if decorator is wp.kernel."""
@@ -238,12 +245,22 @@ def analyze(source: str, filename: str, type_source: str) -> List[Issue]:
     """Check if decorator is wp.func."""
     return name and (name == "wp.func" or name.startswith("wp.func("))
 
-  def _analyze_function(node: ast.FunctionDef, is_nested: bool):
+  def _analyze_function(
+    node: ast.FunctionDef,
+    is_nested: bool,
+    parent_decorators: List[str] = None,
+    parent_node: ast.FunctionDef = None,
+  ):
     """Analyze a function definition for kernel issues."""
+    # Collect this function's decorator names for passing to children
+    my_decorators = []
+    for d in node.decorator_list:
+      my_decorators.append(ast.get_source_segment(source, d))
+
     # Recursively check nested functions first
     for child in ast.iter_child_nodes(node):
       if isinstance(child, ast.FunctionDef):
-        _analyze_function(child, is_nested=True)
+        _analyze_function(child, is_nested=True, parent_decorators=my_decorators, parent_node=node)
 
     # Find wp.kernel or wp.func decorator
     decorator = None
@@ -258,6 +275,18 @@ def analyze(source: str, filename: str, type_source: str) -> List[Issue]:
     if is_nested and _is_kernel(decorator):
       if 'module="unique"' not in decorator and "module='unique'" not in decorator:
         issues.append(MissingModuleUnique(node, node.name))
+      # Parent of a kernel factory must have @cache_kernel.
+      # Only applies to factories (parent returns the kernel), not embedded
+      # kernels launched inline. Skip for test files.
+      elif parent_node is not None and not _is_test_file:
+        # Check if parent returns this kernel by name
+        returns_kernel = any(
+          isinstance(n, ast.Return) and isinstance(n.value, ast.Name) and n.value.id == node.name for n in ast.walk(parent_node)
+        )
+        if returns_kernel:
+          has_cache = any(d == "cache_kernel" or (d and d.startswith("cache_kernel(")) for d in (parent_decorators or []))
+          if not has_cache:
+            issues.append(MissingCacheKernel(node, node.name))
 
     _analyze_kernel(node)
 
