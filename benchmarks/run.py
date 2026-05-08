@@ -38,6 +38,11 @@ from pathlib import Path
 
 _ARGS = None  # module level variable that gets populated with argparse results
 
+# Ensure the active virtual environment's bin directory is in PATH so 'uv' can be found
+_venv_bin = Path(sys.executable).parent.as_posix()
+if _venv_bin not in os.environ.get("PATH", ""):
+  os.environ["PATH"] = f"{_venv_bin}{os.path.pathsep}{os.environ.get('PATH', '')}"
+
 logging.basicConfig(format="[%(asctime)s] %(message)s", datefmt="%Y-%m-%d %H:%M:%S", level=logging.INFO)
 log = logging.getLogger(__name__)
 
@@ -133,15 +138,12 @@ def _run_benchmark(bm: dict, input_dir: Path) -> dict:
     "--measure_solver=true",
     "--measure_alloc=true",
   ]
-  if "nconmax" in bm:
-    cmd.append(f"--nconmax={bm['nconmax']}")
-  if "njmax" in bm:
-    cmd.append(f"--njmax={bm['njmax']}")
+  for field in ("nconmax", "njmax", "function", "nstep", "render_width", "render_height"):
+    if field in bm:
+      cmd.append(f"--{field}={bm[field]}")
   if "replay" in bm:
     replay_path = Path(_ARGS.assets_root) / bm["name"] / bm["replay"]
     cmd.append(f"--replay={replay_path.as_posix()}")
-  if "nstep" in bm:
-    cmd.append(f"--nstep={bm['nstep']}")
 
   result = _uv_run(*cmd, cwd=input_dir)
 
