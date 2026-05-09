@@ -2433,6 +2433,31 @@ class IOTest(parameterized.TestCase):
       """)
       )
 
+  @parameterized.parameters(*_IO_TEST_MODELS)
+  def test_kernel_recompilation(self, xml):
+    """Test that subsequent steps do not trigger kernel recompilation."""
+    _, _, m, d = test_data.fixture(xml)
+    mjwarp.step(m, d)
+    wp.synchronize()
+
+    created_kernels = []
+    original_init = wp.Kernel.__init__
+
+    def _tracking_init(self_kernel, *args, **kwargs):
+      res = original_init(self_kernel, *args, **kwargs)
+      created_kernels.append(self_kernel.key)
+      return res
+
+    # Second step: with cache enabled, should trigger zero new kernel instantiations
+    with mock.patch.object(wp.Kernel, "__init__", _tracking_init):
+      mjwarp.step(m, d)
+      wp.synchronize()
+
+      self.assertEmpty(
+        created_kernels,
+        f"Kernels were re-created on a subsequent step call: {created_kernels}",
+      )
+
 
 # TODO(team): test set_const_0 sparse
 
