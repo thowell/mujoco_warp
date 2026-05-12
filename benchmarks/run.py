@@ -139,7 +139,7 @@ def _run_benchmark(bm: dict, input_dir: Path) -> dict:
     "--measure_solver=true",
     "--measure_alloc=true",
   ]
-  for field in ("nconmax", "njmax", "function", "nstep", "render_width", "render_height"):
+  for field in ("nconmax", "njmax", "function", "nstep", "render_width", "render_height", "render_rgb", "render_depth"):
     if field in bm:
       cmd.append(f"--{field}={bm[field]}")
   if "replay" in bm:

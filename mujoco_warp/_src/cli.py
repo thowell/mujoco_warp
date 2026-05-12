@@ -57,6 +57,7 @@ RENDER_BACKFACE_CULLING = flags.DEFINE_bool(
   True,
   "enable renderer backface culling (RenderContext.enable_backface_culling)",
 )
+RENDER_SKYBOX = flags.DEFINE_bool("render_skybox", True, "render skybox texture if available")
 
 
 def load_model(path: epath.Path) -> mujoco.MjModel:
@@ -164,6 +165,7 @@ def init_structs(
       use_textures=RENDER_TEXTURES.value,
       use_shadows=RENDER_SHADOWS.value,
       enable_backface_culling=RENDER_BACKFACE_CULLING.value,
+      render_skybox=RENDER_SKYBOX.value,
     )
 
     return m, d, rc, ctrls

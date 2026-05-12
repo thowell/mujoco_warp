@@ -260,7 +260,24 @@ def _main(argv: Sequence[str]):
     solver_niter.append(d.solver_niter.numpy())
     trace = _sum_trace(trace, step_trace)
 
-  jit_duration = cli.unroll(_FUNCS[_FUNCTION.value], m, d, rc, callback, ctrls)
+  if _FUNCTION.value == "render":
+    with wp.ScopedCapture() as step_capture:
+      mjw.step(m, d)
+
+    def render_callback(step, step_trace, latency):
+      callback(step, step_trace, latency)
+      wp.capture_launch(step_capture.graph)
+      wp.synchronize()
+
+    # TODO(team): Support specifying multiple functions to benchmark them together,
+    # e.g., `mjwarp-testspeed --function=refit_bvh --function=render`
+    def refit_and_render(m, d, rc):
+      mjw.refit_bvh(m, d, rc)
+      mjw.render(m, d, rc)
+
+    jit_duration = cli.unroll(refit_and_render, m, d, rc, render_callback, ctrls)
+  else:
+    jit_duration = cli.unroll(_FUNCS[_FUNCTION.value], m, d, rc, callback, ctrls)
 
   nconverged = np.sum(~np.any(np.isnan(d.qpos.numpy()), axis=1))
   steps = cli.NWORLD.value * cli.NSTEP.value
