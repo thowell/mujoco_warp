@@ -25,6 +25,7 @@ import mujoco_warp as mjw
 from mujoco_warp import ConeType
 from mujoco_warp import DisableBit
 from mujoco_warp import test_data
+from mujoco_warp._src.types import NEW_GAP_SEMANTICS
 from mujoco_warp._src.util_pkg import check_version
 
 # tolerance for difference between MuJoCo and MJWarp smooth calculations - mostly
@@ -376,6 +377,8 @@ class SmoothTest(parameterized.TestCase):
   )
   def test_actuator_adhesion(self, keyframe, cone, jacobian):
     """Tests adhesion actuator."""
+    if not NEW_GAP_SEMANTICS:
+      self.skipTest("Skipping due to new gap semantics")
     mjm, mjd, m, d = test_data.fixture(
       "actuation/adhesion.xml", keyframe=keyframe, overrides={"opt.cone": cone, "opt.jacobian": jacobian}
     )
