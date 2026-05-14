@@ -194,6 +194,15 @@ def capsule(p: wp.vec3, size: wp.vec3) -> float:
 
 
 @wp.func
+def cylinder(p: wp.vec3, size: wp.vec3) -> float:
+  r = size[0]
+  h = size[1]
+  dx = wp.length(wp.vec2(p[0], p[1])) - r
+  dy = wp.abs(p[2]) - h
+  return wp.min(wp.max(dx, dy), 0.0) + wp.length(wp.vec2(wp.max(dx, 0.0), wp.max(dy, 0.0)))
+
+
+@wp.func
 def grad_sphere(p: wp.vec3) -> wp.vec3:
   c = wp.length(p)
   if c > 1e-9:
@@ -250,6 +259,40 @@ def grad_capsule(p: wp.vec3, size: wp.vec3) -> wp.vec3:
     return diff / c
   else:
     return wp.vec3(0.0)
+
+
+@wp.func
+def grad_cylinder(p: wp.vec3, size: wp.vec3) -> wp.vec3:
+  r = size[0]
+  h = size[1]
+
+  radial_dist = wp.length(wp.vec2(p[0], p[1]))
+  if radial_dist > MJ_MINVAL:
+    u = wp.vec3(p[0] / radial_dist, p[1] / radial_dist, 0.0)
+  else:
+    u = wp.vec3(0.0)
+
+  w = wp.vec3(0.0, 0.0, wp.sign(p[2]))
+
+  dx = radial_dist - r
+  dy = wp.abs(p[2]) - h
+
+  if dx > 0.0 and dy > 0.0:
+    v = wp.vec2(dx, dy)
+    len_v = wp.length(v)
+    if len_v > MJ_MINVAL:
+      return u * (dx / len_v) + w * (dy / len_v)
+    else:
+      return wp.vec3(0.0)
+  elif dx > 0.0:
+    return u
+  elif dy > 0.0:
+    return w
+  else:
+    if dx > dy:
+      return u
+    else:
+      return w
 
 
 @wp.func
@@ -418,6 +461,8 @@ def sdf(type: int, p: wp.vec3, attr: vec_pluginattr, sdf_type: int, volume_data:
     return sphere(p, attr_vec3)
   elif type == GeomType.CAPSULE:
     return capsule(p, attr_vec3)
+  elif type == GeomType.CYLINDER:
+    return cylinder(p, attr_vec3)
   elif type == GeomType.BOX:
     return box(p, attr_vec3)
   elif type == GeomType.ELLIPSOID:
@@ -478,6 +523,8 @@ def sdf_grad(
     return grad_sphere(p)
   elif type == GeomType.CAPSULE:
     return grad_capsule(p, attr_vec3)
+  elif type == GeomType.CYLINDER:
+    return grad_cylinder(p, attr_vec3)
   elif type == GeomType.BOX:
     return grad_box(p, attr_vec3)
   elif type == GeomType.ELLIPSOID:
