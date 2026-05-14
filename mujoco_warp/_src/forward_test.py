@@ -1858,6 +1858,85 @@ class DCMotorTest(parameterized.TestCase):
     np.testing.assert_allclose(force_actual, force_expected, atol=1e-5)
 
 
+class ImplicitBendingStiffnessTest(parameterized.TestCase):
+  def test_flex_contact_energy(self):
+    xml = """
+    <mujoco>
+      <option gravity="0 0 -10" timestep="0.001" integrator="implicitfast"
+              solver="CG" tolerance="1e-6">
+        <flag energy="enable"/>
+      </option>
+      <default>
+        <geom solref="0.003 1"/>
+      </default>
+      <worldbody>
+        <geom type="plane" size="5 5 0.1"/>
+        <flexcomp type="grid" count="8 8 1" spacing=".04 .04 .04"
+                  radius=".01" name="sheet" dim="2" pos="0 0 0.02" mass="0.1">
+          <edge equality="true" damping="0.1"/>
+          <elasticity young="3e6" poisson="0" thickness="2e-2"
+                      elastic2d="bend" damping="0"/>
+          <contact solref="0.003 1" internal="false" selfcollide="none"/>
+        </flexcomp>
+      </worldbody>
+    </mujoco>
+    """
+    _, _, m, d = test_data.fixture(xml=xml)
+
+    mjw.forward(m, d)
+    initial_energy = float(d.energy.numpy()[0, 0] + d.energy.numpy()[0, 1])
+    self.assertGreater(initial_energy, 0.0)
+
+    max_energy = initial_energy
+    for _ in range(10):
+      mjw.step(m, d)
+      total_energy = float(d.energy.numpy()[0, 0] + d.energy.numpy()[0, 1])
+      max_energy = max(max_energy, total_energy)
+
+    energy_ratio = max_energy / initial_energy
+    self.assertLessEqual(energy_ratio, 1.01)
+
+  def test_bending_damping_decays_energy(self):
+    xml = """
+    <mujoco>
+      <option gravity="0 0 0" timestep="0.001" integrator="implicitfast">
+        <flag energy="enable"/>
+      </option>
+      <worldbody>
+        <flexcomp type="grid" count="6 6 1" spacing=".1 .1 .1"
+                  radius=".005" name="sheet" dim="2" mass="0.1">
+          <edge equality="false" damping="0" stiffness="0"/>
+          <elasticity young="1e6" poisson="0" thickness="0.02"
+                      elastic2d="bend" damping="0.1"/>
+          <contact solref="0.01" internal="false" selfcollide="none"/>
+        </flexcomp>
+      </worldbody>
+    </mujoco>
+    """
+    mjm, mjd, m, d = test_data.fixture(xml=xml)
+
+    center_vert = 21
+    bid = mjm.flex_vertbodyid[mjm.flex_vertadr[0] + center_vert]
+    dofadr = mjm.body_dofadr[bid]
+    mjd.qvel[dofadr + 2] = 1.0
+    wp.copy(d.qvel, wp.array(mjd.qvel, dtype=float, shape=(1, mjm.nv)))
+
+    mjw.forward(m, d)
+    initial_energy = float(d.energy.numpy()[0, 0] + d.energy.numpy()[0, 1])
+    self.assertGreater(initial_energy, 0.0)
+
+    max_energy = initial_energy
+    for _ in range(10):
+      mjw.step(m, d)
+      total_energy = float(d.energy.numpy()[0, 0] + d.energy.numpy()[0, 1])
+      max_energy = max(max_energy, total_energy)
+
+    self.assertLessEqual(max_energy, initial_energy * 1.01)
+
+    final_energy = float(d.energy.numpy()[0, 0] + d.energy.numpy()[0, 1])
+    self.assertLess(final_energy, 0.99 * initial_energy)
+
+
 if __name__ == "__main__":
   wp.init()
   absltest.main()

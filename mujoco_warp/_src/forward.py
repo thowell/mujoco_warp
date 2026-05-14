@@ -27,6 +27,7 @@ from mujoco_warp._src import sensor
 from mujoco_warp._src import smooth
 from mujoco_warp._src import solver
 from mujoco_warp._src import util_misc
+from mujoco_warp._src.support import mul_m
 from mujoco_warp._src.support import next_act
 from mujoco_warp._src.support import xfrc_accumulate
 from mujoco_warp._src.types import MJ_MINVAL
@@ -573,6 +574,294 @@ def rungekutta4(m: Model, d: Data):
   _advance(m, d, qacc_rk, qvel_rk)
 
 
+@wp.kernel
+def _flex_implicit_mul_vec(
+  # Model:
+  nflex: int,
+  opt_timestep: wp.array[float],
+  body_dofadr: wp.array[int],
+  flex_dim: wp.array[int],
+  flex_vertadr: wp.array[int],
+  flex_edgeadr: wp.array[int],
+  flex_edgenum: wp.array[int],
+  flex_bendingadr: wp.array[int],
+  flex_vertbodyid: wp.array[int],
+  flex_edge: wp.array[wp.vec2i],
+  flex_edgeflap: wp.array[wp.vec2i],
+  flex_bending: wp.array[float],
+  flex_damping: wp.array[float],
+  # In:
+  vec: wp.array2d[float],
+  s1: float,
+  s2: float,
+  s3: float,
+  # Out:
+  res_out: wp.array2d[float],
+):
+  worldid, edgeid = wp.tid()
+
+  for i in range(nflex):
+    locid = edgeid - flex_edgeadr[i]
+    if locid >= 0 and locid < flex_edgenum[i]:
+      f = i
+      break
+
+  if flex_dim[f] != 2:
+    return
+
+  flap = flex_edgeflap[edgeid]
+  if flap[1] == -1:
+    return
+
+  h = opt_timestep[worldid % opt_timestep.shape[0]]
+  scale = h * s1 + h * (h * s2 + flex_damping[f] * s3)
+  if scale == 0.0:
+    return
+
+  edge = flex_edge[edgeid]
+  vbase = flex_vertadr[f]
+  v = wp.vec4i(
+    vbase + edge[0],
+    vbase + edge[1],
+    vbase + flap[0],
+    vbase + flap[1],
+  )
+
+  adr = flex_bendingadr[f]
+  local_edgeid = edgeid - flex_edgeadr[f]
+
+  # apply 4x4 bending stencil, coordinate-wise
+  for i in range(4):
+    bodyid_i = flex_vertbodyid[v[i]]
+    dof_i = body_dofadr[bodyid_i]
+    for x in range(3):
+      val = float(0.0)
+      for j in range(4):
+        bodyid_j = flex_vertbodyid[v[j]]
+        dof_j = body_dofadr[bodyid_j]
+        val += flex_bending[adr + 17 * local_edgeid + 4 * i + j] * vec[worldid, dof_j + x]
+
+      wp.atomic_add(res_out[worldid], dof_i + x, scale * val)
+
+
+@wp.kernel
+def _flex_implicit_dot_product(
+  # In:
+  a: wp.array2d[float],
+  b: wp.array2d[float],
+  # Out:
+  out: wp.array[float],
+):
+  worldid = wp.tid()
+  NV = a.shape[1]
+  val = float(0.0)
+  for i in range(NV):
+    val += a[worldid, i] * b[worldid, i]
+  out[worldid] = val
+
+
+@wp.kernel
+def _flex_implicit_cg_init(
+  # In:
+  b: wp.array2d[float],
+  Ax0: wp.array2d[float],
+  # Out:
+  r_out: wp.array2d[float],
+):
+  worldid, dofid = wp.tid()
+  r_out[worldid, dofid] = b[worldid, dofid] - Ax0[worldid, dofid]
+
+
+@wp.kernel
+def _flex_implicit_cg_update_r_x(
+  # In:
+  r: wp.array2d[float],
+  Ap: wp.array2d[float],
+  p: wp.array2d[float],
+  alpha: wp.array[float],
+  # Out:
+  x_out: wp.array2d[float],
+  r_new_out: wp.array2d[float],
+):
+  worldid, dofid = wp.tid()
+  a = alpha[worldid]
+  x_out[worldid, dofid] += a * p[worldid, dofid]
+  r_new_out[worldid, dofid] = r[worldid, dofid] - a * Ap[worldid, dofid]
+
+
+@wp.kernel
+def _flex_implicit_cg_update_p(
+  # In:
+  z_new: wp.array2d[float],
+  p: wp.array2d[float],
+  beta: wp.array[float],
+  # Out:
+  p_new_out: wp.array2d[float],
+):
+  worldid, dofid = wp.tid()
+  p_new_out[worldid, dofid] = z_new[worldid, dofid] + beta[worldid] * p[worldid, dofid]
+
+
+@wp.kernel
+def _flex_implicit_cg_dot_divide(
+  # In:
+  a: wp.array2d[float],
+  b: wp.array2d[float],
+  dot_val: wp.array[float],
+  flip_div: bool,
+  # Out:
+  res_out: wp.array[float],
+  # Out:
+  dot_out: wp.array[float],
+):
+  worldid = wp.tid()
+  NV = a.shape[1]
+  val = float(0.0)
+  for i in range(NV):
+    val += a[worldid, i] * b[worldid, i]
+
+  dot_out[worldid] = val
+
+  if flip_div:
+    d = wp.max(MJ_MINVAL, dot_val[worldid])
+    res_out[worldid] = val / d
+  else:
+    d = wp.max(MJ_MINVAL, val)
+    res_out[worldid] = dot_val[worldid] / d
+
+
+def _flex_implicit_cgsolve(m: Model, d: Data, qacc_out: wp.array, qDeriv: wp.array, qLD: wp.array, qLDiagInv: wp.array):
+  # copy warmstart to x0
+  wp.copy(qacc_out, d.qacc_warmstart)
+
+  r = wp.empty((d.nworld, m.nv), dtype=float)
+  z = wp.empty((d.nworld, m.nv), dtype=float)
+  p = wp.empty((d.nworld, m.nv), dtype=float)
+  r_new = wp.empty((d.nworld, m.nv), dtype=float)
+  z_new = wp.empty((d.nworld, m.nv), dtype=float)
+  p_new = wp.empty((d.nworld, m.nv), dtype=float)
+  Ap = wp.empty((d.nworld, m.nv), dtype=float)
+  Ax = wp.empty((d.nworld, m.nv), dtype=float)
+  rhs = wp.clone(d.qfrc_smooth)
+  dot_rz_old = wp.empty(d.nworld, dtype=float)
+  dot_rz_new = wp.empty(d.nworld, dtype=float)
+  alpha = wp.empty(d.nworld, dtype=float)
+  beta = wp.empty(d.nworld, dtype=float)
+
+  # subtract velocity correction h * K_bend * qvel from rhs
+  wp.launch(
+    _flex_implicit_mul_vec,
+    dim=(d.nworld, m.nflexedge),
+    inputs=[
+      m.nflex,
+      m.opt.timestep,
+      m.body_dofadr,
+      m.flex_dim,
+      m.flex_vertadr,
+      m.flex_edgeadr,
+      m.flex_edgenum,
+      m.flex_bendingadr,
+      m.flex_vertbodyid,
+      m.flex_edge,
+      m.flex_edgeflap,
+      m.flex_bending,
+      m.flex_damping,
+      d.qvel,
+      -1.0,
+      0.0,
+      0.0,
+    ],
+    outputs=[rhs],
+  )
+
+  def flex_A_mult(x_in, out_res):
+    mul_m(m, d, out_res, x_in, M=qDeriv)
+    wp.launch(
+      _flex_implicit_mul_vec,
+      dim=(d.nworld, m.nflexedge),
+      inputs=[
+        m.nflex,
+        m.opt.timestep,
+        m.body_dofadr,
+        m.flex_dim,
+        m.flex_vertadr,
+        m.flex_edgeadr,
+        m.flex_edgenum,
+        m.flex_bendingadr,
+        m.flex_vertbodyid,
+        m.flex_edge,
+        m.flex_edgeflap,
+        m.flex_bending,
+        m.flex_damping,
+        x_in,
+        0.0,
+        1.0,
+        1.0,
+      ],
+      outputs=[out_res],
+    )
+
+  # compute Ax = A * x0
+  flex_A_mult(qacc_out, Ax)
+
+  # r = rhs - Ax
+  wp.launch(_flex_implicit_cg_init, dim=(d.nworld, m.nv), inputs=[rhs, Ax], outputs=[r])
+
+  # z = precond(r)
+  smooth.solve_LD(m, d, qLD, qLDiagInv, z, r)
+
+  # p = z
+  wp.copy(p, z)
+
+  # dot_rz_old = dot(r, z)
+  wp.launch(_flex_implicit_dot_product, dim=d.nworld, inputs=[r, z], outputs=[dot_rz_old])
+
+  for k in range(10):
+    # Ap = A * p
+    flex_A_mult(p, Ap)
+
+    # alpha = dot_rz_old / dot(p, Ap)
+    wp.launch(
+      _flex_implicit_cg_dot_divide,
+      dim=d.nworld,
+      inputs=[p, Ap, dot_rz_old, False],
+      outputs=[alpha, dot_rz_new],
+    )
+
+    # update x and r_new
+    wp.launch(
+      _flex_implicit_cg_update_r_x,
+      dim=(d.nworld, m.nv),
+      inputs=[r, Ap, p, alpha],
+      outputs=[qacc_out, r_new],
+    )
+
+    # z_new = precond(r_new)
+    smooth.solve_LD(m, d, qLD, qLDiagInv, z_new, r_new)
+
+    # beta = dot(r_new, z_new) / dot_rz_old
+    wp.launch(
+      _flex_implicit_cg_dot_divide,
+      dim=d.nworld,
+      inputs=[r_new, z_new, dot_rz_old, True],
+      outputs=[beta, dot_rz_new],
+    )
+
+    # update p
+    wp.launch(
+      _flex_implicit_cg_update_p,
+      dim=(d.nworld, m.nv),
+      inputs=[z_new, p, beta],
+      outputs=[p_new],
+    )
+
+    # move to next iteration: swap array references
+    r, r_new = r_new, r
+    z, z_new = z_new, z
+    p, p_new = p_new, p
+    wp.copy(dot_rz_old, dot_rz_new)
+
+
 @event_scope
 def implicit(m: Model, d: Data):
   """Integrates fully implicit in velocity."""
@@ -586,7 +875,28 @@ def implicit(m: Model, d: Data):
     qLDiagInv = wp.empty((d.nworld, m.nv), dtype=float)
     derivative.deriv_smooth_vel(m, d, qDeriv)
     qacc = wp.empty((d.nworld, m.nv), dtype=float)
-    smooth.factor_solve_i(m, d, qDeriv, qLD, qLDiagInv, qacc, d.efc.Ma)
+
+    # inline check for active standard flex bending
+    has_implicit_stiffness = False
+    if m.nflex > 0:
+      flex_dim = m.flex_dim.numpy()
+      flex_bendingadr = m.flex_bendingadr.numpy()
+      for f in range(m.nflex):
+        if flex_dim[f] == 2 and flex_bendingadr[f] >= 0:
+          has_implicit_stiffness = True
+          break
+
+    if has_implicit_stiffness:
+      # factorize first to use as preconditioner
+      if m.is_sparse:
+        smooth._factor_i_sparse(m, d, qDeriv, qLD, qLDiagInv)
+      else:
+        smooth._factor_i_dense(m, d, qDeriv, qLD)
+
+      _flex_implicit_cgsolve(m, d, qacc, qDeriv, qLD, qLDiagInv)
+    else:
+      smooth.factor_solve_i(m, d, qDeriv, qLD, qLDiagInv, qacc, d.efc.Ma)
+
     _advance(m, d, qacc)
   else:
     _advance(m, d, d.qacc)
