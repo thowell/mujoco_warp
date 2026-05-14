@@ -23,6 +23,7 @@ from mujoco_warp._src.collision_core import geom_collision_pair
 from mujoco_warp._src.collision_core import write_contact
 from mujoco_warp._src.math import make_frame
 from mujoco_warp._src.ray import ray_mesh
+from mujoco_warp._src.types import MJ_MINVAL
 from mujoco_warp._src.types import Data
 from mujoco_warp._src.types import GeomType
 from mujoco_warp._src.types import Model
@@ -184,6 +185,15 @@ def ellipsoid(p: wp.vec3, size: wp.vec3) -> float:
 
 
 @wp.func
+def capsule(p: wp.vec3, size: wp.vec3) -> float:
+  r = size[0]
+  h = size[1]
+  pz_clamped = wp.clamp(p[2], -h, h)
+  diff = wp.vec3(p[0], p[1], p[2] - pz_clamped)
+  return wp.length(diff) - r
+
+
+@wp.func
 def grad_sphere(p: wp.vec3) -> wp.vec3:
   c = wp.length(p)
   if c > 1e-9:
@@ -228,6 +238,18 @@ def grad_ellipsoid(p: wp.vec3, size: wp.vec3) -> wp.vec3:
   df_dk1 = k0 * (k0 - 1.0) * invK1 * invK1
   raw_grad = gk0 * df_dk0 - gk1 * df_dk1
   return raw_grad / wp.length(raw_grad)
+
+
+@wp.func
+def grad_capsule(p: wp.vec3, size: wp.vec3) -> wp.vec3:
+  h = size[1]
+  pz_clamped = wp.clamp(p[2], -h, h)
+  diff = wp.vec3(p[0], p[1], p[2] - pz_clamped)
+  c = wp.length(diff)
+  if c > MJ_MINVAL:
+    return diff / c
+  else:
+    return wp.vec3(0.0)
 
 
 @wp.func
@@ -394,6 +416,8 @@ def sdf(type: int, p: wp.vec3, attr: vec_pluginattr, sdf_type: int, volume_data:
     return p[2]
   elif type == GeomType.SPHERE:
     return sphere(p, attr_vec3)
+  elif type == GeomType.CAPSULE:
+    return capsule(p, attr_vec3)
   elif type == GeomType.BOX:
     return box(p, attr_vec3)
   elif type == GeomType.ELLIPSOID:
@@ -452,6 +476,8 @@ def sdf_grad(
     return grad
   elif type == GeomType.SPHERE:
     return grad_sphere(p)
+  elif type == GeomType.CAPSULE:
+    return grad_capsule(p, attr_vec3)
   elif type == GeomType.BOX:
     return grad_box(p, attr_vec3)
   elif type == GeomType.ELLIPSOID:

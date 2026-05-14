@@ -1103,6 +1103,24 @@ class CollisionTest(parameterized.TestCase):
           </worldbody>
         </mujoco>
     """,
+    "sdf_capsule": """
+        <mujoco>
+          <option sdf_iterations="10" sdf_initpoints="40"/>
+          <asset>
+            <mesh name="cube"
+             vertex="1 1 1  1 1 -1  1 -1 1  1 -1 -1  -1 1 1  -1 1 -1  -1 -1 1  -1 -1 -1"/>
+          </asset>
+          <worldbody>
+            <body pos="0 0 0">
+              <geom type="capsule" size="0.3 0.6"/>
+            </body>
+            <body pos="0 0 1.5" euler="30 0 0">
+              <freejoint/>
+              <geom type="sdf" mesh="cube"/>
+            </body>
+          </worldbody>
+        </mujoco>
+    """,
   }
 
   @parameterized.parameters(_SDF_VOLUME.keys())
