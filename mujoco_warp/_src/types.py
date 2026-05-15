@@ -1156,9 +1156,9 @@ class Model:
     sensor_cutoff: cutoff for real and positive; 0: ignore   (nsensor,)
     plugin: globally registered plugin slot number           (nplugin,)
     plugin_attr: config attributes of geom plugin            (nplugin, _NPLUGINATTR)
-    M_rownnz: number of non-zeros in each row of qM          (nv,)
-    M_rowadr: index of each row in qM                        (nv,)
-    M_colind: column indices of non-zeros in qM              (nM,)
+    M_rownnz: number of non-zeros in each row of M           (nv,)
+    M_rowadr: index of each row in M                         (nv,)
+    M_colind: column indices of non-zeros in M               (nC,)
     mapM2M: index mapping from M (legacy) to M (CSR)         (nC)
     flex_vertflexid: flex id for each flex vertex            (nflexvert,)
 
@@ -1244,21 +1244,21 @@ class Model:
     sensor_rangefinder_bodyid: bodyid for rangefinder        (nrangefinder,)
     taxel_vertadr: tactile sensor vertex address             (nsensortaxel,)
     taxel_sensorid: address for tactile sensors
-    qM_tiles: tiling configuration
+    M_tiles: tiling configuration
     qLD_updates: tuple of index triples for sparse factorization
     qLD_all_updates: tuple of all levels concatenated
     qLD_level_offsets: tuple of start offsets for each level
-    qM_fullm_i: sparse mass matrix addressing
-    qM_fullm_j: sparse mass matrix addressing
-    qM_fullm_elemid: (row, col) -> elemid into qM_fullm_i/qM_fullm_j; -1 if not a chain ancestor
-    qM_fullm_upper_i: upper-triangle row indices for solver h seeding
-    qM_fullm_upper_j: upper-triangle column indices for solver h seeding
-    qM_fullm_upper_elemid: source elemid into qM_fullm_i/qM_fullm_j
+    M_fullm_i: sparse mass matrix addressing
+    M_fullm_j: sparse mass matrix addressing
+    M_elemid: (row, col) -> CSR madr addresses; -1 if not a chain ancestor
+    M_fullm_upper_i: upper-triangle row indices for solver h seeding
+    M_fullm_upper_j: upper-triangle column indices for solver h seeding
+    M_fullm_upper_elemid: source elemid into M_fullm_i/M_fullm_j
     qD_fullm_i: D-structure row indices for RNE derivatives
     qD_fullm_j: D-structure column indices for RNE derivatives
-    qM_mulm_rowadr: sparse matmul row pointers
-    qM_mulm_col: sparse matmul column indices
-    qM_mulm_madr: sparse matmul matrix addresses
+    M_mulm_rowadr: sparse matmul row pointers
+    M_mulm_col: sparse matmul column indices
+    M_mulm_madr: sparse matmul matrix addresses
   """
 
   nq: int
@@ -1643,22 +1643,24 @@ class Model:
   sensor_rangefinder_bodyid: array("nrangefinder", int)
   taxel_vertadr: array("nsensortaxel", int)
   taxel_sensorid: wp.array[int]
-  qM_tiles: tuple[TileSet, ...]
+  M_tiles: tuple[TileSet, ...]
   qLD_updates: tuple[wp.array[wp.vec3i], ...]
   qLD_all_updates: wp.array[wp.vec3i]
   qLD_level_offsets: wp.array[int]
-  qM_fullm_i: wp.array[int]
-  qM_fullm_j: wp.array[int]
-  qM_fullm_elemid: wp.array2d[int]  # (row, col) -> elemid in qM_fullm_i/j; -1 if col is not a chain ancestor of row
-  qM_fullm_upper_i: wp.array[int]
-  qM_fullm_upper_j: wp.array[int]
-  qM_fullm_upper_elemid: wp.array[int]
+  # TODO(team): Remove M_fullm_i/j and M_elemid by iterating the M CSR layout
+  # directly in the solver/derivative kernels
+  M_fullm_i: wp.array[int]
+  M_fullm_j: wp.array[int]
+  M_elemid: wp.array2d[int]  # (row, col) -> CSR madr address; -1 if col is not a chain ancestor of row
+  M_fullm_upper_i: wp.array[int]
+  M_fullm_upper_j: wp.array[int]
+  M_fullm_upper_elemid: wp.array[int]
   qD_fullm_i: wp.array[int]  # D-structure (full square) row indices for RNE derivatives
   qD_fullm_j: wp.array[int]  # D-structure (full square) column indices for RNE derivatives
   # Gather-based sparse mul_m indices (thread per DOF, no atomics)
-  qM_mulm_rowadr: wp.array[int]  # start address for each row [nv+1]
-  qM_mulm_col: wp.array[int]  # column index to gather from
-  qM_mulm_madr: wp.array[int]  # matrix address to read
+  M_mulm_rowadr: wp.array[int]  # start address for each row [nv+1]
+  M_mulm_col: wp.array[int]  # column index to gather from
+  M_mulm_madr: wp.array[int]  # matrix address to read
 
 
 class ContactType(enum.IntFlag):
@@ -1818,10 +1820,10 @@ class Data:
     moment_colind: column indices in sparse actuator_moment     (nworld, nJmom)
     actuator_moment: actuator moments                           (nworld, nJmom)
     crb: com-based composite inertia and mass                   (nworld, nbody, 10)
-    qM: total inertia                                           (nworld, nv, nv) if dense
-                                                                (nworld, 1, nM) if sparse
-    qLD: upper Cholesky factorization if dense                  (nworld, nv, nv)
-         L'*D*L factorization of M if sparse                    (nworld, 1, nC)
+    M: total inertia                                            (nworld, nv, nv) if dense
+                                                                (nworld, 1, nC) if sparse
+    qLD: upper Cholesky factorization                           (nworld, nv, nv) if dense
+         L'*D*L factorization of M                              (nworld, 1, nC) if sparse
     qLDiagInv: 1/diag(D)                                        (nworld, nv)
     flexedge_velocity: flex edge velocities                     (nworld, nflexedge)
     ten_velocity: tendon velocities                             (nworld, ntendon)
@@ -1916,7 +1918,7 @@ class Data:
   moment_colind: array("nworld", "nJmom", int)
   actuator_moment: array("nworld", "nJmom", float)
   crb: array("nworld", "nbody", vec10)
-  qM: wp.array3d[float]
+  M: wp.array3d[float]
   qLD: wp.array3d[float]
   qLDiagInv: array("nworld", "nv", float)
   flexedge_velocity: array("nworld", "nflexedge", float)

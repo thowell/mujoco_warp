@@ -1669,7 +1669,7 @@ def _linesearch(m: types.Model, d: types.Data, ctx: SolverContext, cost: wp.arra
     ctx: SolverContext
     cost: Scratch array for storing costs per (world, alpha) - used for parallel mode
   """
-  # mv = qM @ search (common to both parallel and iterative)
+  # mv = M @ search (common to both parallel and iterative)
   support.mul_m(m, d, ctx.mv, ctx.search, skip=ctx.done)
 
   # Fuse jv computation in-kernel for small nv (iterative only, dense only)
@@ -2257,13 +2257,13 @@ def update_gradient_grad(
 
 
 @wp.kernel
-def update_gradient_set_h_qM_upper_sparse(
+def update_gradient_set_h_M_upper_sparse(
   # Model:
-  qM_fullm_upper_i: wp.array[int],
-  qM_fullm_upper_j: wp.array[int],
-  qM_fullm_upper_elemid: wp.array[int],
+  M_fullm_upper_i: wp.array[int],
+  M_fullm_upper_j: wp.array[int],
+  M_fullm_upper_elemid: wp.array[int],
   # Data in:
-  qM_in: wp.array3d[float],
+  M_in: wp.array3d[float],
   # In:
   ctx_done_in: wp.array[bool],
   # Out:
@@ -2274,10 +2274,10 @@ def update_gradient_set_h_qM_upper_sparse(
   if ctx_done_in[worldid]:
     return
 
-  i = qM_fullm_upper_i[elementid]
-  j = qM_fullm_upper_j[elementid]
-  qM_elemid = qM_fullm_upper_elemid[elementid]
-  ctx_h_out[worldid, i, j] += qM_in[worldid, 0, qM_elemid]
+  i = M_fullm_upper_i[elementid]
+  j = M_fullm_upper_j[elementid]
+  madr = M_fullm_upper_elemid[elementid]
+  ctx_h_out[worldid, i, j] += M_in[worldid, 0, madr]
 
 
 @wp.func
@@ -2377,7 +2377,7 @@ def update_gradient_JTDAJ_dense_tiled(nv_pad: int, tile_size: int, njmax: int):
   def kernel(
     # Data in:
     nefc_in: wp.array[int],
-    qM_in: wp.array3d[float],
+    M_in: wp.array3d[float],
     efc_J_in: wp.array3d[float],
     efc_D_in: wp.array2d[float],
     efc_state_in: wp.array2d[int],
@@ -2393,7 +2393,7 @@ def update_gradient_JTDAJ_dense_tiled(nv_pad: int, tile_size: int, njmax: int):
 
     nefc = nefc_in[worldid]
 
-    sum_val = wp.tile_load(qM_in[worldid], shape=(nv_pad, nv_pad), bounds_check=True)
+    sum_val = wp.tile_load(M_in[worldid], shape=(nv_pad, nv_pad), bounds_check=True)
 
     # Each tile processes one output tile by looping over all constraints
     for k in range(0, njmax, TILE_SIZE_K):
@@ -2936,7 +2936,7 @@ def _update_gradient(m: types.Model, d: types.Data, ctx: SolverContext):
   if m.opt.solver == types.SolverType.CG:
     smooth.solve_m(m, d, ctx.Mgrad, ctx.grad)
   elif m.opt.solver == types.SolverType.NEWTON:
-    # h = qM + (efc_J.T * efc_D * active) @ efc_J
+    # h = M + (efc_J.T * efc_D * active) @ efc_J
     if m.is_sparse:
       ctx.h.zero_()
       wp.launch(
@@ -2947,9 +2947,9 @@ def _update_gradient(m: types.Model, d: types.Data, ctx: SolverContext):
       )
 
       wp.launch(
-        update_gradient_set_h_qM_upper_sparse,
-        dim=(d.nworld, m.qM_fullm_upper_i.size),
-        inputs=[m.qM_fullm_upper_i, m.qM_fullm_upper_j, m.qM_fullm_upper_elemid, d.qM, ctx.done],
+        update_gradient_set_h_M_upper_sparse,
+        dim=(d.nworld, m.M_fullm_upper_i.size),
+        inputs=[m.M_fullm_upper_i, m.M_fullm_upper_j, m.M_fullm_upper_elemid, d.M, ctx.done],
         outputs=[ctx.h],
       )
     else:
@@ -2959,7 +2959,7 @@ def _update_gradient(m: types.Model, d: types.Data, ctx: SolverContext):
           dim=d.nworld,
           inputs=[
             d.nefc,
-            d.qM,
+            d.M,
             d.efc.J,
             d.efc.D,
             d.efc.state,
@@ -3330,7 +3330,7 @@ def init_context(m: types.Model, d: types.Data, ctx: SolverContext | InverseCont
     outputs=[ctx.Jaref],
   )
 
-  # Ma = qM @ qacc
+  # Ma = M @ qacc
   support.mul_m(m, d, d.efc.Ma, d.qacc, skip=ctx.done)
 
   _update_constraint(m, d, ctx)

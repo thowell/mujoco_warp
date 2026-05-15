@@ -196,18 +196,16 @@ class SmoothTest(parameterized.TestCase):
 
     if jacobian == mujoco.mjtJacobian.mjJAC_SPARSE:
       if check_version("mujoco>=3.8.1.dev910242375"):
-        mjd_qM = np.zeros(mjm.nM)
-        mjd_qM[mjm.mapM2M] = mjd.M
-        _assert_eq(d.qM.numpy()[0, 0], mjd_qM, "qM")
+        _assert_eq(d.M.numpy()[0, 0], mjd.M, "M")
       else:
-        _assert_eq(d.qM.numpy()[0, 0], mjd.qM, "qM")
+        _assert_eq(d.M.numpy()[0, 0], mjd.qM[mjm.mapM2M], "M")
     else:
-      qM = np.zeros((mjm.nv, mjm.nv))
+      M = np.zeros((mjm.nv, mjm.nv))
       if check_version("mujoco>=3.8.1.dev910242375"):
-        mujoco.mju_sym2dense(qM, mjd.M, mjm.M_rownnz, mjm.M_rowadr, mjm.M_colind)
+        mujoco.mju_sym2dense(M, mjd.M, mjm.M_rownnz, mjm.M_rowadr, mjm.M_colind)
       else:
-        mujoco.mj_fullM(mjm, qM, mjd.qM)
-      _assert_eq(d.qM.numpy()[0, : mjm.nv, : mjm.nv], qM, "qM")
+        mujoco.mj_fullM(mjm, M, mjd.qM)
+      _assert_eq(d.M.numpy()[0, : mjm.nv, : mjm.nv], M, "M")
 
   @parameterized.parameters(mujoco.mjtJacobian.mjJAC_SPARSE, mujoco.mjtJacobian.mjJAC_DENSE)
   def test_factor_m(self, jacobian):
@@ -504,9 +502,9 @@ class SmoothTest(parameterized.TestCase):
     res = wp.zeros((1, mjm.nv), dtype=float)
     vec = wp.ones((1, mjm.nv), dtype=float)
 
-    mjw._src.smooth.factor_solve_i(m, d, d.qM, d.qLD, d.qLDiagInv, res, vec)
+    mjw._src.smooth.factor_solve_i(m, d, d.M, d.qLD, d.qLDiagInv, res, vec)
 
-    _assert_eq(res.numpy()[0], np.linalg.solve(qM, vec.numpy()[0]), "qM \\ 1")
+    _assert_eq(res.numpy()[0], np.linalg.solve(qM, vec.numpy()[0]), "M \\ 1")
 
     if sparse:
       _assert_eq(d.qLD.numpy()[0].reshape(-1), mjd.qLD, "qLD")
@@ -518,18 +516,18 @@ class SmoothTest(parameterized.TestCase):
   def test_tendon_armature(self):
     mjm, mjd, m, d = test_data.fixture("tendon/armature.xml", keyframe=0)
 
-    # qM
-    d.qM.fill_(wp.inf)
+    # M
+    d.M.fill_(wp.inf)
 
     mjw._src.smooth.crb(m, d)
     mjw._src.smooth.tendon_armature(m, d)
 
-    qM = np.zeros((mjm.nv, mjm.nv))
+    M = np.zeros((mjm.nv, mjm.nv))
     if check_version("mujoco>=3.8.1.dev910242375"):
-      mujoco.mju_sym2dense(qM, mjd.M, mjm.M_rownnz, mjm.M_rowadr, mjm.M_colind)
+      mujoco.mju_sym2dense(M, mjd.M, mjm.M_rownnz, mjm.M_rowadr, mjm.M_colind)
     else:
-      mujoco.mj_fullM(mjm, qM, mjd.qM)
-    _assert_eq(d.qM.numpy()[0, : mjm.nv, : mjm.nv], qM, "qM")
+      mujoco.mj_fullM(mjm, M, mjd.qM)
+    _assert_eq(d.M.numpy()[0, : mjm.nv, : mjm.nv], M, "M")
 
     # qfrc_bias
     d.qfrc_bias.fill_(wp.inf)
