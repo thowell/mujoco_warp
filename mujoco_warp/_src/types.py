@@ -47,6 +47,25 @@ class BlockDim:
   """Block dimension 'block_dim' settings for wp.launch_tiled.
 
   TODO(team): experimental and may be removed
+
+  Attributes:
+    segmented_sort: segmented sort block dimension (collision_driver)
+    euler_dense: Euler dense block dimension (forward)
+    actuator_velocity: actuator velocity block dimension (forward)
+    ray: ray block dimension (ray)
+    contact_sort: contact sort block dimension (sensor)
+    energy_vel_kinetic: energy velocity kinetic block dimension (sensor)
+    cholesky_factorize: Cholesky factorize block dimension (smooth)
+    cholesky_solve: Cholesky solve block dimension (smooth)
+    cholesky_factorize_solve: Cholesky factorize and solve block dimension (smooth)
+    solve_LD_sparse_fused: solve LD sparse fused block dimension (smooth)
+    update_gradient_cholesky: update gradient Cholesky block dimension (solver)
+    update_gradient_cholesky_blocked: update gradient Cholesky blocked block dimension (solver)
+    update_gradient_JTDAJ_sparse: update gradient JTDAJ sparse block dimension (solver)
+    update_gradient_JTDAJ_dense: update gradient JTDAJ dense block dimension (solver)
+    linesearch_iterative: linesearch iterative block dimension (solver)
+    contact_jac_tiled: contact Jacobian tiled block dimension (solver)
+    qderiv_actuator_dense: qderiv actuator dense block dimension (derivative)
   """
 
   # collision_driver
@@ -131,13 +150,8 @@ class ProjectionType(enum.IntEnum):
     ORTHOGRAPHIC: orthographic projection
   """
 
-  # TODO(team): remove after mjwarp depends on mujoco > 3.4.0 in pyproject.toml
-  if hasattr(mujoco, "mjtProjection"):
-    PERSPECTIVE = mujoco.mjtProjection.mjPROJ_PERSPECTIVE
-    ORTHOGRAPHIC = mujoco.mjtProjection.mjPROJ_ORTHOGRAPHIC
-  else:
-    PERSPECTIVE = 0
-    ORTHOGRAPHIC = 1
+  PERSPECTIVE = mujoco.mjtProjection.mjPROJ_PERSPECTIVE
+  ORTHOGRAPHIC = mujoco.mjtProjection.mjPROJ_ORTHOGRAPHIC
 
 
 class Stage(enum.IntEnum):
@@ -188,6 +202,7 @@ class DisableBit(enum.IntFlag):
     EULERDAMP:    implicit damping for Euler integration
     NATIVECCD:    native convex collision detection (ignored in MJWarp)
     ISLAND:       constraint islands
+    MULTICCD:     disable multiple contacts with CCD
   """
 
   CONSTRAINT = mujoco.mjtDisableBit.mjDSBL_CONSTRAINT
@@ -217,7 +232,6 @@ class EnableBit(enum.IntFlag):
   Attributes:
     ENERGY: energy computation
     INVDISCRETE: discrete-time inverse dynamics
-    MULTICCD: multiple contacts with CCD
   """
 
   ENERGY = mujoco.mjtEnableBit.mjENBL_ENERGY
@@ -1666,8 +1680,9 @@ class Model:
 class ContactType(enum.IntFlag):
   """Type of contact.
 
-  CONSTRAINT: contact for constraint solver.
-  SENSOR: contact for collision sensor (GEOMDIST, GEOMNORMAL, GEOMFROMTO).
+  Attributes:
+    CONSTRAINT: contact for constraint solver
+    SENSOR: contact for collision sensor (GEOMDIST, GEOMNORMAL, GEOMFROMTO)
   """
 
   CONSTRAINT = 1
@@ -1689,6 +1704,8 @@ class Contact:
     solimp: constraint solver impedance                              (naconmax, 5)
     dim: contact space dimensionality: 1, 3, 4 or 6                  (naconmax,)
     geom: geom ids; -1 for flex                                      (naconmax, 2)
+    flex: flex ids; -1 for geom                                      (naconmax, 2)
+    vert: vertex ids for flex/mesh contact                           (naconmax, 2)
     efc_address: address in efc; -1: not included                    (naconmax, nmaxpyramid)
     worldid: world id                                                (naconmax,)
     type: ContactType                                                (naconmax,)
@@ -1727,9 +1744,9 @@ class Constraint:
     J_rowadr: row start address in colind array       (nworld, 0) dense
                                                       (nworld, njmax) sparse
     J_colind: column indices in J                     (nworld, 0, 0) dense
-                                                      (nworld, 1, njmax * nv) sparse
+                                                      (nworld, 1, njmax_nnz) sparse
     J: constraint Jacobian                            (nworld, njmax_pad, nv_pad) dense
-                                                      (nworld, 1, njmax * nv) sparse
+                                                      (nworld, 1, njmax_nnz) sparse
     pos: constraint position (equality, contact)      (nworld, njmax)
     margin: inclusion margin (contact)                (nworld, njmax)
     D: constraint mass                                (nworld, njmax_pad)
@@ -1807,7 +1824,7 @@ class Data:
     cinert: com-based body inertia and mass                     (nworld, nbody, 10)
     flexvert_xpos: cartesian flex vertex positions              (nworld, nflexvert, 3)
     flexedge_J: edge length Jacobian                            (nworld, nJfe)
-    flexedge_length: flex edge lengths                          (nworld, nflexedge, 1)
+    flexedge_length: flex edge lengths                          (nworld, nflexedge)
     ten_wrapadr: start address of tendon's path                 (nworld, ntendon)
     ten_wrapnum: number of wrap points in path                  (nworld, ntendon)
     ten_J: tendon Jacobian                                      (nworld, nJten)
@@ -1820,7 +1837,7 @@ class Data:
     moment_colind: column indices in sparse actuator_moment     (nworld, nJmom)
     actuator_moment: actuator moments                           (nworld, nJmom)
     crb: com-based composite inertia and mass                   (nworld, nbody, 10)
-    M: total inertia                                            (nworld, nv, nv) if dense
+    M: total inertia                                            (nworld, nv_pad, nv_pad) if dense
                                                                 (nworld, 1, nC) if sparse
     qLD: upper Cholesky factorization                           (nworld, nv, nv) if dense
          L'*D*L factorization of M                              (nworld, 1, nC) if sparse
@@ -1969,6 +1986,7 @@ class RenderContext:
     use_textures: whether to use textures
     use_shadows: whether to use shadows
     use_ambient_lighting: whether to use ambient lighting
+    background_color: background color
     use_precomputed_rays: whether to use precomputed rays
     bvh_ngeom: number of geometries in the BVH
     enabled_geom_ids: enabled geometry ids
@@ -1988,7 +2006,10 @@ class RenderContext:
     flex_bvh_id: per-flex BVH ids
     flex_group_root: per-flex group roots (nworld x n_flex_bvh)
     flex_render_smooth: whether to render flex meshes smoothly
-    flex_dim: flex dimension per flex (1D/2D/3D)
+    bvh_nflexgeom: number of flex geometries in the BVH
+    flex_dim_np: flex dimension per flex (1D/2D/3D)
+    flex_geom_flexid: map from flex geom ID to flex ID
+    flex_geom_edgeid: map from flex geom ID to flex edge ID
     bvh: scene BVH
     bvh_id: scene BVH id
     lower: lower bounds
