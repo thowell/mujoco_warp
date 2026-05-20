@@ -32,6 +32,8 @@ BENCHMARKS = [
     "nconmax": 48,
     "njmax": 192,
     "nstep": 200,
+    "render_width": 64,
+    "render_height": 64,
     "render_depth": False,
     "replay": "shuffle_dance.npz",
     "assets": [(ASSETS[0], "unitree_g1/assets", "assets")],
