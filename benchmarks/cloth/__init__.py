@@ -9,7 +9,7 @@ BENCHMARKS = [
   {
     "name": "cloth_render",
     "mjcf": "scene.xml",
-    "function": "render",
+    "function": ["refit_bvh", "render"],
     "nworld": 32,
     "nconmax": 4000,
     "njmax": 32000,
