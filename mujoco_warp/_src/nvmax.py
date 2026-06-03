@@ -32,93 +32,9 @@ from mujoco_warp._src.warp_util import event_scope
 
 _TILE_SIZE = types.TILE_SIZE_JTDAJ_DENSE
 
-# A contact only wakes a sleeping tree if one of its bodies moves faster than this
-# (squared spatial velocity, |cvel|^2). Keeps settled/resting contacts asleep.
-_WAKE_SPEED_SQ = 1.0e-4
-
 
 def _round_up(x: int, multiple: int) -> int:
   return ((x + multiple - 1) // multiple) * multiple
-
-
-@wp.kernel
-def _seed_qfrc_applied(
-  # Model:
-  dof_treeid: wp.array[int],
-  # Data in:
-  qfrc_applied_in: wp.array2d[float],
-  # Data out:
-  tree_active_out: wp.array2d[bool],
-):
-  worldid, dofid = wp.tid()
-  if qfrc_applied_in[worldid, dofid] != 0.0:
-    tree = dof_treeid[dofid]
-    if tree >= 0:
-      tree_active_out[worldid, tree] = True
-
-
-@wp.kernel
-def _seed_xfrc_applied(
-  # Model:
-  body_treeid: wp.array[int],
-  # Data in:
-  xfrc_applied_in: wp.array2d[wp.spatial_vector],
-  # Data out:
-  tree_active_out: wp.array2d[bool],
-):
-  worldid, bodyid = wp.tid()
-  tree = body_treeid[bodyid]
-  if tree < 0:
-    return
-  xfrc = xfrc_applied_in[worldid, bodyid]
-  for i in range(6):
-    if xfrc[i] != 0.0:
-      tree_active_out[worldid, tree] = True
-      return
-
-
-@wp.func
-def _body_moving(cvel_in: wp.array2d[wp.spatial_vector], worldid: int, bodyid: int, speed_sq: float) -> bool:
-  if bodyid < 0:
-    return False
-  v = cvel_in[worldid, bodyid]
-  return wp.dot(v, v) > speed_sq
-
-
-@wp.kernel
-def _seed_contacts(
-  # Model:
-  body_treeid: wp.array[int],
-  geom_bodyid: wp.array[int],
-  # Data in:
-  cvel_in: wp.array2d[wp.spatial_vector],
-  contact_geom_in: wp.array[wp.vec2i],
-  contact_worldid_in: wp.array[int],
-  nacon_in: wp.array[int],
-  # In:
-  wake_speed_sq: float,
-  # Data out:
-  tree_active_out: wp.array2d[bool],
-):
-  conid = wp.tid()
-  if conid >= nacon_in[0]:
-    return
-  worldid = contact_worldid_in[conid]
-  geom = contact_geom_in[conid]
-
-  b0 = wp.where(geom[0] >= 0, geom_bodyid[geom[0]], -1)
-  b1 = wp.where(geom[1] >= 0, geom_bodyid[geom[1]], -1)
-
-  # Velocity gate: only wake on contacts where at least one body is moving.
-  # Resting contacts (cup on a static table, settled clutter) stay asleep; motion
-  # propagates outward from the actuated/forced drivers over successive steps.
-  if not (_body_moving(cvel_in, worldid, b0, wake_speed_sq) or _body_moving(cvel_in, worldid, b1, wake_speed_sq)):
-    return
-
-  if b0 >= 0 and body_treeid[b0] >= 0:
-    tree_active_out[worldid, body_treeid[b0]] = True
-  if b1 >= 0 and body_treeid[b1] >= 0:
-    tree_active_out[worldid, body_treeid[b1]] = True
 
 
 @wp.kernel
@@ -128,7 +44,7 @@ def _compact_dofs(
   tree_dofadr: wp.array[int],
   tree_dofnum: wp.array[int],
   # Data in:
-  tree_active_in: wp.array2d[bool],
+  tree_awake_in: wp.array2d[int],
   nv_max_in: int,
   # Data out:
   ncdof_out: wp.array[int],
@@ -138,7 +54,7 @@ def _compact_dofs(
   worldid = wp.tid()
   count = int(0)
   for t in range(ntree):
-    if tree_active_in[worldid, t]:
+    if tree_awake_in[worldid, t] == 1:
       adr = tree_dofadr[t]
       num = tree_dofnum[t]
       for j in range(num):
@@ -161,26 +77,14 @@ def _compact_dofs(
 
 
 @event_scope
-def update_active_dofs(m: types.Model, d: types.Data):
-  """Update the persistent active-tree mask and rebuild the compaction maps."""
-  # seed newly-active trees from applied forces and contacts (monotonic OR)
-  wp.launch(_seed_qfrc_applied, dim=(d.nworld, m.nv), inputs=[m.dof_treeid, d.qfrc_applied], outputs=[d.tree_active])
-  wp.launch(_seed_xfrc_applied, dim=(d.nworld, m.nbody), inputs=[m.body_treeid, d.xfrc_applied], outputs=[d.tree_active])
-
-  wp.launch(
-    _seed_contacts,
-    dim=(d.naconmax,),
-    inputs=[m.body_treeid, m.geom_bodyid, d.cvel, d.contact.geom, d.contact.worldid, d.nacon, _WAKE_SPEED_SQ],
-    outputs=[d.tree_active],
-  )
-
-  # rebuild compaction maps from the (monotonic) active-tree mask
+def compact_dofs(m: types.Model, d: types.Data):
+  """Rebuild the compaction maps from the tree_awake array."""
   d.dof_cdof.fill_(-1)
   d.cdof_dof.fill_(-1)
   wp.launch(
     _compact_dofs,
     dim=(d.nworld,),
-    inputs=[m.ntree, m.tree_dofadr, m.tree_dofnum, d.tree_active, d.nv_max],
+    inputs=[m.ntree, m.tree_dofadr, m.tree_dofnum, d.tree_awake, d.nv_max],
     outputs=[d.ncdof, d.dof_cdof, d.cdof_dof],
   )
 
@@ -326,6 +230,28 @@ def _gather_M_sparse(
 
 
 @wp.kernel
+def _gather_M_dense(
+  # Model:
+  nv: int,
+  # Data in:
+  M_in: wp.array3d[float],
+  dof_cdof_in: wp.array2d[int],
+  # Out:
+  M_c_out: wp.array3d[float],
+):
+  worldid, i = wp.tid()
+  ci = dof_cdof_in[worldid, i]
+  if ci < 0:
+    return
+  for j in range(i, nv):
+    cj = dof_cdof_in[worldid, j]
+    if cj >= 0:
+      val = M_in[worldid, i, j]
+      M_c_out[worldid, ci, cj] = val
+      M_c_out[worldid, cj, ci] = val
+
+
+@wp.kernel
 def _gather_rhs(
   # Data in:
   dof_cdof_in: wp.array2d[int],
@@ -387,12 +313,20 @@ def smooth_solve_compact(m: types.Model, d: types.Data, ctx: NvCompactContext):
   ctx.M_c.zero_()
   ctx.rhs_c.zero_()
   wp.launch(_pad_identity, dim=(d.nworld, ctx.nv_max_pad), inputs=[d.ncdof], outputs=[ctx.M_c])
-  wp.launch(
-    _gather_M_sparse,
-    dim=(d.nworld, m.nv),
-    inputs=[m.M_rownnz, m.M_rowadr, m.M_colind, d.M, d.dof_cdof],
-    outputs=[ctx.M_c],
-  )
+  if m.is_sparse:
+    wp.launch(
+      _gather_M_sparse,
+      dim=(d.nworld, m.nv),
+      inputs=[m.M_rownnz, m.M_rowadr, m.M_colind, d.M, d.dof_cdof],
+      outputs=[ctx.M_c],
+    )
+  else:
+    wp.launch(
+      _gather_M_dense,
+      dim=(d.nworld, m.nv),
+      inputs=[m.nv, d.M, d.dof_cdof],
+      outputs=[ctx.M_c],
+    )
   wp.launch(_gather_rhs, dim=(d.nworld, m.nv), inputs=[d.dof_cdof, d.qfrc_smooth], outputs=[ctx.rhs_c])
   wp.launch_tiled(
     _blocked_factor_solve(ctx.nv_max_pad),
@@ -460,6 +394,27 @@ def _gather_J_sparse(
       J_c_out[worldid, efcid, cj] = J_in[worldid, 0, adr]
 
 
+@wp.kernel
+def _gather_J_dense(
+  # Model:
+  nv: int,
+  # Data in:
+  nefc_in: wp.array[int],
+  dof_cdof_in: wp.array2d[int],
+  # In:
+  J_in: wp.array3d[float],
+  # Out:
+  J_c_out: wp.array3d[float],
+):
+  worldid, efcid = wp.tid()
+  if efcid >= nefc_in[worldid]:
+    return
+  for j in range(nv):
+    cj = dof_cdof_in[worldid, j]
+    if cj >= 0:
+      J_c_out[worldid, efcid, cj] = J_in[worldid, efcid, j]
+
+
 def _gather2d(d, src, dst):
   dst.zero_()
   wp.launch(_gather_dof_vec, dim=(d.nworld, src.shape[1]), inputs=[d.dof_cdof, src], outputs=[dst])
@@ -488,7 +443,13 @@ def solve_compact(m: types.Model, d: types.Data, ctx: NvCompactContext):
   gc = m.opt.graph_conditional and wp.get_device().is_cuda
   opt2 = _dc.replace(m.opt, graph_conditional=gc, tolerance=ctx.tol_c, ls_tolerance=ctx.ls_tol_c)
   m2 = _dc.replace(
-    m, opt=opt2, nv=nvp, nv_pad=nvp, is_sparse=False, dof_tri_row=ctx.dof_tri_row_c, dof_tri_col=ctx.dof_tri_col_c
+    m,
+    opt=opt2,
+    nv=nvp,
+    nv_pad=nvp,
+    is_sparse=False,
+    dof_tri_row=ctx.dof_tri_row_c,
+    dof_tri_col=ctx.dof_tri_col_c,
   )
   efc2 = _dc.replace(d.efc, J=ctx.J_c, Ma=ctx.Ma_c)
   d2 = _dc.replace(
@@ -514,20 +475,36 @@ def _compact_gather(m: types.Model, d: types.Data, ctx: NvCompactContext):
   # gather compacted dense inertia (identity-padded tail)
   ctx.M_c.zero_()
   wp.launch(_pad_identity, dim=(d.nworld, nvp), inputs=[d.ncdof], outputs=[ctx.M_c])
-  wp.launch(
-    _gather_M_sparse,
-    dim=(d.nworld, m.nv),
-    inputs=[m.M_rownnz, m.M_rowadr, m.M_colind, d.M, d.dof_cdof],
-    outputs=[ctx.M_c],
-  )
+  if m.is_sparse:
+    wp.launch(
+      _gather_M_sparse,
+      dim=(d.nworld, m.nv),
+      inputs=[m.M_rownnz, m.M_rowadr, m.M_colind, d.M, d.dof_cdof],
+      outputs=[ctx.M_c],
+    )
+  else:
+    wp.launch(
+      _gather_M_dense,
+      dim=(d.nworld, m.nv),
+      inputs=[m.nv, d.M, d.dof_cdof],
+      outputs=[ctx.M_c],
+    )
   # gather compacted dense constraint Jacobian (active columns only)
   ctx.J_c.zero_()
-  wp.launch(
-    _gather_J_sparse,
-    dim=(d.nworld, d.njmax),
-    inputs=[d.nefc, d.dof_cdof, d.efc.J_rownnz, d.efc.J_rowadr, d.efc.J_colind, d.efc.J],
-    outputs=[ctx.J_c],
-  )
+  if m.is_sparse:
+    wp.launch(
+      _gather_J_sparse,
+      dim=(d.nworld, d.njmax),
+      inputs=[d.nefc, d.dof_cdof, d.efc.J_rownnz, d.efc.J_rowadr, d.efc.J_colind, d.efc.J],
+      outputs=[ctx.J_c],
+    )
+  else:
+    wp.launch(
+      _gather_J_dense,
+      dim=(d.nworld, d.njmax),
+      inputs=[m.nv, d.nefc, d.dof_cdof, d.efc.J],
+      outputs=[ctx.J_c],
+    )
   # gather compacted DOF-space vectors
   _gather2d(d, d.qfrc_smooth, ctx.qfrc_smooth_c)
   _gather2d(d, d.qacc_smooth, ctx.qacc_smooth_c)

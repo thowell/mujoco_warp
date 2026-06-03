@@ -2029,7 +2029,6 @@ class Data:
     iqfrc_smooth: island-local qfrc_smooth                      (nworld, nv)
     iqfrc_constraint: island-local qfrc_constraint              (nworld, nv)
     ncdof: number of active (compacted) DOFs per world          (nworld,)
-    tree_active: persistent active mask per tree                (nworld, ntree)
     dof_cdof: global DOF -> compacted DOF; -1 if inactive       (nworld, nv)
     cdof_dof: compacted DOF -> global DOF; -1 if unused         (nworld, nv_max)
 
@@ -2157,7 +2156,6 @@ class Data:
   iqfrc_smooth: wp.array2d[float]
   iqfrc_constraint: wp.array2d[float]
   ncdof: array("nworld", int)
-  tree_active: array("nworld", "ntree", bool)
   dof_cdof: array("nworld", "nv", int)
   cdof_dof: array("nworld", "nv_max", int)
 

@@ -1335,9 +1335,8 @@ def fwd_acceleration(m: Model, d: Data, factorize: bool = False):
   xfrc_accumulate(m, d, d.qfrc_smooth)
 
   if m.opt.nv_compact:
-    # update the active-DOF set (needs contacts from fwd_position) and solve
-    # the smooth acceleration in compacted dense space.
-    nvmax.update_active_dofs(m, d)
+    # experimental active-DOF compaction solver (smooth phase)
+    nvmax.compact_dofs(m, d)
     nvmax.smooth_solve_compact(m, d, nvmax.get_context(m, d))
   elif factorize:
     smooth.factor_solve_i(m, d, d.M, d.qLD, d.qLDiagInv, d.qacc_smooth, d.qfrc_smooth)
@@ -1429,7 +1428,10 @@ def step2(m: Model, d: Data):
   """Advance simulation in two phases: after input is set by user."""
   fwd_actuation(m, d)
   fwd_acceleration(m, d)
-  solver.solve(m, d)
+  if m.opt.nv_compact:
+    nvmax.solve_compact(m, d, nvmax.get_context(m, d))
+  else:
+    solver.solve(m, d)
   sensor.sensor_acc(m, d)
 
   # integrate with Euler or implicitfast

@@ -24,6 +24,7 @@ import warp as wp
 from mujoco_warp._src import bvh
 from mujoco_warp._src import math as mjmath
 from mujoco_warp._src import render_util
+from mujoco_warp._src import sleep
 from mujoco_warp._src import smooth
 from mujoco_warp._src import types
 from mujoco_warp._src import warp_util
@@ -44,6 +45,17 @@ ENABLE_NV_COMPACT = False
 def _is_array_spec(typ) -> bool:
   """Check if a type annotation is an array spec (wp.array instance or bracket annotation)."""
   return isinstance(typ, wp.array) or type(typ).__name__ == "_ArrayAnnotation"
+
+
+def _mj_kinematics_no_sleep(mjm: mujoco.MjModel, mjd: mujoco.MjData) -> None:
+  """Run mj_kinematics ensuring sleep optimizations are temporarily disabled."""
+  sleep_bit = int(mujoco.mjtEnableBit.mjENBL_SLEEP)
+  sleep_enabled = bool(mjm.opt.enableflags & sleep_bit)
+  if sleep_enabled:
+    mjm.opt.enableflags &= ~sleep_bit
+  mujoco.mj_kinematics(mjm, mjd)
+  if sleep_enabled:
+    mjm.opt.enableflags |= sleep_bit
 
 
 def _create_array(data: Any, spec, sizes: dict[str, int]) -> wp.array | None:
@@ -164,6 +176,11 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
     if missing.any():
       names = [mj_type(v).name for v in field[missing]]
       raise NotImplementedError(f"{names} not supported.")
+
+  global ENABLE_ISLANDS
+  if ENABLE_NV_COMPACT:
+    ENABLE_ISLANDS = True
+    mjm.opt.enableflags |= mujoco.mjtEnableBit.mjENBL_SLEEP
 
   # opt: check supported features in scalar types
   for field, field_type, mj_type in (
@@ -1052,26 +1069,54 @@ def _allocate_island_arrays(
   d.iqfrc_constraint = wp.empty((nworld, nv_size), dtype=float)
 
 
-def _tree_actuated_mask(mjm: mujoco.MjModel) -> np.ndarray:
-  """Trees that contain an actuator (always-active seeds for nv_compact)."""
-  mask = np.zeros(mjm.ntree, dtype=bool)
-  for i in range(mjm.nu):
-    trntype = mjm.actuator_trntype[i]
-    # PoC: only joint transmissions are mapped to trees; other types wake via contact/force.
-    if trntype in (mujoco.mjtTrn.mjTRN_JOINT, mujoco.mjtTrn.mjTRN_JOINTINPARENT):
-      tree = mjm.dof_treeid[mjm.jnt_dofadr[mjm.actuator_trnid[i, 0]]]
-      if tree >= 0:
-        mask[tree] = True
-  return mask
-
-
 def _init_nv_compact(mjm: mujoco.MjModel, d: types.Data, nworld: int):
-  """Seed the persistent active-tree mask and clear the compaction maps."""
-  tree_actuated = _tree_actuated_mask(mjm)
-  d.tree_active = wp.array(np.tile(tree_actuated, (nworld, 1)), shape=(nworld, mjm.ntree), dtype=bool)
+  """Clear the compaction maps."""
   d.ncdof.zero_()
   d.dof_cdof.fill_(-1)
   d.cdof_dof.fill_(-1)
+
+
+def _get_initial_sleep_states(mjm: mujoco.MjModel) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+  """Determine host arrays for initial sleep states based on enableflags and sleep policies."""
+  enable_sleep = bool(mjm.opt.enableflags & mujoco.mjtEnableBit.mjENBL_SLEEP)
+  if enable_sleep:
+    policy = mjm.tree_sleep_policy
+    tree_awake = np.where(policy == mujoco.mjtSleepPolicy.mjSLEEP_AUTO_NEVER, 1, 0).astype(np.int32)
+    tree_asleep = np.where(
+      policy == mujoco.mjtSleepPolicy.mjSLEEP_AUTO_NEVER,
+      -(1 + types.MJ_MINAWAKE),
+      np.arange(mjm.ntree, dtype=np.int32),
+    ).astype(np.int32)
+
+    body_awake = np.zeros(mjm.nbody, dtype=np.int32)
+    for b in range(mjm.nbody):
+      t = mjm.body_treeid[b]
+      if t < 0:
+        if mjm.body_mocapid[b] >= 0:
+          body_awake[b] = int(types.SleepState.AWAKE)
+        else:
+          body_awake[b] = int(types.SleepState.STATIC)
+      else:
+        if tree_awake[t] == 1:
+          body_awake[b] = int(types.SleepState.AWAKE)
+        else:
+          body_awake[b] = int(types.SleepState.ASLEEP)
+  else:
+    tree_awake = np.ones(mjm.ntree, dtype=np.int32)
+    tree_asleep = np.full(mjm.ntree, -(1 + types.MJ_MINAWAKE), dtype=np.int32)
+
+    body_awake = np.zeros(mjm.nbody, dtype=np.int32)
+    for b in range(mjm.nbody):
+      t = mjm.body_treeid[b]
+      if t < 0:
+        if mjm.body_mocapid[b] >= 0:
+          body_awake[b] = int(types.SleepState.AWAKE)
+        else:
+          body_awake[b] = int(types.SleepState.STATIC)
+      else:
+        body_awake[b] = int(types.SleepState.AWAKE)
+
+  return tree_asleep, tree_awake, body_awake
 
 
 def make_data(
@@ -1103,6 +1148,11 @@ def make_data(
   Returns:
     The data object containing the current state and output arrays (device).
   """
+  global ENABLE_ISLANDS
+  if ENABLE_NV_COMPACT:
+    ENABLE_ISLANDS = True
+    mjm.opt.enableflags |= mujoco.mjtEnableBit.mjENBL_SLEEP
+
   # TODO(team): move nconmax, njmax to Model?
   if nconmax is None:
     nconmax = _default_nconmax(mjm)
@@ -1187,11 +1237,13 @@ def make_data(
   # this speeds up scenes with many static geoms (e.g. terrains)
   # TODO(team): remove this when we introduce dof islands + sleeping
   mjd = mujoco.MjData(mjm)
-  mujoco.mj_kinematics(mjm, mjd)
+  _mj_kinematics_no_sleep(mjm, mjd)
 
   # mocap
   mocap_body = np.nonzero(mjm.body_mocapid >= 0)[0]
   mocap_id = mjm.body_mocapid[mocap_body]
+
+  tree_asleep_val, tree_awake_val, body_awake_val = _get_initial_sleep_states(mjm)
 
   d_kwargs = {
     "qpos": wp.array(np.tile(mjm.qpos0, nworld), shape=(nworld, mjm.nq), dtype=float),
@@ -1242,10 +1294,10 @@ def make_data(
     "iqacc_smooth": None,
     "iqfrc_smooth": None,
     "iqfrc_constraint": None,
-    # sleep state: all trees start fully awake
-    "tree_asleep": wp.array(np.full((nworld, mjm.ntree), -(1 + types.MJ_MINAWAKE)), dtype=int),
-    "tree_awake": wp.array(np.ones((nworld, mjm.ntree)), dtype=int),
-    "body_awake": wp.array(np.ones((nworld, mjm.nbody)), dtype=int),
+    # sleep state
+    "tree_asleep": wp.array(np.tile(tree_asleep_val, (nworld, 1)), dtype=int),
+    "tree_awake": wp.array(np.tile(tree_awake_val, (nworld, 1)), dtype=int),
+    "body_awake": wp.array(np.tile(body_awake_val, (nworld, 1)), dtype=int),
   }
   for f in dataclasses.fields(types.Data):
     if f.name in d_kwargs:
@@ -1372,7 +1424,7 @@ def put_data(
 
   # ensure static geom positions are computed
   # TODO: remove once MjData creation semantics are fixed
-  mujoco.mj_kinematics(mjm, mjd)
+  _mj_kinematics_no_sleep(mjm, mjd)
 
   # create contact
   contact_kwargs = {"efc_address": None, "worldid": None, "type": None, "geomcollisionid": None}
@@ -1445,8 +1497,13 @@ def put_data(
     efc_J[:, : mjd.nefc, : mjm.nv] = np.tile(mj_efc_J, (nworld, 1, 1))
     efc.J = wp.array(efc_J, dtype=float)
 
+  tree_asleep_val, tree_awake_val, body_awake_val = _get_initial_sleep_states(mjm)
+
   # create data
   d_kwargs = {
+    "tree_asleep": wp.array(np.tile(tree_asleep_val, (nworld, 1)), dtype=int),
+    "tree_awake": wp.array(np.tile(tree_awake_val, (nworld, 1)), dtype=int),
+    "body_awake": wp.array(np.tile(body_awake_val, (nworld, 1)), dtype=int),
     "contact": contact,
     "efc": efc,
     "nworld": nworld,
@@ -1726,8 +1783,6 @@ def get_data_into(
   result.efc_frictionloss[:] = d.efc.frictionloss.numpy()[world_id, efc_idx]
   result.efc_state[:] = d.efc.state.numpy()[world_id, efc_idx]
   result.efc_force[:] = d.efc.force.numpy()[world_id, efc_idx]
-  result.efc_island[:] = d.efc.island.numpy()[world_id, efc_idx]
-
   # rne_postconstraint
   result.cacc[:] = d.cacc.numpy()[world_id]
   result.cfrc_int[:] = d.cfrc_int.numpy()[world_id]
@@ -1750,55 +1805,103 @@ def get_data_into(
   result.tree_awake[:] = d.tree_awake.numpy()[world_id]
   result.body_awake[:] = d.body_awake.numpy()[world_id]
 
-  # islands
+  # islands — compute visualization fields from tree_island on the CPU so
+  # that island coloring works regardless of which solver path ran
   nisland = d.nisland.numpy()[world_id]
   result.nisland = nisland
   if d.tree_island.shape[1] > 0 and nisland:
-    result.tree_island[:] = d.tree_island.numpy()[world_id]
-    result.dof_island[:] = d.dof_island.numpy()[world_id]
-    result.island_idofadr[:nisland] = d.island_idofadr.numpy()[world_id, :nisland]
-    result.island_dofadr[:nisland] = d.island_dofadr.numpy()[world_id, :nisland]
-    result.island_nv[:nisland] = d.island_nv.numpy()[world_id, :nisland]
-    result.island_nefc[:nisland] = d.island_nefc.numpy()[world_id, :nisland]
-    result.island_ne[:nisland] = d.island_ne.numpy()[world_id, :nisland]
-    result.island_nf[:nisland] = d.island_nf.numpy()[world_id, :nisland]
-    result.island_iefcadr[:nisland] = d.island_efcadr.numpy()[world_id, :nisland]
+    tree_island = d.tree_island.numpy()[world_id]
+    result.tree_island[:] = tree_island
     nv = mjm.nv
-    result.map_dof2idof[:nv] = d.map_dof2idof.numpy()[world_id, :nv]
-    result.map_idof2dof[:nv] = d.map_idof2dof.numpy()[world_id, :nv]
-    result.map_efc2iefc[:nefc] = d.map_efc2iefc.numpy()[world_id, :nefc]
-    result.map_iefc2efc[:nefc] = d.map_iefc2efc.numpy()[world_id, :nefc]
 
-    result.iefc_type[:nefc] = d.efc.itype.numpy()[world_id, :nefc]
-    result.iefc_id[:nefc] = d.efc.iid.numpy()[world_id, :nefc]
-    result.iefc_D[:nefc] = d.efc.iD.numpy()[world_id, :nefc]
-    result.iefc_aref[:nefc] = d.efc.iaref.numpy()[world_id, :nefc]
-    result.iefc_frictionloss[:nefc] = d.efc.ifrictionloss.numpy()[world_id, :nefc]
-    result.iefc_state[:nefc] = d.efc.istate.numpy()[world_id, :nefc]
-    result.iefc_force[:nefc] = d.efc.iforce.numpy()[world_id, :nefc]
+    # Check if the GPU solver populated the full island mapping
+    has_island_mapping = d.nidof.shape[0] > 0 and int(d.nidof.numpy()[world_id]) > 0
+    if has_island_mapping:
+      # --- Previous island code path (essentially unchanged) ---
+      result.efc_island[:] = d.efc.island.numpy()[world_id, efc_idx]
+      result.dof_island[:] = d.dof_island.numpy()[world_id]
+      result.island_idofadr[:nisland] = d.island_idofadr.numpy()[world_id, :nisland]
+      result.island_dofadr[:nisland] = d.island_dofadr.numpy()[world_id, :nisland]
+      result.island_nv[:nisland] = d.island_nv.numpy()[world_id, :nisland]
+      result.island_nefc[:nisland] = d.island_nefc.numpy()[world_id, :nisland]
+      result.island_ne[:nisland] = d.island_ne.numpy()[world_id, :nisland]
+      result.island_nf[:nisland] = d.island_nf.numpy()[world_id, :nisland]
+      result.island_iefcadr[:nisland] = d.island_efcadr.numpy()[world_id, :nisland]
+      result.map_dof2idof[:nv] = d.map_dof2idof.numpy()[world_id, :nv]
+      result.map_idof2dof[:nv] = d.map_idof2dof.numpy()[world_id, :nv]
+      result.map_efc2iefc[:nefc] = d.map_efc2iefc.numpy()[world_id, :nefc]
+      result.map_iefc2efc[:nefc] = d.map_iefc2efc.numpy()[world_id, :nefc]
 
-    if is_sparse(mjm):
-      iefc_J = np.zeros((nefc, mjm.nv))
-      mujoco.mju_sparse2dense(
-        iefc_J,
-        d.efc.iJ.numpy()[world_id, 0],
-        d.efc.iJ_rownnz.numpy()[world_id, :nefc],
-        d.efc.iJ_rowadr.numpy()[world_id, :nefc],
-        d.efc.iJ_colind.numpy()[world_id, 0],
-      )
+      result.iefc_type[:nefc] = d.efc.itype.numpy()[world_id, :nefc]
+      result.iefc_id[:nefc] = d.efc.iid.numpy()[world_id, :nefc]
+      result.iefc_D[:nefc] = d.efc.iD.numpy()[world_id, :nefc]
+      result.iefc_aref[:nefc] = d.efc.iaref.numpy()[world_id, :nefc]
+      result.iefc_frictionloss[:nefc] = d.efc.ifrictionloss.numpy()[world_id, :nefc]
+      result.iefc_state[:nefc] = d.efc.istate.numpy()[world_id, :nefc]
+      result.iefc_force[:nefc] = d.efc.iforce.numpy()[world_id, :nefc]
+
+      if is_sparse(mjm):
+        iefc_J = np.zeros((nefc, mjm.nv))
+        mujoco.mju_sparse2dense(
+          iefc_J,
+          d.efc.iJ.numpy()[world_id, 0],
+          d.efc.iJ_rownnz.numpy()[world_id, :nefc],
+          d.efc.iJ_rowadr.numpy()[world_id, :nefc],
+          d.efc.iJ_colind.numpy()[world_id, 0],
+        )
+      else:
+        iefc_J = d.efc.iJ.numpy()[world_id, :nefc, : mjm.nv]
+
+      if mujoco.mj_isSparse(mjm):
+        mujoco.mju_dense2sparse(
+          result.iefc_J,
+          iefc_J,
+          result.iefc_J_rownnz,
+          result.iefc_J_rowadr,
+          result.iefc_J_colind,
+        )
+      else:
+        result.iefc_J[: nefc * mjm.nv] = iefc_J.flatten()
     else:
-      iefc_J = d.efc.iJ.numpy()[world_id, :nefc, : mjm.nv]
+      # --- Simplified CPU fallback for nv_compact (only compute visualization fields) ---
+      # dof_island: derive from tree_island and dof_treeid
+      result.dof_island[:] = tree_island[mjm.dof_treeid[:nv]]
 
-    if mujoco.mj_isSparse(mjm):
-      mujoco.mju_dense2sparse(
-        result.iefc_J,
-        iefc_J,
-        result.iefc_J_rownnz,
-        result.iefc_J_rowadr,
-        result.iefc_J_colind,
-      )
-    else:
-      result.iefc_J[: nefc * mjm.nv] = iefc_J.flatten()
+      # island_nv and island_dofadr: derive from dof_island
+      result.island_nv[:nisland] = 0
+      result.island_dofadr[:nisland] = nv
+      for i in range(nv):
+        isl = result.dof_island[i]
+        if 0 <= isl < nisland:
+          result.island_nv[isl] += 1
+          result.island_dofadr[isl] = min(result.island_dofadr[isl], i)
+
+      # efc_island and island constraint counts: derive from Jacobian and efc_type
+      result.island_nefc[:nisland] = 0
+      result.island_ne[:nisland] = 0
+      result.island_nf[:nisland] = 0
+      if nefc > 0:
+        first_dof = np.argmax(efc_J != 0, axis=1)
+        has_nonzero = np.any(efc_J != 0, axis=1)
+        efc_island = np.full(nefc, -1, dtype=np.int32)
+        valid = has_nonzero & (first_dof < nv)
+        efc_island[valid] = tree_island[mjm.dof_treeid[first_dof[valid]]]
+        result.efc_island[:] = efc_island[efc_idx]
+
+        efc_type = d.efc.type.numpy()[world_id, :nefc]
+        eq_type = int(mujoco.mjtConstraint.mjCNSTR_EQUALITY)
+        fric_dof_type = int(mujoco.mjtConstraint.mjCNSTR_FRICTION_DOF)
+        fric_ten_type = int(mujoco.mjtConstraint.mjCNSTR_FRICTION_TENDON)
+        for i in range(nefc):
+          isl = result.efc_island[i]
+          if 0 <= isl < nisland:
+            result.island_nefc[isl] += 1
+            if efc_type[i] == eq_type:
+              result.island_ne[isl] += 1
+            elif efc_type[i] in (fric_dof_type, fric_ten_type):
+              result.island_nf[isl] += 1
+      else:
+        result.efc_island[:] = 0
 
 
 def reset_data(m: types.Model, d: types.Data, reset: Optional[wp.array] = None):
@@ -1992,7 +2095,9 @@ def reset_data(m: types.Model, d: types.Data, reset: Optional[wp.array] = None):
     ntree: int,
     body_mocapid: wp.array[int],
     body_treeid: wp.array[int],
+    tree_sleep_policy: wp.array[int],
     # In:
+    enable_sleep: bool,
     mj_minawake: int,
     reset_in: wp.array[bool],
     # Data out:
@@ -2009,17 +2114,34 @@ def reset_data(m: types.Model, d: types.Data, reset: Optional[wp.array] = None):
         return
 
     if elemid < ntree:
-      tree_asleep_out[worldid, elemid] = -(1 + mj_minawake)
-      tree_awake_out[worldid, elemid] = 1
+      if enable_sleep:
+        policy = tree_sleep_policy[elemid]
+        if policy == types.SleepPolicy.AUTO_NEVER:
+          tree_asleep_out[worldid, elemid] = -(1 + mj_minawake)
+          tree_awake_out[worldid, elemid] = 1
+        else:
+          tree_asleep_out[worldid, elemid] = elemid
+          tree_awake_out[worldid, elemid] = 0
+      else:
+        tree_asleep_out[worldid, elemid] = -(1 + mj_minawake)
+        tree_awake_out[worldid, elemid] = 1
 
     if elemid < nbody:
-      if body_treeid[elemid] < 0:
+      t = body_treeid[elemid]
+      if t < 0:
         if body_mocapid[elemid] >= 0:
           body_awake_out[worldid, elemid] = int(types.SleepState.AWAKE)
         else:
           body_awake_out[worldid, elemid] = int(types.SleepState.STATIC)
       else:
-        body_awake_out[worldid, elemid] = int(types.SleepState.AWAKE)
+        if enable_sleep:
+          policy = tree_sleep_policy[t]
+          if policy == types.SleepPolicy.AUTO_NEVER:
+            body_awake_out[worldid, elemid] = int(types.SleepState.AWAKE)
+          else:
+            body_awake_out[worldid, elemid] = int(types.SleepState.ASLEEP)
+        else:
+          body_awake_out[worldid, elemid] = int(types.SleepState.AWAKE)
       body_awake_ind_out[worldid, elemid] = elemid
 
     if elemid < nv:
@@ -2068,10 +2190,21 @@ def reset_data(m: types.Model, d: types.Data, reset: Optional[wp.array] = None):
     ],
   )
 
+  enable_sleep = bool(m.opt.enableflags & types.EnableBit.SLEEP)
   wp.launch(
     reset_sleep,
     dim=(d.nworld, max(m.ntree, m.nbody, m.nv)),
-    inputs=[m.nv, m.nbody, m.ntree, m.body_mocapid, m.body_treeid, types.MJ_MINAWAKE, reset_input],
+    inputs=[
+      m.nv,
+      m.nbody,
+      m.ntree,
+      m.body_mocapid,
+      m.body_treeid,
+      m.tree_sleep_policy,
+      enable_sleep,
+      types.MJ_MINAWAKE,
+      reset_input,
+    ],
     outputs=[
       d.tree_asleep,
       d.tree_awake,
@@ -2109,6 +2242,9 @@ def reset_data(m: types.Model, d: types.Data, reset: Optional[wp.array] = None):
       d.nacon,
     ],
   )
+
+  if enable_sleep:
+    sleep.update_sleep(m, d)
 
 
 # kernel_analyzer: off

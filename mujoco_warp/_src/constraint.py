@@ -1923,7 +1923,7 @@ def _efc_contact_init(cone_type: types.ConeType, is_sparse: bool, nv_compact: bo
     flex_vertadr: wp.array[int],
     flex_vertbodyid: wp.array[int],
     # Data in:
-    tree_active_in: wp.array2d[bool],
+    tree_awake_in: wp.array2d[int],
     njmax_in: int,
     njmax_nnz_in: int,
     nacon_in: wp.array[int],
@@ -1981,13 +1981,13 @@ def _efc_contact_init(cone_type: types.ConeType, is_sparse: bool, nv_compact: bo
       keep = False
       if cgeom[0] >= 0:
         t = body_treeid[geom_bodyid[cgeom[0]]]
-        if t >= 0 and tree_active_in[worldid, t]:
+        if t >= 0 and tree_awake_in[worldid, t] == 1:
           keep = True
       else:
         keep = True
       if cgeom[1] >= 0:
         t = body_treeid[geom_bodyid[cgeom[1]]]
-        if t >= 0 and tree_active_in[worldid, t]:
+        if t >= 0 and tree_awake_in[worldid, t] == 1:
           keep = True
       else:
         keep = True
@@ -3023,7 +3023,7 @@ def make_constraint(m: types.Model, d: types.Data):
           m.geom_bodyid,
           m.flex_vertadr,
           m.flex_vertbodyid,
-          d.tree_active,
+          d.tree_awake,
           d.njmax,
           d.njmax_nnz,
           d.nacon,

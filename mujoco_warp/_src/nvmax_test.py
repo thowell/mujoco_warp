@@ -19,6 +19,7 @@ import mujoco
 import numpy as np
 import warp as wp
 from absl.testing import absltest
+from absl.testing import parameterized
 
 import mujoco_warp as mjwarp
 from mujoco_warp._src import nvmax
@@ -76,20 +77,27 @@ _CONTACT_XML = """
 """
 
 
-def _setup_contact(nv_max=None):
+def _setup_contact(nv_max=None, sparse=False):
   mjm = mujoco.MjModel.from_xml_string(_CONTACT_XML)
+  if sparse:
+    mjm.opt.jacobian = mujoco.mjtJacobian.mjJAC_SPARSE
+  else:
+    mjm.opt.jacobian = mujoco.mjtJacobian.mjJAC_DENSE
   m = mjwarp.put_model(mjm)
   d = mjwarp.make_data(mjm, nv_max=nv_max)
   return mjm, m, d
 
 
 class NvCompactBookkeepingTest(absltest.TestCase):
-  def test_actuated_tree_seeded(self):
-    """Only the actuated arm tree is active at construction; maps are compact."""
+  def test_compaction_mapping(self):
+    """Manually setting awake trees results in correct compact maps."""
     _, m, d = _setup()
-    np.testing.assert_array_equal(d.tree_active.numpy()[0], [True, False, False])
+    # Set only tree 0 (actuated arm, dofs 0-1) awake
+    tree_awake = np.zeros((d.nworld, m.ntree), dtype=np.int32)
+    tree_awake[0, 0] = 1
+    d.tree_awake = wp.array(tree_awake, dtype=int)
 
-    nvmax.update_active_dofs(m, d)
+    nvmax.compact_dofs(m, d)
 
     self.assertEqual(d.ncdof.numpy()[0], 2)
     # arm dofs 0,1 map to compacted 0,1; the rest are inactive (-1).
@@ -98,109 +106,47 @@ class NvCompactBookkeepingTest(absltest.TestCase):
     self.assertTrue((dof_cdof[2:] == -1).all())
     np.testing.assert_array_equal(d.cdof_dof.numpy()[0][:2], [0, 1])
 
-  def test_applied_force_wakes_tree_per_world(self):
-    """qfrc_applied on a free-body DOF wakes its whole tree, independently per world."""
+  def test_compaction_multi_world(self):
+    """Compacting DOFs works independently per world."""
     _, m, d = _setup(nworld=2)
-    qfrc = d.qfrc_applied.numpy()
-    qfrc[0, 2] = 1.0  # dof 2 belongs to tree 1 (first free body) in world 0
-    d.qfrc_applied = wp.array(qfrc, dtype=float)
+    # world 0: tree 0 (arm, dofs 0-1) and tree 1 (free body, dofs 2-7) awake
+    # world 1: tree 0 awake
+    tree_awake = np.zeros((2, m.ntree), dtype=np.int32)
+    tree_awake[0, 0] = 1
+    tree_awake[0, 1] = 1
+    tree_awake[1, 0] = 1
+    d.tree_awake = wp.array(tree_awake, dtype=int)
 
-    nvmax.update_active_dofs(m, d)
+    nvmax.compact_dofs(m, d)
 
     # world 0: arm (2) + free body (6) = 8; world 1: arm only = 2
     np.testing.assert_array_equal(d.ncdof.numpy(), [8, 2])
     np.testing.assert_array_equal(d.dof_cdof.numpy()[0][:8], np.arange(8))
     self.assertTrue((d.dof_cdof.numpy()[1][2:] == -1).all())
 
-  def _fake_contact(self, d, g0, g1):
-    d.nacon = wp.array([1], dtype=int)
-    geom = d.contact.geom.numpy()
-    geom[0] = (g0, g1)
-    d.contact.geom = wp.array(geom, dtype=wp.vec2i)
-    d.contact.worldid = wp.array(np.zeros(d.naconmax, dtype=int), dtype=int)
-
-  def _set_body_moving(self, m, d, geomid, speed=1.0):
-    bodyid = m.geom_bodyid.numpy()[geomid]
-    cvel = d.cvel.numpy()
-    cvel[0, bodyid, 3] = speed  # linear-x component of spatial velocity
-    d.cvel = wp.array(cvel, dtype=wp.spatial_vector)
-
-  def test_moving_contact_wakes_both_trees(self):
-    """A contact with a moving body activates the trees of both involved geoms."""
-    mjm, m, d = _setup()
-    ball0 = mujoco.mj_name2id(mjm, mujoco.mjtObj.mjOBJ_GEOM, "ball0")
-    ball1 = mujoco.mj_name2id(mjm, mujoco.mjtObj.mjOBJ_GEOM, "ball1")
-
-    self._fake_contact(d, ball0, ball1)
-    self._set_body_moving(m, d, ball0)  # ball0 is moving into ball1
-    nvmax.update_active_dofs(m, d)
-
-    # arm (seeded) + both free bodies = 2 + 6 + 6 = 14
-    np.testing.assert_array_equal(d.tree_active.numpy()[0], [True, True, True])
-    self.assertEqual(d.ncdof.numpy()[0], 14)
-
-  def test_resting_contact_does_not_wake(self):
-    """A contact where both bodies are at rest does not wake them (velocity gate)."""
-    mjm, m, d = _setup()
-    ball0 = mujoco.mj_name2id(mjm, mujoco.mjtObj.mjOBJ_GEOM, "ball0")
-    ball1 = mujoco.mj_name2id(mjm, mujoco.mjtObj.mjOBJ_GEOM, "ball1")
-
-    self._fake_contact(d, ball0, ball1)  # both at rest (cvel = 0)
-    nvmax.update_active_dofs(m, d)
-
-    # only the actuated arm stays active; the resting balls remain asleep
-    np.testing.assert_array_equal(d.tree_active.numpy()[0], [True, False, False])
-    self.assertEqual(d.ncdof.numpy()[0], 2)
-
-  def test_static_geom_does_not_wake(self):
-    """A contact with a static (world) geom only wakes the moving dynamic side."""
-    mjm, m, d = _setup()
-    floor = mujoco.mj_name2id(mjm, mujoco.mjtObj.mjOBJ_GEOM, "floor")
-    ball0 = mujoco.mj_name2id(mjm, mujoco.mjtObj.mjOBJ_GEOM, "ball0")
-
-    self._fake_contact(d, floor, ball0)
-    self._set_body_moving(m, d, ball0)  # ball0 dropping onto the floor
-    nvmax.update_active_dofs(m, d)
-
-    # floor is static (tree -1): only ball0's tree wakes, alongside the arm.
-    np.testing.assert_array_equal(d.tree_active.numpy()[0], [True, True, False])
-    self.assertEqual(d.ncdof.numpy()[0], 8)
-
-  def test_monotonic(self):
-    """Once active, a tree stays active after the triggering force is removed."""
-    _, m, d = _setup()
-    qfrc = d.qfrc_applied.numpy()
-    qfrc[0, 8] = 1.0  # wake tree 2
-    d.qfrc_applied = wp.array(qfrc, dtype=float)
-    nvmax.update_active_dofs(m, d)
-    self.assertEqual(d.ncdof.numpy()[0], 8)
-
-    d.qfrc_applied = wp.array(np.zeros_like(qfrc), dtype=float)
-    nvmax.update_active_dofs(m, d)
-    self.assertEqual(d.ncdof.numpy()[0], 8)  # still active
-
   def test_overflow_clamps_and_warns(self):
     """When active DOFs exceed nv_max, ncdof is clamped to nv_max."""
     _, m, d = _setup(nv_max=4)
-    ta = d.tree_active.numpy()
-    ta[0, :] = True
-    d.tree_active = wp.array(ta, dtype=bool)
+    # Set all trees awake
+    tree_awake = np.ones((d.nworld, m.ntree), dtype=np.int32)
+    d.tree_awake = wp.array(tree_awake, dtype=int)
 
-    nvmax.update_active_dofs(m, d)
+    nvmax.compact_dofs(m, d)
 
     self.assertEqual(d.ncdof.numpy()[0], 4)
 
 
-class NvCompactSmoothSolveTest(absltest.TestCase):
-  def test_smooth_solve_equivalence_all_active(self):
+class NvCompactSmoothSolveTest(parameterized.TestCase):
+  @parameterized.parameters(True, False)
+  def test_smooth_solve_equivalence_all_active(self, sparse):
     """With every tree active and nv_max=nv, compacted qacc_smooth matches baseline."""
-    _, m, d = _setup(sparse=True)
-    self.assertTrue(m.is_sparse)
+    _, m, d = _setup(sparse=sparse)
     mjwarp.forward(m, d)
     baseline = d.qacc_smooth.numpy().copy()
 
-    d.tree_active = wp.array(np.ones((d.nworld, m.ntree), dtype=bool), dtype=bool)
-    nvmax.update_active_dofs(m, d)
+    tree_awake = np.ones((d.nworld, m.ntree), dtype=np.int32)
+    d.tree_awake = wp.array(tree_awake, dtype=int)
+    nvmax.compact_dofs(m, d)
     self.assertEqual(d.ncdof.numpy()[0], m.nv)
 
     ctx = nvmax.create_nvcompact_context(m, d)
@@ -208,14 +154,18 @@ class NvCompactSmoothSolveTest(absltest.TestCase):
 
     np.testing.assert_allclose(d.qacc_smooth.numpy(), baseline, rtol=1e-4, atol=1e-5)
 
-  def test_smooth_solve_partial_active_freezes_rest(self):
+  @parameterized.parameters(True, False)
+  def test_smooth_solve_partial_active_freezes_rest(self, sparse):
     """Active trees match baseline (M is block-diagonal); inactive DOFs are frozen to 0."""
-    _, m, d = _setup(sparse=True)
+    _, m, d = _setup(sparse=sparse)
     mjwarp.forward(m, d)
     baseline = d.qacc_smooth.numpy().copy()
 
     # only the actuated arm tree (dofs 0-1) is active
-    nvmax.update_active_dofs(m, d)
+    tree_awake = np.zeros((d.nworld, m.ntree), dtype=np.int32)
+    tree_awake[0, 0] = 1
+    d.tree_awake = wp.array(tree_awake, dtype=int)
+    nvmax.compact_dofs(m, d)
     self.assertEqual(d.ncdof.numpy()[0], 2)
 
     ctx = nvmax.create_nvcompact_context(m, d)
@@ -226,17 +176,18 @@ class NvCompactSmoothSolveTest(absltest.TestCase):
     np.testing.assert_array_equal(out[0, 2:], np.zeros(m.nv - 2))
 
 
-class NvCompactConstrainedSolveTest(absltest.TestCase):
-  def test_constrained_solve_equivalence_all_active(self):
+class NvCompactConstrainedSolveTest(parameterized.TestCase):
+  @parameterized.parameters(True, False)
+  def test_constrained_solve_equivalence_all_active(self, sparse):
     """With every tree active and nv_max=nv, the compacted Newton solve matches baseline qacc."""
-    _, m, d = _setup_contact()
-    self.assertTrue(m.is_sparse)
+    _, m, d = _setup_contact(sparse=sparse)
     mjwarp.forward(m, d)  # full baseline solve (also builds efc.J, M)
     self.assertGreater(d.nacon.numpy()[0], 0)  # contacts exist
     baseline_qacc = d.qacc.numpy().copy()
 
-    d.tree_active = wp.array(np.ones((d.nworld, m.ntree), dtype=bool), dtype=bool)
-    nvmax.update_active_dofs(m, d)
+    tree_awake = np.ones((d.nworld, m.ntree), dtype=np.int32)
+    d.tree_awake = wp.array(tree_awake, dtype=int)
+    nvmax.compact_dofs(m, d)
     self.assertEqual(d.ncdof.numpy()[0], m.nv)
 
     ctx = nvmax.create_nvcompact_context(m, d)

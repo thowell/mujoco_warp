@@ -707,10 +707,11 @@ class SleepTest(parameterized.TestCase):
       nworld=nworld,
     )
 
-    # Put box (tree 0) to sleep manually
+    # Put box (tree 0) to sleep manually, keep sphere (tree 1) awake
     tree_asleep = d.tree_asleep.numpy()
     for w in range(nworld):
       tree_asleep[w, 0] = 0  # self-cycle for box
+      tree_asleep[w, 1] = -(1 + types.MJ_MINAWAKE)  # sphere awake
     d.tree_asleep = wp.array(tree_asleep, dtype=int)
     sleep.update_sleep(m, d)
 
@@ -794,8 +795,9 @@ class SleepTest(parameterized.TestCase):
     )
 
     # World 0: awake, World 1: asleep
-    # 1. Put tree 0 to sleep in World 1
+    # 1. Put tree 0 to sleep in World 1, keep awake in World 0
     tree_asleep = d.tree_asleep.numpy()
+    tree_asleep[0, 0] = -(1 + types.MJ_MINAWAKE)  # awake in world 0
     tree_asleep[1, 0] = 0  # self-cycle for tree 0 in world 1
     d.tree_asleep = wp.array(tree_asleep, dtype=int)
     sleep.update_sleep(m, d)
