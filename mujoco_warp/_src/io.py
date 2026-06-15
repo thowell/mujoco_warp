@@ -307,6 +307,7 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
   if mjm.nv > 500:
     m.block_dim.linesearch_iterative = 512
   m.is_sparse = is_sparse(mjm)
+  m.tree_total_nnz_int = int(sum(int(n) ** 2 for n in mjm.tree_dofnum))
   m.has_fluid = mjm.opt.wind.any() or mjm.opt.density > 0 or mjm.opt.viscosity > 0
 
   m.max_ten_J_rownnz = int(mjm.ten_J_rownnz.max()) if mjm.ntendon else 0
