@@ -2236,17 +2236,9 @@ class SolverContext:
   beta_den: wp.array[float]
   h: wp.array3d[float]
   hfactor: wp.array3d[float]
-  # Block Jacobi preconditioner (CG only): pre-inverted block Hessian
-  inv_H_blocks: wp.array3d[float]
-  # Block mapping: split bodies with >3 DOFs into ≤3-DOF blocks
-  block_dof_adr: wp.array[int]
-  block_dof_num: wp.array[int]
-  dof_to_block: wp.array[int]
-  nblocks: int
   # Tree-level IC preconditioner (CG sparse only)
   H_tree: wp.array2d[float]  # (nworld, total_tree_nnz) dense tree blocks
   tree_mat_adr: wp.array[int]  # offset into H_tree for each tree [ntree+1]
-  total_tree_nnz: wp.array[int]  # single-element: total nnz across all trees
   ntrees: int  # number of trees with DOFs
   # Incremental Hessian update (Newton only)
   changed_efc_ids: wp.array2d[int]

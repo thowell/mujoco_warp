@@ -43,6 +43,18 @@ def _assert_eq(a, b, name):
 
 
 class SolverTest(parameterized.TestCase):
+  __test__ = False
+  preconditioner = "inertia"
+
+  def setUp(self):
+    super().setUp()
+    self.old_precond = solver.CG_PRECONDITIONER
+    solver.CG_PRECONDITIONER = self.preconditioner
+
+  def tearDown(self):
+    solver.CG_PRECONDITIONER = self.old_precond
+    super().tearDown()
+
   def test_M_fullm_upper_indices_are_row_sorted(self):
     """Sparse M seeding uses upper-triangle row-sorted writes."""
     _, _, m, _ = test_data.fixture("humanoid/humanoid.xml")
@@ -202,7 +214,7 @@ class SolverTest(parameterized.TestCase):
 
     ctx_Mgrad = ctx.Mgrad.numpy()[0, : mjm.nv]
 
-    if jacobian == mujoco.mjtJacobian.mjJAC_SPARSE:
+    if jacobian == mujoco.mjtJacobian.mjJAC_SPARSE and self.preconditioner == "constraint_tree_block":
       # Sparse CG uses block Jacobi preconditioner: Mgrad = H_block^{-1} * grad
       # Verify Mgrad is non-trivial (not zero when grad is non-zero)
       ctx_grad = ctx.grad.numpy()[0, : mjm.nv]
@@ -2280,6 +2292,16 @@ class IslandSolverTest(parameterized.TestCase):
       d_island.act.assign(d_monolithic.act)
       d_island.time.assign(d_monolithic.time)
       d_island.qacc_warmstart.assign(d_monolithic.qacc_warmstart)
+
+
+class SolverTestInertia(SolverTest):
+  __test__ = True
+  preconditioner = "inertia"
+
+
+class SolverTestConstraintTree(SolverTest):
+  __test__ = True
+  preconditioner = "constraint_tree_block"
 
 
 if __name__ == "__main__":

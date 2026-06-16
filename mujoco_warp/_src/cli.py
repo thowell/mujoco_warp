@@ -26,6 +26,7 @@ from etils import epath
 
 import mujoco_warp as mjw
 from mujoco_warp._src import io
+from mujoco_warp._src import solver
 from mujoco_warp._src import warp_util
 from mujoco_warp._src.io import load_trajectory
 from mujoco_warp._src.io import override_model
@@ -47,6 +48,11 @@ ENABLE_ISLANDS = flags.DEFINE_bool(
   "enable_islands",
   False,
   "Enable constraint islands solver",
+)
+CG_PRECONDITIONER = flags.DEFINE_string(
+  "cg_preconditioner",
+  "inertia",
+  "CG preconditioner type: 'inertia' (inertia matrix inverse) or 'constraint_tree_block' (per-tree inverse)",
 )
 
 
@@ -142,6 +148,7 @@ def init_structs(
 ) -> Tuple[mjw.Model, mjw.Data, mjw.RenderContext | None, list[np.ndarray] | None]:
   """Initialize device structs."""
   io.ENABLE_ISLANDS = ENABLE_ISLANDS.value
+  solver.CG_PRECONDITIONER = CG_PRECONDITIONER.value
 
   mjd = mujoco.MjData(mjm)
   ctrls = None
