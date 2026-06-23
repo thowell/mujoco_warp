@@ -1383,6 +1383,7 @@ def step2(m: Model, d: Data):
   # integrate with Euler or implicitfast
   if m.opt.integrator in (IntegratorType.IMPLICITFAST, IntegratorType.IMPLICIT):
     implicit(m, d)
-  else:
-    # note: RK4 defaults to Euler
+  elif m.opt.integrator == IntegratorType.EULER:
     euler(m, d)
+  else:
+    raise NotImplementedError(f"integrator {m.opt.integrator} not implemented for step2.")
