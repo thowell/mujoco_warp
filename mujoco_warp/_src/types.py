@@ -1374,7 +1374,9 @@ class Model:
     has_flex_selfcollide: whether any flex has self-collision enabled
     has_ellipsoid_geom: whether the model contains ellipsoid geoms
     has_plane_geom: whether the model contains plane geoms
+    has_1d_flex: whether the model contains 1D flexes
     has_3d_flex: whether the model contains 3D flexes
+    has_elem_flex: whether the model contains 2D or 3D element flexes
     max_flex_dim: maximum flex dimension in the model
     block_dim: block dim options
     body_tree: list of body ids by tree level
@@ -1463,6 +1465,7 @@ class Model:
     flex_elemflexid: maps each element index directly to its flexid         (nflexelem,)
     flex_shellflexid: maps each shell index directly to its flexid          (nflexshelldata,)
     flex_vertflexid: maps each vertex index directly to its flexid          (nflexvert,)
+    flex_nodeflexid: maps each node index directly to its flexid            (nflexnode,)
     flex_shelladr: maps each flex to its start shell index                  (nflex,)
     flex_faceadr: maps each flex to its start face index                    (nflex,)
     flex_cell_map: precomputed flex cell mapping (nflexintcell,)
@@ -1477,6 +1480,9 @@ class Model:
     nflexface: number of interpolated flex shell faces
     flex_face_map: mapping of face index to flex and local element face indices
     flex_face: global node indices of each face                             (nflexface, 9)
+    body_isflex: maps each body to the flex ID it belongs to (-1 if none)   (nbody,)
+    flex_has_dynamic_body: mask indicating if flex has dynamic bodies       (nflex,)
+    flex_root_tree: root tree ID for each flex object (-1 if none)          (nflex,)
   """
 
   nq: int
@@ -1683,6 +1689,7 @@ class Model:
   flex_bendingadr: array("nflex", int)
   flex_shellnum: array("nflex", int)
   flex_shelldataadr: array("nflex", int)
+
   flex_nodebodyid: array("nflexnode", int)
   flex_vertbodyid: array("nflexvert", int)
   flex_edge: array("nflexedge", wp.vec2i)
@@ -1863,7 +1870,9 @@ class Model:
   has_flex_selfcollide: bool
   has_ellipsoid_geom: bool
   has_plane_geom: bool
+  has_1d_flex: bool
   has_3d_flex: bool
+  has_elem_flex: bool
   max_flex_dim: int
   block_dim: BlockDim
   body_tree: tuple[array("nbody", int), ...]
@@ -1946,6 +1955,7 @@ class Model:
   flex_elemflexid: array("nflexelem", int)
   flex_shellflexid: array("nflexshelldata", int)
   flex_vertflexid: array("nflexvert", int)
+  flex_nodeflexid: array("nflexnode", int)
   flex_shelladr: array("nflex", int)
   flex_faceadr: array("nflex", int)
   flex_cell_map: array("nflexintcell", wp.vec4i)
@@ -1959,6 +1969,9 @@ class Model:
   nflexface: int
   flex_face_map: array("nflexface", wp.vec2i)
   flex_face: array("nflexface", 9, int)
+  body_isflex: array("nbody", int)
+  flex_has_dynamic_body: array("nflex", int)
+  flex_root_tree: array("nflex", int)
 
 
 class ContactType(enum.IntFlag):
@@ -2223,6 +2236,8 @@ class Data:
     flex_aabb_min: dynamic flex object bounding box min         (nworld, nflex, 3)
     flex_aabb_max: dynamic flex object bounding box max         (nworld, nflex, 3)
     flexnode_xpos: cartesian flex node positions                (nworld, nflexnode, 3)
+    flex_awake: dynamic flex object awake state                 (nworld, nflex)
+    flex_awake_prev: dynamic flex object awake state prev       (nworld, nflex)
     overflow: overflow bitmask (OverflowType)                   (nworld,)
     face_xpos: cartesian flex face positions                    (nworld, nflexface, 9, 3)
     face_quat: cartesian flex face orientations                 (nworld, nflexface, 4)
@@ -2370,6 +2385,8 @@ class Data:
   flex_aabb_min: array("nworld", "nflex", wp.vec3)
   flex_aabb_max: array("nworld", "nflex", wp.vec3)
   flexnode_xpos: array("nworld", "nflexnode", wp.vec3)
+  flex_awake: array("nworld", "nflex", int)
+  flex_awake_prev: array("nworld", "nflex", int)
   overflow: array("nworld", int)
   face_xpos: array("nworld", "nflexface", 9, wp.vec3)
   face_quat: array("nworld", "nflexface", wp.quat)

@@ -3748,7 +3748,7 @@ def solve(m: types.Model, d: types.Data):
     ctx = _create_solver_context(m, d)
     _solve(m, d, ctx)
 
-  if sleep_enabled and m.ntree > 1:
+  if sleep_enabled and m.opt.solver == types.SolverType.NEWTON and m.ntree > 1:
     island.compute_island_mapping(m, d)
 
 

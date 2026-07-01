@@ -3384,6 +3384,39 @@ class FlexContactNnzTest(parameterized.TestCase):
           f"Contact row {idx} actual NNZ ({actual_nnz}) exceeded static estimate ({estimated_max_nnz})",
         )
 
+  def test_flex_ccd_overflow_handling(self):
+    """Verifies flex element CCD triggers OverflowType.CCD when naccdmax is exceeded."""
+    xml = """
+    <mujoco>
+      <worldbody>
+        <flexcomp name="cloth1" type="grid" count="3 3 1" spacing=".2 .2 .1" pos="0 0 0" radius=".02" dim="2" mass=".5">
+          <contact selfcollide="none" contype="1" conaffinity="1"/>
+        </flexcomp>
+        <flexcomp name="cloth2" type="grid" count="3 3 1" spacing=".2 .2 .1" pos="0 0 0.01" radius=".02" dim="2" mass=".5">
+          <contact selfcollide="none" contype="1" conaffinity="1"/>
+        </flexcomp>
+      </worldbody>
+    </mujoco>
+    """
+    # 1. naccdmax = 0 should trigger CCD overflow
+    mjm, _, m, d_overflow = test_data.fixture(xml=xml, nconmax=128, naccdmax=0)
+    mjw.kinematics(m, d_overflow)
+    mjw.collision(m, d_overflow)
+    self.assertTrue(
+      bool(d_overflow.overflow.numpy()[0] & types.OverflowType.CCD),
+      "Expected OverflowType.CCD when naccdmax=0",
+    )
+
+    # 2. naccdmax = 128 should have sufficient capacity without overflow
+    _, _, _, d_valid = test_data.fixture(xml=xml, nconmax=128, naccdmax=128)
+    mjw.kinematics(m, d_valid)
+    mjw.collision(m, d_valid)
+    self.assertFalse(
+      bool(d_valid.overflow.numpy()[0] & types.OverflowType.CCD),
+      "Did not expect OverflowType.CCD with sufficient capacity",
+    )
+    self.assertGreater(int(d_valid.nacon.numpy()[0]), 0, "Expected active contacts")
+
 
 if __name__ == "__main__":
   wp.init()

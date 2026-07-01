@@ -14,6 +14,7 @@
 """Flex collision detection (geom vs flex triangles)."""
 
 import dataclasses
+from typing import Optional
 
 import warp as wp
 
@@ -23,6 +24,8 @@ from mujoco_warp._src.collision_core import sap_binary_search
 from mujoco_warp._src.collision_core import sap_range
 from mujoco_warp._src.collision_gjk import ccd
 from mujoco_warp._src.math import make_frame
+from mujoco_warp._src.sleep import init_sleep_flex
+from mujoco_warp._src.sleep import update_sleep_flex_from_bodies
 from mujoco_warp._src.types import MJ_MAX_EPAFACES
 from mujoco_warp._src.types import MJ_MAX_EPAHORIZON
 from mujoco_warp._src.types import MJ_MAXCONPAIR
@@ -33,6 +36,7 @@ from mujoco_warp._src.types import Data
 from mujoco_warp._src.types import GeomType
 from mujoco_warp._src.types import Model
 from mujoco_warp._src.types import OverflowType
+from mujoco_warp._src.types import SleepState
 from mujoco_warp._src.types import mat63
 from mujoco_warp._src.types import vec5
 from mujoco_warp._src.warp_util import cache_kernel
@@ -561,7 +565,7 @@ def _collide_mesh_convex(
 
 
 @cache_kernel
-def _flex_plane_narrowphase(warn_overflow: bool):
+def _flex_plane_narrowphase(warn_overflow: bool, enable_sleep: bool = False, incremental: bool = False):
   @wp.kernel(module="unique", enable_backward=False)
   def kernel(
     # Model:
@@ -580,9 +584,13 @@ def _flex_plane_narrowphase(warn_overflow: bool):
     geom_xpos_in: wp.array2d[wp.vec3],
     geom_xmat_in: wp.array2d[wp.mat33],
     flexvert_xpos_in: wp.array2d[wp.vec3],
+    body_awake_in: wp.array2d[int],
     flex_aabb_min_in: wp.array2d[wp.vec3],
     flex_aabb_max_in: wp.array2d[wp.vec3],
+    flex_awake_in: wp.array2d[int],
+    flex_awake_prev_in: wp.array2d[int],
     # In:
+    body_awake_prev_in: wp.array2d[int],
     max_candidates: int,
     # Data out:
     overflow_out: wp.array[int],
@@ -600,6 +608,13 @@ def _flex_plane_narrowphase(warn_overflow: bool):
     worldid, vertid = wp.tid()
 
     flexid = flex_vertflexid[vertid]
+    if wp.static(enable_sleep):
+      if flex_awake_in[worldid, flexid] == 0:
+        return
+      if wp.static(incremental):
+        if flex_awake_prev_in[worldid, flexid] != 0:
+          return
+
     radius = flex_radius[flexid]
     flex_margin_val = flex_margin[flexid]
     local_vertid = vertid - flex_vertadr[flexid]
@@ -675,18 +690,12 @@ def _flex_geom_vertex_narrowphase_detect(warn_overflow: bool):
   @wp.kernel(module="unique", enable_backward=False)
   def kernel(
     # Model:
-    ngeom: int,
     opt_ccd_tolerance: wp.array[float],
     geom_type: wp.array[int],
-    geom_contype: wp.array[int],
-    geom_conaffinity: wp.array[int],
     geom_bodyid: wp.array[int],
     geom_dataid: wp.array2d[int],
     geom_size: wp.array2d[wp.vec3],
-    geom_aabb: wp.array3d[wp.vec3],
     geom_margin: wp.array2d[float],
-    flex_contype: wp.array[int],
-    flex_conaffinity: wp.array[int],
     flex_margin: wp.array[float],
     flex_dim: wp.array[int],
     flex_vertadr: wp.array[int],
@@ -710,9 +719,11 @@ def _flex_geom_vertex_narrowphase_detect(warn_overflow: bool):
     geom_xmat_in: wp.array2d[wp.mat33],
     flexvert_xpos_in: wp.array2d[wp.vec3],
     naccdmax_in: int,
-    flex_aabb_min_in: wp.array2d[wp.vec3],
-    flex_aabb_max_in: wp.array2d[wp.vec3],
     # In:
+    cand_geom_in: wp.array3d[int],
+    cand_geom_aabb_min_in: wp.array3d[wp.vec3],
+    cand_geom_aabb_max_in: wp.array3d[wp.vec3],
+    ncand_geom_in: wp.array2d[int],
     epa_vert: wp.array2d[wp.vec3],
     epa_vert_index: wp.array2d[int],
     epa_face: wp.array2d[int],
@@ -741,36 +752,31 @@ def _flex_geom_vertex_narrowphase_detect(warn_overflow: bool):
     if flex_dim[flexid] >= 2:
       return
 
+    num_cand = ncand_geom_in[worldid, flexid]
+    if num_cand == 0:
+      return
+
     radius = flex_radius[flexid]
     flex_margin_val = flex_margin[flexid]
     local_vertid = vertid - flex_vertadr[flexid]
 
     v_pos = flexvert_xpos_in[worldid, vertid]
-    flex_aabb_min_val = flex_aabb_min_in[worldid, flexid]
-    flex_aabb_max_val = flex_aabb_max_in[worldid, flexid]
+    v_inflate = wp.vec3(radius, radius, radius)
+    v_box_min = v_pos - v_inflate
+    v_box_max = v_pos + v_inflate
 
-    for geomid in range(ngeom):
-      gtype = geom_type[geomid]
-      if (
-        gtype != int(GeomType.SPHERE)
-        and gtype != int(GeomType.CAPSULE)
-        and gtype != int(GeomType.BOX)
-        and gtype != int(GeomType.CYLINDER)
-        and gtype != int(GeomType.ELLIPSOID)
-        and gtype != int(GeomType.MESH)
-      ):
-        continue
-
-      g_contype = geom_contype[geomid]
-      g_conaffinity = geom_conaffinity[geomid]
-      f_contype = flex_contype[flexid]
-      f_conaffinity = flex_conaffinity[flexid]
-      if not ((g_contype & f_conaffinity) or (f_contype & g_conaffinity)):
-        continue
+    for c_idx in range(num_cand):
+      geomid = cand_geom_in[worldid, flexid, c_idx]
+      geom_box_min = cand_geom_aabb_min_in[worldid, flexid, c_idx]
+      geom_box_max = cand_geom_aabb_max_in[worldid, flexid, c_idx]
 
       # skip if vertex is on same body as geom
       b = geom_bodyid[geomid]
       if b >= 0 and b == flex_vertbodyid[vertid]:
+        continue
+
+      # Stage 2 Filter: Vertex AABB vs Geom world AABB check
+      if _flex_element_aabb_filter(geom_box_min, geom_box_max, v_box_min, v_box_max):
         continue
 
       geom_margin_val = geom_margin[worldid % geom_margin.shape[0], geomid]
@@ -779,34 +785,7 @@ def _flex_geom_vertex_narrowphase_detect(warn_overflow: bool):
       geom_pos = geom_xpos_in[worldid, geomid]
       geom_rot = geom_xmat_in[worldid, geomid]
       geom_size_val = geom_size[worldid % geom_size.shape[0], geomid]
-
-      # Stage 1: Coarse flex object AABB vs Geom world AABB check
-      aabb_id = worldid % geom_aabb.shape[0]
-      geom_center_local = geom_aabb[aabb_id, geomid, 0]
-      geom_half_size_local = geom_aabb[aabb_id, geomid, 1]
-      geom_center_global = geom_rot @ geom_center_local + geom_pos
-      geom_half_size_global = wp.vec3(
-        wp.abs(geom_rot[0, 0]) * geom_half_size_local[0]
-        + wp.abs(geom_rot[0, 1]) * geom_half_size_local[1]
-        + wp.abs(geom_rot[0, 2]) * geom_half_size_local[2],
-        wp.abs(geom_rot[1, 0]) * geom_half_size_local[0]
-        + wp.abs(geom_rot[1, 1]) * geom_half_size_local[1]
-        + wp.abs(geom_rot[1, 2]) * geom_half_size_local[2],
-        wp.abs(geom_rot[2, 0]) * geom_half_size_local[0]
-        + wp.abs(geom_rot[2, 1]) * geom_half_size_local[1]
-        + wp.abs(geom_rot[2, 2]) * geom_half_size_local[2],
-      )
-      inflate = wp.vec3(margin, margin, margin)
-      geom_box_min = geom_center_global - geom_half_size_global - inflate
-      geom_box_max = geom_center_global + geom_half_size_global + inflate
-
-      if _flex_element_aabb_filter(geom_box_min, geom_box_max, flex_aabb_min_val, flex_aabb_max_val):
-        continue
-
-      # Stage 2 Filter: Vertex AABB vs Geom world AABB check
-      v_inflate = wp.vec3(radius, radius, radius)
-      if _flex_element_aabb_filter(geom_box_min, geom_box_max, v_pos - v_inflate, v_pos + v_inflate):
-        continue
+      gtype = geom_type[geomid]
 
       if gtype == int(GeomType.MESH):
         ccdid = wp.atomic_add(nccd, 0, 1)
@@ -1185,7 +1164,7 @@ def _flex_sap_project(
 
 
 @cache_kernel
-def _flex_sap_sweep(is_self: bool, warn_overflow: bool):
+def _flex_sap_sweep(is_self: bool, warn_overflow: bool, enable_sleep: bool = False, incremental: bool = False):
   @wp.kernel(module="unique", enable_backward=False)
   def kernel(
     # Model:
@@ -1202,6 +1181,8 @@ def _flex_sap_sweep(is_self: bool, warn_overflow: bool):
     # Data in:
     flex_aabb_min_in: wp.array2d[wp.vec3],
     flex_aabb_max_in: wp.array2d[wp.vec3],
+    flex_awake_in: wp.array2d[int],
+    flex_awake_prev_in: wp.array2d[int],
     # In:
     nelem: int,
     sort_index_in: wp.array2d[int],
@@ -1242,10 +1223,26 @@ def _flex_sap_sweep(is_self: bool, warn_overflow: bool):
         if flexid1 != flexid2 or flex_selfcollide[flexid1] == 0 or (flex_contype[flexid1] & flex_conaffinity[flexid1]) == 0:
           worldelemid += nsweep_in
           continue
+        if wp.static(enable_sleep):
+          if flex_awake_in[worldid, flexid1] == 0:
+            worldelemid += nsweep_in
+            continue
+          if wp.static(incremental):
+            if flex_awake_prev_in[worldid, flexid1] != 0:
+              worldelemid += nsweep_in
+              continue
       else:
         if flexid1 == flexid2:
           worldelemid += nsweep_in
           continue
+        if wp.static(enable_sleep):
+          if flex_awake_in[worldid, flexid1] == 0 and flex_awake_in[worldid, flexid2] == 0:
+            worldelemid += nsweep_in
+            continue
+          if wp.static(incremental):
+            if not (flex_awake_prev_in[worldid, flexid1] == 0 and flex_awake_prev_in[worldid, flexid2] == 0):
+              worldelemid += nsweep_in
+              continue
 
       if elem1 > elem2:
         tmpelem = elem1
@@ -1390,7 +1387,7 @@ def _flex_narrowphase(warn_overflow: bool):
     pairid = wp.tid()
 
     # Check bounds
-    if pairid >= ncollision_in[0]:
+    if ncollision_in[0] == 0 or pairid >= ncollision_in[0]:
       return
 
     pair = collision_pair_in[pairid]
@@ -1589,18 +1586,12 @@ def _flex_narrowphase_elem_detect(warn_overflow: bool):
   @wp.kernel(module="unique", enable_backward=False, grid_stride=False)
   def kernel(
     # Model:
-    ngeom: int,
     opt_ccd_tolerance: wp.array[float],
     geom_type: wp.array[int],
-    geom_contype: wp.array[int],
-    geom_conaffinity: wp.array[int],
     geom_bodyid: wp.array[int],
     geom_dataid: wp.array2d[int],
     geom_size: wp.array2d[wp.vec3],
-    geom_aabb: wp.array3d[wp.vec3],
     geom_margin: wp.array2d[float],
-    flex_contype: wp.array[int],
-    flex_conaffinity: wp.array[int],
     flex_margin: wp.array[float],
     flex_dim: wp.array[int],
     flex_vertadr: wp.array[int],
@@ -1627,9 +1618,11 @@ def _flex_narrowphase_elem_detect(warn_overflow: bool):
     geom_xmat_in: wp.array2d[wp.mat33],
     flexvert_xpos_in: wp.array2d[wp.vec3],
     naccdmax_in: int,
-    flex_aabb_min_in: wp.array2d[wp.vec3],
-    flex_aabb_max_in: wp.array2d[wp.vec3],
     # In:
+    cand_geom_in: wp.array3d[int],
+    cand_geom_aabb_min_in: wp.array3d[wp.vec3],
+    cand_geom_aabb_max_in: wp.array3d[wp.vec3],
+    ncand_geom_in: wp.array2d[int],
     epa_vert: wp.array2d[wp.vec3],
     epa_vert_index: wp.array2d[int],
     epa_face: wp.array2d[int],
@@ -1656,6 +1649,10 @@ def _flex_narrowphase_elem_detect(warn_overflow: bool):
 
     flexid = flex_elemflexid[elemid]
     if flex_dim[flexid] < 2:
+      return
+
+    num_cand = ncand_geom_in[worldid, flexid]
+    if num_cand == 0:
       return
 
     f_dim = flex_dim[flexid]
@@ -1751,27 +1748,10 @@ def _flex_narrowphase_elem_detect(warn_overflow: bool):
     else:
       return
 
-    flex_aabb_min_val = flex_aabb_min_in[worldid, flexid]
-    flex_aabb_max_val = flex_aabb_max_in[worldid, flexid]
-
-    for geomid in range(ngeom):
-      gtype = geom_type[geomid]
-      if (
-        gtype != int(GeomType.SPHERE)
-        and gtype != int(GeomType.CAPSULE)
-        and gtype != int(GeomType.BOX)
-        and gtype != int(GeomType.CYLINDER)
-        and gtype != int(GeomType.ELLIPSOID)
-        and gtype != int(GeomType.MESH)
-      ):
-        continue
-
-      g_contype = geom_contype[geomid]
-      g_conaffinity = geom_conaffinity[geomid]
-      f_contype = flex_contype[flexid]
-      f_conaffinity = flex_conaffinity[flexid]
-      if not ((g_contype & f_conaffinity) or (f_contype & g_conaffinity)):
-        continue
+    for c_idx in range(num_cand):
+      geomid = cand_geom_in[worldid, flexid, c_idx]
+      geom_box_min = cand_geom_aabb_min_in[worldid, flexid, c_idx]
+      geom_box_max = cand_geom_aabb_max_in[worldid, flexid, c_idx]
 
       # skip if element has vertices on the same body as geom
       b = geom_bodyid[geomid]
@@ -1784,39 +1764,17 @@ def _flex_narrowphase_elem_detect(warn_overflow: bool):
         if f_dim == 3 and b == flex_vertbodyid[vert_adr + v3]:
           continue
 
+      # Stage 2: Element AABB vs Geom world AABB check
+      if _flex_element_aabb_filter(geom_box_min, geom_box_max, elem_min, elem_max):
+        continue
+
       geom_margin_val = geom_margin[worldid % geom_margin.shape[0], geomid]
       margin = geom_margin_val + elem_margin
 
       geom_pos = geom_xpos_in[worldid, geomid]
       geom_rot = geom_xmat_in[worldid, geomid]
       geom_size_val = geom_size[worldid % geom_size.shape[0], geomid]
-
-      # Stage 1: Coarse flex object AABB vs Geom world AABB check
-      aabb_id = worldid % geom_aabb.shape[0]
-      geom_center_local = geom_aabb[aabb_id, geomid, 0]
-      geom_half_size_local = geom_aabb[aabb_id, geomid, 1]
-      geom_center_global = geom_rot @ geom_center_local + geom_pos
-      geom_half_size_global = wp.vec3(
-        wp.abs(geom_rot[0, 0]) * geom_half_size_local[0]
-        + wp.abs(geom_rot[0, 1]) * geom_half_size_local[1]
-        + wp.abs(geom_rot[0, 2]) * geom_half_size_local[2],
-        wp.abs(geom_rot[1, 0]) * geom_half_size_local[0]
-        + wp.abs(geom_rot[1, 1]) * geom_half_size_local[1]
-        + wp.abs(geom_rot[1, 2]) * geom_half_size_local[2],
-        wp.abs(geom_rot[2, 0]) * geom_half_size_local[0]
-        + wp.abs(geom_rot[2, 1]) * geom_half_size_local[1]
-        + wp.abs(geom_rot[2, 2]) * geom_half_size_local[2],
-      )
-      inflate = wp.vec3(margin, margin, margin)
-      geom_box_min = geom_center_global - geom_half_size_global - inflate
-      geom_box_max = geom_center_global + geom_half_size_global + inflate
-
-      if _flex_element_aabb_filter(geom_box_min, geom_box_max, flex_aabb_min_val, flex_aabb_max_val):
-        continue
-
-      # Stage 2: Element AABB vs Geom world AABB check
-      if _flex_element_aabb_filter(geom_box_min, geom_box_max, elem_min, elem_max):
-        continue
+      gtype = geom_type[geomid]
 
       if gtype == int(GeomType.MESH):
         ccdid = wp.atomic_add(nccd, 0, 1)
@@ -2099,6 +2057,8 @@ def _filter_flex_candidates_sorted(
   complexity from O(n^2) to O(n * k) where k is the average group size.
   """
   si = wp.tid()
+  if ncand[0] == 0:
+    return
   ncand_limit = wp.min(ncand[0], cand_active_out.shape[0])
   if si >= ncand_limit:
     return
@@ -2221,7 +2181,7 @@ def _write_filtered_contacts(warn_overflow: bool):
     overflow_out: wp.array[int],
   ):
     i = wp.tid()
-    if i >= ncand[0]:
+    if ncand[0] == 0 or i >= ncand[0]:
       return
 
     if cand_active[i] == 0:
@@ -2339,6 +2299,10 @@ def _populate_active_sorted(
   cand_active_sorted_out: wp.array[int],
 ):
   si = wp.tid()
+  if ncand[0] == 0:
+    if si < cand_active_sorted_out.shape[0]:
+      cand_active_sorted_out[si] = 0
+    return
   ncand_limit = wp.min(ncand[0], cand_active_sorted_out.shape[0])
   if si < ncand_limit:
     cand_active_sorted_out[si] = cand_active[sort_val[si]]
@@ -2356,6 +2320,8 @@ def _find_group_starts(
   flex_group_temp_out: wp.array[int],
 ):
   si = wp.tid()
+  if ncand[0] == 0:
+    return
   ncand_limit = wp.min(ncand[0], flex_group_temp_out.shape[0])
   if si >= ncand_limit:
     return
@@ -2390,6 +2356,8 @@ def _populate_group_starts(warn_overflow: bool):
     flex_num_groups_out: wp.array[int],
   ):
     si = wp.tid()
+    if ncand[0] == 0:
+      return
     ncand_limit = wp.min(ncand[0], flex_group_temp_in.shape[0])
     if si >= ncand_limit:
       return
@@ -2452,7 +2420,7 @@ def _filter_flex_fps(
 ):
   g = wp.tid()
 
-  if g >= flex_num_groups_in[0]:
+  if ncand[0] == 0 or flex_num_groups_in[0] == 0 or g >= flex_num_groups_in[0]:
     return
 
   g_start = flex_group_start_indices_in[g]
@@ -2544,7 +2512,10 @@ def _filter_flex_fps(
           fps_min_dist_out[c_idx] = wp.min(fps_min_dist_out[c_idx], d_new)
 
 
-def flex_broadphase_aabb(m: Model, d: Data):
+def flex_broadphase_aabb(
+  m: Model,
+  d: Data,
+):
   """Precompute dynamic flex object bounding boxes."""
   wp.launch(
     _flex_broadphase_bounds,
@@ -2601,6 +2572,12 @@ class FlexWorkspace:
   flex_num_groups: wp.array | None = None
   nccd: wp.array | None = None
 
+  # Flex-Geom Broadphase candidate buffers
+  flex_cand_geom: wp.array | None = None
+  flex_cand_geom_aabb_min: wp.array | None = None
+  flex_cand_geom_aabb_max: wp.array | None = None
+  nflex_cand_geom: wp.array | None = None
+
 
 def _allocate_flex_workspace(m: Model, d: Data) -> FlexWorkspace:
   epa_iterations = m.opt.ccd_iterations
@@ -2628,6 +2605,18 @@ def _allocate_flex_workspace(m: Model, d: Data) -> FlexWorkspace:
     flex_fps_min_dist = None
     flex_num_groups = None
 
+  has_geom_flex = (m.has_1d_flex or m.has_elem_flex) and m.ngeom > 0
+  if has_geom_flex:
+    flex_cand_geom = wp.empty((d.nworld, m.nflex, m.ngeom), dtype=int)
+    flex_cand_geom_aabb_min = wp.empty((d.nworld, m.nflex, m.ngeom), dtype=wp.vec3)
+    flex_cand_geom_aabb_max = wp.empty((d.nworld, m.nflex, m.ngeom), dtype=wp.vec3)
+    nflex_cand_geom = wp.zeros((d.nworld, m.nflex), dtype=int)
+  else:
+    flex_cand_geom = None
+    flex_cand_geom_aabb_min = None
+    flex_cand_geom_aabb_max = None
+    nflex_cand_geom = None
+
   return FlexWorkspace(
     dist=wp.empty(d.naconmax, dtype=float),
     pos=wp.empty(d.naconmax, dtype=wp.vec3),
@@ -2654,6 +2643,10 @@ def _allocate_flex_workspace(m: Model, d: Data) -> FlexWorkspace:
     epa_norm2=wp.empty(shape=(capacity, 6 + MJ_MAX_EPAFACES * epa_iterations), dtype=float),
     epa_horizon=wp.empty(shape=(capacity, MJ_MAX_EPAHORIZON), dtype=int),
     nccd=nccd,
+    flex_cand_geom=flex_cand_geom,
+    flex_cand_geom_aabb_min=flex_cand_geom_aabb_min,
+    flex_cand_geom_aabb_max=flex_cand_geom_aabb_max,
+    nflex_cand_geom=nflex_cand_geom,
   )
 
 
@@ -2820,13 +2813,19 @@ def _detect_plane_flex_candidates(
   m: Model,
   d: Data,
   ws: FlexWorkspace,
+  enable_sleep: bool = False,
+  incremental: bool = False,
+  body_awake: Optional[wp.array] = None,
+  flex_awake: Optional[wp.array] = None,
+  body_awake_prev: Optional[wp.array] = None,
+  flex_awake_prev: Optional[wp.array] = None,
 ):
   """Detect candidates between plane geoms and flex vertices."""
   if m.nflexvert == 0 or not m.has_plane_geom:
     return
 
   wp.launch(
-    _flex_plane_narrowphase(bool(m.opt.warn_overflow)),
+    _flex_plane_narrowphase(bool(m.opt.warn_overflow), enable_sleep, incremental),
     dim=(d.nworld, m.nflexvert),
     inputs=[
       m.ngeom,
@@ -2843,8 +2842,12 @@ def _detect_plane_flex_candidates(
       d.geom_xpos,
       d.geom_xmat,
       d.flexvert_xpos,
+      body_awake if body_awake is not None else d.body_awake,
       d.flex_aabb_min,
       d.flex_aabb_max,
+      flex_awake if flex_awake is not None else d.body_awake,
+      flex_awake_prev if flex_awake_prev is not None else d.body_awake,
+      body_awake_prev if body_awake_prev is not None else d.body_awake,
       d.naconmax,
     ],
     outputs=[
@@ -2862,13 +2865,116 @@ def _detect_plane_flex_candidates(
   )
 
 
+@cache_kernel
+def _flex_geom_broadphase(enable_sleep: bool = False, incremental: bool = False):
+  @wp.kernel(module="unique", enable_backward=False)
+  def kernel(
+    # Model:
+    geom_type: wp.array[int],
+    geom_contype: wp.array[int],
+    geom_conaffinity: wp.array[int],
+    geom_bodyid: wp.array[int],
+    geom_aabb: wp.array3d[wp.vec3],
+    geom_margin: wp.array2d[float],
+    flex_contype: wp.array[int],
+    flex_conaffinity: wp.array[int],
+    flex_margin: wp.array[float],
+    # Data in:
+    geom_xpos_in: wp.array2d[wp.vec3],
+    geom_xmat_in: wp.array2d[wp.mat33],
+    body_awake_in: wp.array2d[int],
+    flex_aabb_min_in: wp.array2d[wp.vec3],
+    flex_aabb_max_in: wp.array2d[wp.vec3],
+    flex_awake_in: wp.array2d[int],
+    flex_awake_prev_in: wp.array2d[int],
+    # In:
+    body_awake_prev_in: wp.array2d[int],
+    # Out:
+    cand_geom_out: wp.array3d[int],
+    cand_geom_aabb_min_out: wp.array3d[wp.vec3],
+    cand_geom_aabb_max_out: wp.array3d[wp.vec3],
+    ncand_geom_out: wp.array2d[int],
+  ):
+    worldid, flexid, geomid = wp.tid()
+
+    gtype = geom_type[geomid]
+    if (
+      gtype != int(GeomType.SPHERE)
+      and gtype != int(GeomType.CAPSULE)
+      and gtype != int(GeomType.BOX)
+      and gtype != int(GeomType.CYLINDER)
+      and gtype != int(GeomType.ELLIPSOID)
+      and gtype != int(GeomType.MESH)
+    ):
+      return
+
+    g_contype = geom_contype[geomid]
+    g_conaffinity = geom_conaffinity[geomid]
+    f_contype = flex_contype[flexid]
+    f_conaffinity = flex_conaffinity[flexid]
+    if not ((g_contype & f_conaffinity) or (f_contype & g_conaffinity)):
+      return
+
+    if wp.static(enable_sleep):
+      geom_body = geom_bodyid[geomid]
+      geom_state = body_awake_in[worldid, geom_body]
+      flex_asleep = flex_awake_in[worldid, flexid] == 0
+      if flex_asleep and (geom_state == SleepState.ASLEEP or geom_state == SleepState.STATIC):
+        return
+      if wp.static(incremental):
+        geom_state_prev = body_awake_prev_in[worldid, geom_body]
+        flex_asleep_prev = flex_awake_prev_in[worldid, flexid] == 0
+        skipped_pass1 = flex_asleep_prev and (geom_state_prev == SleepState.ASLEEP or geom_state_prev == SleepState.STATIC)
+        if not skipped_pass1:
+          return
+
+    geom_margin_val = geom_margin[worldid % geom_margin.shape[0], geomid]
+    elem_margin = flex_margin[flexid]
+    margin = geom_margin_val + elem_margin
+
+    geom_pos = geom_xpos_in[worldid, geomid]
+    geom_rot = geom_xmat_in[worldid, geomid]
+
+    aabb_id = worldid % geom_aabb.shape[0]
+    geom_center_local = geom_aabb[aabb_id, geomid, 0]
+    geom_half_size_local = geom_aabb[aabb_id, geomid, 1]
+    geom_center_global = geom_rot @ geom_center_local + geom_pos
+    geom_half_size_global = wp.vec3(
+      wp.abs(geom_rot[0, 0]) * geom_half_size_local[0]
+      + wp.abs(geom_rot[0, 1]) * geom_half_size_local[1]
+      + wp.abs(geom_rot[0, 2]) * geom_half_size_local[2],
+      wp.abs(geom_rot[1, 0]) * geom_half_size_local[0]
+      + wp.abs(geom_rot[1, 1]) * geom_half_size_local[1]
+      + wp.abs(geom_rot[1, 2]) * geom_half_size_local[2],
+      wp.abs(geom_rot[2, 0]) * geom_half_size_local[0]
+      + wp.abs(geom_rot[2, 1]) * geom_half_size_local[1]
+      + wp.abs(geom_rot[2, 2]) * geom_half_size_local[2],
+    )
+    inflate = wp.vec3(margin, margin, margin)
+    geom_box_min = geom_center_global - geom_half_size_global - inflate
+    geom_box_max = geom_center_global + geom_half_size_global + inflate
+
+    flex_aabb_min_val = flex_aabb_min_in[worldid, flexid]
+    flex_aabb_max_val = flex_aabb_max_in[worldid, flexid]
+
+    if _flex_element_aabb_filter(geom_box_min, geom_box_max, flex_aabb_min_val, flex_aabb_max_val):
+      return
+
+    idx = wp.atomic_add(ncand_geom_out, worldid, flexid, 1)
+    cand_geom_out[worldid, flexid, idx] = geomid
+    cand_geom_aabb_min_out[worldid, flexid, idx] = geom_box_min
+    cand_geom_aabb_max_out[worldid, flexid, idx] = geom_box_max
+
+  return kernel
+
+
 def _detect_1d_geom_candidates(
   m: Model,
   d: Data,
   ws: FlexWorkspace,
 ):
   """Detect candidates between 1D flex rope vertices and geoms."""
-  if m.nflexvert == 0:
+  if m.nflexvert == 0 or not m.has_1d_flex or m.ngeom == 0 or ws.nflex_cand_geom is None:
     return
 
   epa_iterations = m.opt.ccd_iterations
@@ -2876,18 +2982,12 @@ def _detect_1d_geom_candidates(
     _flex_geom_vertex_narrowphase_detect(bool(m.opt.warn_overflow)),
     dim=(d.nworld, m.nflexvert),
     inputs=[
-      m.ngeom,
       m.opt.ccd_tolerance,
       m.geom_type,
-      m.geom_contype,
-      m.geom_conaffinity,
       m.geom_bodyid,
       m.geom_dataid,
       m.geom_size,
-      m.geom_aabb,
       m.geom_margin,
-      m.flex_contype,
-      m.flex_conaffinity,
       m.flex_margin,
       m.flex_dim,
       m.flex_vertadr,
@@ -2910,8 +3010,10 @@ def _detect_1d_geom_candidates(
       d.geom_xmat,
       d.flexvert_xpos,
       d.naccdmax,
-      d.flex_aabb_min,
-      d.flex_aabb_max,
+      ws.flex_cand_geom,
+      ws.flex_cand_geom_aabb_min,
+      ws.flex_cand_geom_aabb_max,
+      ws.nflex_cand_geom,
       ws.epa_vert,
       ws.epa_vert_index,
       ws.epa_face,
@@ -2943,7 +3045,7 @@ def _detect_elem_geom_candidates(
   ws: FlexWorkspace,
 ):
   """Detect candidates between 2D/3D flex elements and geoms."""
-  if m.nflexelem == 0:
+  if m.nflexelem == 0 or not m.has_elem_flex or m.ngeom == 0 or ws.nflex_cand_geom is None:
     return
 
   epa_iterations = m.opt.ccd_iterations
@@ -2951,18 +3053,12 @@ def _detect_elem_geom_candidates(
     _flex_narrowphase_elem_detect(bool(m.opt.warn_overflow)),
     dim=(d.nworld, m.nflexelem),
     inputs=[
-      m.ngeom,
       m.opt.ccd_tolerance,
       m.geom_type,
-      m.geom_contype,
-      m.geom_conaffinity,
       m.geom_bodyid,
       m.geom_dataid,
       m.geom_size,
-      m.geom_aabb,
       m.geom_margin,
-      m.flex_contype,
-      m.flex_conaffinity,
       m.flex_margin,
       m.flex_dim,
       m.flex_vertadr,
@@ -2988,8 +3084,10 @@ def _detect_elem_geom_candidates(
       d.geom_xmat,
       d.flexvert_xpos,
       d.naccdmax,
-      d.flex_aabb_min,
-      d.flex_aabb_max,
+      ws.flex_cand_geom,
+      ws.flex_cand_geom_aabb_min,
+      ws.flex_cand_geom_aabb_max,
+      ws.nflex_cand_geom,
       ws.epa_vert,
       ws.epa_vert_index,
       ws.epa_face,
@@ -3164,6 +3262,12 @@ def _flex_geom_collision(
   m: Model,
   d: Data,
   ws: FlexWorkspace,
+  enable_sleep: bool = False,
+  incremental: bool = False,
+  body_awake: Optional[wp.array] = None,
+  flex_awake: Optional[wp.array] = None,
+  body_awake_prev: Optional[wp.array] = None,
+  flex_awake_prev: Optional[wp.array] = None,
 ):
   """Detect and write collisions between rigid geoms and flex objects."""
   if m.nflex == 0:
@@ -3173,14 +3277,65 @@ def _flex_geom_collision(
   if ws.flex_num_groups is not None:
     ws.flex_num_groups.zero_()
 
+  # 0. Coarse flex vs geom broadphase (filters geoms against flex object AABB)
+  if ws.nflex_cand_geom is not None:
+    ws.nflex_cand_geom.zero_()
+    wp.launch(
+      _flex_geom_broadphase(enable_sleep, incremental),
+      dim=(d.nworld, m.nflex, m.ngeom),
+      inputs=[
+        m.geom_type,
+        m.geom_contype,
+        m.geom_conaffinity,
+        m.geom_bodyid,
+        m.geom_aabb,
+        m.geom_margin,
+        m.flex_contype,
+        m.flex_conaffinity,
+        m.flex_margin,
+        d.geom_xpos,
+        d.geom_xmat,
+        body_awake if body_awake is not None else d.body_awake,
+        d.flex_aabb_min,
+        d.flex_aabb_max,
+        flex_awake if flex_awake is not None else d.body_awake,
+        flex_awake_prev if flex_awake_prev is not None else d.body_awake,
+        body_awake_prev if body_awake_prev is not None else d.body_awake,
+      ],
+      outputs=[
+        ws.flex_cand_geom,
+        ws.flex_cand_geom_aabb_min,
+        ws.flex_cand_geom_aabb_max,
+        ws.nflex_cand_geom,
+      ],
+    )
+
   # 1. Plane collisions (flex vertices vs infinite planes)
-  _detect_plane_flex_candidates(m, d, ws)
+  _detect_plane_flex_candidates(
+    m,
+    d,
+    ws,
+    enable_sleep=enable_sleep,
+    incremental=incremental,
+    body_awake=body_awake,
+    flex_awake=flex_awake,
+    body_awake_prev=body_awake_prev,
+    flex_awake_prev=flex_awake_prev,
+  )
 
   # 2. 1D rope vertex collisions (vertices vs rigid geoms)
-  _detect_1d_geom_candidates(m, d, ws)
+  _detect_1d_geom_candidates(
+    m,
+    d,
+    ws,
+  )
 
   # 3. 2D cloth and 3D softbody element collisions (elements vs rigid geoms)
-  _detect_elem_geom_candidates(m, d, ws)
+  _detect_elem_geom_candidates(
+    m,
+    d,
+    ws,
+  )
 
   # 4. Contact writing pass
   _filter_and_write_contacts(m, d, ws, enable_fps=False)
@@ -3193,6 +3348,10 @@ def _flex_sap_collision(
   ws: FlexWorkspace,
   is_self: bool,
   sap_data: tuple[wp.array, wp.array, wp.array, wp.array] | None = None,
+  enable_sleep: bool = False,
+  incremental: bool = False,
+  flex_awake: Optional[wp.array] = None,
+  flex_awake_prev: Optional[wp.array] = None,
 ):
   """Detect and write flex self or flex-flex collision contacts (broadphase and narrowphase)."""
   if is_self and not m.has_flex_selfcollide:
@@ -3211,7 +3370,7 @@ def _flex_sap_collision(
   d.ncollision.zero_()
 
   wp.launch(
-    _flex_sap_sweep(is_self, bool(m.opt.warn_overflow)),
+    _flex_sap_sweep(is_self, bool(m.opt.warn_overflow), enable_sleep, incremental),
     dim=nsweep,
     inputs=[
       m.flex_contype,
@@ -3226,6 +3385,8 @@ def _flex_sap_collision(
       m.flex_elemflexid,
       d.flex_aabb_min,
       d.flex_aabb_max,
+      flex_awake if flex_awake is not None else d.body_awake,
+      flex_awake_prev if flex_awake_prev is not None else d.body_awake,
       m.nflexelem,
       sap_sort_index,
       sap_cumsum,
@@ -3255,28 +3416,101 @@ def _flex_sap_collision(
 
 
 @event_scope
-def flex_collision(m: Model, d: Data, ctx):
+def flex_collision(
+  m: Model,
+  d: Data,
+  ctx,
+  enable_sleep: bool = False,
+  awake_prev: Optional[wp.array] = None,
+):
   """Runs collision detection for all flex collisions."""
   if m.nflex == 0 or m.nflexelem == 0:
     return
 
-  # Update dynamic flex object bounding boxes
-  flex_broadphase_aabb(m, d)
+  incremental = awake_prev is not None
+  awake_prev_in = awake_prev if awake_prev is not None else d.body_awake
 
-  ws = _allocate_flex_workspace(m, d)
+  flex_awake = d.body_awake
+  if enable_sleep:
+    flex_awake = d.flex_awake
+
+  flex_awake_prev = awake_prev_in
+  if enable_sleep and incremental:
+    flex_awake_prev = d.flex_awake_prev
+    wp.launch(
+      init_sleep_flex,
+      dim=(d.nworld, m.nflex),
+      inputs=[m.flex_has_dynamic_body],
+      outputs=[flex_awake_prev],
+    )
+    wp.launch(
+      update_sleep_flex_from_bodies,
+      dim=(d.nworld, m.nbody),
+      inputs=[
+        m.body_isflex,
+        awake_prev_in,
+      ],
+      outputs=[flex_awake_prev],
+    )
+
+  # Update dynamic flex object bounding boxes
+  if not incremental:
+    flex_broadphase_aabb(m, d)
+
+  ws = getattr(d, "_flex_ws", None)
+  if ws is None:
+    d._flex_ws = ws = _allocate_flex_workspace(m, d)
 
   # Compute SAP projection and segmented sort once if needed by self or flex-flex collision
   sap_data = None
   needs_self_sap = m.has_flex_selfcollide
   needs_flex_flex_sap = m.nflex > 1
   if needs_self_sap or needs_flex_flex_sap:
-    sap_data = _run_flex_sap_sort(m, d)
+    if not incremental:
+      sap_data = _run_flex_sap_sort(m, d)
+      d._flex_sap_data = sap_data
+    else:
+      sap_data = getattr(d, "_flex_sap_data", None)
+      if sap_data is None:
+        sap_data = _run_flex_sap_sort(m, d)
 
   # 1. Flex-Geom Collision (Primitive and CCD)
-  _flex_geom_collision(m, d, ws)
+  _flex_geom_collision(
+    m,
+    d,
+    ws,
+    enable_sleep=enable_sleep,
+    incremental=incremental,
+    body_awake=d.body_awake,
+    flex_awake=flex_awake,
+    body_awake_prev=awake_prev_in,
+    flex_awake_prev=flex_awake_prev,
+  )
 
   # 2. Flex Self-Collision (Broadphase and Narrowphase)
-  _flex_sap_collision(m, d, ctx, ws, is_self=True, sap_data=sap_data)
+  _flex_sap_collision(
+    m,
+    d,
+    ctx,
+    ws,
+    is_self=True,
+    sap_data=sap_data,
+    enable_sleep=enable_sleep,
+    incremental=incremental,
+    flex_awake=flex_awake,
+    flex_awake_prev=flex_awake_prev,
+  )
 
   # 3. Flex-Flex Collision (Broadphase and Narrowphase)
-  _flex_sap_collision(m, d, ctx, ws, is_self=False, sap_data=sap_data)
+  _flex_sap_collision(
+    m,
+    d,
+    ctx,
+    ws,
+    is_self=False,
+    sap_data=sap_data,
+    enable_sleep=enable_sleep,
+    incremental=incremental,
+    flex_awake=flex_awake,
+    flex_awake_prev=flex_awake_prev,
+  )

@@ -17,6 +17,7 @@ import warp as wp
 
 from mujoco_warp._src import types
 from mujoco_warp._src.types import ConstraintType
+from mujoco_warp._src.types import EnableBit
 from mujoco_warp._src.types import EqType
 from mujoco_warp._src.types import ObjType
 from mujoco_warp._src.types import OverflowType
@@ -87,6 +88,56 @@ def _reset_dsu(
     nisland_out[worldid] = 0
 
 
+def _dsu_flex_star_union(enable_sleep: bool):
+  @wp.kernel(module="unique")
+  def kernel(
+    # Model:
+    body_treeid: wp.array[int],
+    flex_interp: wp.array[int],
+    flex_nodeadr: wp.array[int],
+    flex_nodenum: wp.array[int],
+    flex_vertadr: wp.array[int],
+    flex_vertnum: wp.array[int],
+    flex_nodebodyid: wp.array[int],
+    flex_vertbodyid: wp.array[int],
+    flex_has_dynamic_body: wp.array[int],
+    flex_root_tree: wp.array[int],
+    # Data in:
+    flex_awake_in: wp.array2d[int],
+    # Data out:
+    tree_island_out: wp.array2d[int],
+    # Out:
+    island_parent_out: wp.array2d[int],
+  ):
+    worldid, flexid = wp.tid()
+    if flex_has_dynamic_body[flexid] == 0:
+      return
+
+    if wp.static(enable_sleep):
+      if flex_awake_in[worldid, flexid] == 0:
+        return
+
+    root_tree = flex_root_tree[flexid]
+    if root_tree < 0:
+      return
+
+    _dsu_activate(worldid, root_tree, tree_island_out)
+
+    is_interp = flex_interp[flexid] != 0
+    num = flex_nodenum[flexid] if is_interp else flex_vertnum[flexid]
+    adr = flex_nodeadr[flexid] if is_interp else flex_vertadr[flexid]
+
+    for j in range(num):
+      b = flex_nodebodyid[adr + j] if is_interp else flex_vertbodyid[adr + j]
+      if b >= 0:
+        t = body_treeid[b]
+        if t >= 0 and t != root_tree:
+          _dsu_activate(worldid, t, tree_island_out)
+          island_parent_out[worldid, t] = root_tree
+
+  return kernel
+
+
 @wp.func
 def _is_repeated_fixed_support_efc(
   # Data in:
@@ -105,117 +156,147 @@ def _is_repeated_fixed_support_efc(
   )
 
 
-@wp.kernel
-def _island_dsu(
-  # Model:
-  nv: int,
-  body_treeid: wp.array[int],
-  jnt_dofadr: wp.array[int],
-  dof_treeid: wp.array[int],
-  geom_bodyid: wp.array[int],
-  site_bodyid: wp.array[int],
-  eq_type: wp.array[int],
-  eq_obj1id: wp.array[int],
-  eq_obj2id: wp.array[int],
-  eq_objtype: wp.array[int],
-  is_sparse: bool,
-  # Data in:
-  nefc_in: wp.array[int],
-  contact_geom_in: wp.array[wp.vec2i],
-  efc_type_in: wp.array2d[int],
-  efc_id_in: wp.array2d[int],
-  efc_J_rownnz_in: wp.array2d[int],
-  efc_J_rowadr_in: wp.array2d[int],
-  efc_J_colind_in: wp.array3d[int],
-  efc_J_in: wp.array3d[float],
-  njmax_in: int,
-  # In:
-  chunk_size: int,
-  # Data out:
-  tree_island_out: wp.array2d[int],
-  # Out:
-  island_parent_out: wp.array2d[int],
-):
-  """Process one chunk of one world's active EFC prefix with one strided CUDA warp.
+def _island_dsu(has_flex: bool):
+  @wp.kernel(module="unique")
+  def kernel(
+    # Model:
+    nv: int,
+    body_treeid: wp.array[int],
+    jnt_dofadr: wp.array[int],
+    dof_treeid: wp.array[int],
+    geom_bodyid: wp.array[int],
+    site_bodyid: wp.array[int],
+    eq_type: wp.array[int],
+    eq_obj1id: wp.array[int],
+    eq_obj2id: wp.array[int],
+    eq_objtype: wp.array[int],
+    is_sparse: bool,
+    flex_root_tree: wp.array[int],
+    # Data in:
+    nefc_in: wp.array[int],
+    contact_geom_in: wp.array[wp.vec2i],
+    contact_flex_in: wp.array[wp.vec2i],
+    efc_type_in: wp.array2d[int],
+    efc_id_in: wp.array2d[int],
+    efc_J_rownnz_in: wp.array2d[int],
+    efc_J_rowadr_in: wp.array2d[int],
+    efc_J_colind_in: wp.array3d[int],
+    efc_J_in: wp.array3d[float],
+    njmax_in: int,
+    # In:
+    chunk_size: int,
+    # Data out:
+    tree_island_out: wp.array2d[int],
+    # Out:
+    island_parent_out: wp.array2d[int],
+  ):
+    """Process one chunk of one world's active EFC prefix with one strided CUDA warp.
 
-  Blocks are laid out over (world, chunk) rather than world alone, so resident
-  parallelism tracks total constraint capacity instead of batch size. A single world
-  with a long prefix fills the device the same way a large batch of short ones does.
-  """
-  worldid, chunkid, lane = wp.tid()
-  chunk_beg = chunkid * chunk_size
-  chunk_end = wp.min(chunk_beg + chunk_size, wp.min(njmax_in, nefc_in[worldid]))
-  for efcid in range(chunk_beg + lane, chunk_end, wp.block_dim()):
-    efc_type = efc_type_in[worldid, efcid]
-    efc_id = efc_id_in[worldid, efcid]
-    repeated = _is_repeated_fixed_support_efc(efc_type_in, efc_id_in, worldid, efcid)
-    tree0 = int(-1)
-    tree1 = int(-1)
-    use_generic = int(0)
+    Blocks are laid out over (world, chunk) rather than world alone, so resident
+    parallelism tracks total constraint capacity instead of batch size. A single world
+    with a long prefix fills the device the same way a large batch of short ones does.
+    """
+    worldid, chunkid, lane = wp.tid()
+    chunk_beg = chunkid * chunk_size
+    chunk_end = wp.min(chunk_beg + chunk_size, wp.min(njmax_in, nefc_in[worldid]))
+    for efcid in range(chunk_beg + lane, chunk_end, wp.block_dim()):
+      efc_type = efc_type_in[worldid, efcid]
+      efc_id = efc_id_in[worldid, efcid]
+      repeated = _is_repeated_fixed_support_efc(efc_type_in, efc_id_in, worldid, efcid)
+      tree0 = int(-1)
+      tree1 = int(-1)
+      use_generic = int(0)
 
-    if efc_type == ConstraintType.EQUALITY:
-      eq_t = eq_type[efc_id]
-      if eq_t == EqType.CONNECT or eq_t == EqType.WELD:
+      if efc_type == ConstraintType.EQUALITY:
+        eq_t = eq_type[efc_id]
+        if eq_t == EqType.CONNECT or eq_t == EqType.WELD:
+          if repeated:
+            continue
+          body0 = eq_obj1id[efc_id]
+          body1 = eq_obj2id[efc_id]
+          if eq_objtype[efc_id] == ObjType.SITE:
+            body0 = site_bodyid[body0]
+            body1 = site_bodyid[body1]
+          tree0 = body_treeid[body0]
+          tree1 = body_treeid[body1]
+        elif wp.static(has_flex) and (eq_t == EqType.FLEX or eq_t == EqType.FLEXSTRAIN):
+          continue
+        else:
+          use_generic = 1
+      elif efc_type == ConstraintType.FRICTION_DOF:
         if repeated:
           continue
-        body0 = eq_obj1id[efc_id]
-        body1 = eq_obj2id[efc_id]
-        if eq_objtype[efc_id] == ObjType.SITE:
-          body0 = site_bodyid[body0]
-          body1 = site_bodyid[body1]
-        tree0 = body_treeid[body0]
-        tree1 = body_treeid[body1]
-      else:
-        use_generic = 1
-    elif efc_type == ConstraintType.FRICTION_DOF:
-      if repeated:
-        continue
-      tree0 = dof_treeid[efc_id]
-    elif efc_type == ConstraintType.LIMIT_JOINT:
-      if repeated:
-        continue
-      tree0 = dof_treeid[jnt_dofadr[efc_id]]
-    elif (
-      efc_type == ConstraintType.CONTACT_FRICTIONLESS
-      or efc_type == ConstraintType.CONTACT_PYRAMIDAL
-      or efc_type == ConstraintType.CONTACT_ELLIPTIC
-    ):
-      geom_pair = contact_geom_in[efc_id]
-      if geom_pair[0] >= 0 and geom_pair[1] >= 0:
+        tree0 = dof_treeid[efc_id]
+      elif efc_type == ConstraintType.LIMIT_JOINT:
         if repeated:
           continue
-        tree0 = body_treeid[geom_bodyid[geom_pair[0]]]
-        tree1 = body_treeid[geom_bodyid[geom_pair[1]]]
+        tree0 = dof_treeid[jnt_dofadr[efc_id]]
+      elif (
+        efc_type == ConstraintType.CONTACT_FRICTIONLESS
+        or efc_type == ConstraintType.CONTACT_PYRAMIDAL
+        or efc_type == ConstraintType.CONTACT_ELLIPTIC
+      ):
+        geom_pair = contact_geom_in[efc_id]
+        if geom_pair[0] >= 0 and geom_pair[1] >= 0:
+          if repeated:
+            continue
+          tree0 = body_treeid[geom_bodyid[geom_pair[0]]]
+          tree1 = body_treeid[geom_bodyid[geom_pair[1]]]
+        elif wp.static(has_flex):
+          flex_pair = contact_flex_in[efc_id]
+          if geom_pair[0] >= 0 and geom_pair[1] < 0:
+            if repeated:
+              continue
+            tree0 = body_treeid[geom_bodyid[geom_pair[0]]]
+            flex_id = flex_pair[1] if flex_pair[1] >= 0 else flex_pair[0]
+            tree1 = flex_root_tree[flex_id]
+          elif geom_pair[0] < 0 and geom_pair[1] >= 0:
+            if repeated:
+              continue
+            tree0 = body_treeid[geom_bodyid[geom_pair[1]]]
+            flex_id = flex_pair[0] if flex_pair[0] >= 0 else flex_pair[1]
+            tree1 = flex_root_tree[flex_id]
+          elif geom_pair[0] < 0 and geom_pair[1] < 0:
+            if flex_pair[0] == flex_pair[1]:
+              continue
+            if repeated:
+              continue
+            tree0 = flex_root_tree[flex_pair[0]]
+            tree1 = flex_root_tree[flex_pair[1]]
+          else:
+            use_generic = 1
+        else:
+          use_generic = 1
       else:
         use_generic = 1
-    else:
-      use_generic = 1
 
-    if use_generic == 0:
-      _dsu_union(island_parent_out, worldid, tree0, tree1, tree_island_out)
-      continue
+      if use_generic == 0:
+        _dsu_union(island_parent_out, worldid, tree0, tree1, tree_island_out)
+        continue
 
-    first_tree = int(-1)
-    count = nv
-    rowadr = int(0)
-    if is_sparse:
-      count = efc_J_rownnz_in[worldid, efcid]
-      rowadr = efc_J_rowadr_in[worldid, efcid]
-
-    for index in range(count):
-      dof = index
+      first_tree = int(-1)
+      count = nv
+      rowadr = int(0)
       if is_sparse:
-        dof = efc_J_colind_in[worldid, 0, rowadr + index]
-      elif efc_J_in[worldid, efcid, dof] == 0.0:
-        continue
-      tree = dof_treeid[dof]
-      if tree < 0:
-        continue
-      if first_tree < 0:
-        first_tree = tree
-        _dsu_union(island_parent_out, worldid, tree, -1, tree_island_out)
-      else:
-        _dsu_union(island_parent_out, worldid, first_tree, tree, tree_island_out)
+        count = efc_J_rownnz_in[worldid, efcid]
+        rowadr = efc_J_rowadr_in[worldid, efcid]
+
+      for index in range(count):
+        dof = index
+        if is_sparse:
+          dof = efc_J_colind_in[worldid, 0, rowadr + index]
+        elif efc_J_in[worldid, efcid, dof] == 0.0:
+          continue
+        tree = dof_treeid[dof]
+        if tree < 0:
+          continue
+        if first_tree < 0:
+          first_tree = tree
+          _dsu_union(island_parent_out, worldid, tree, -1, tree_island_out)
+        else:
+          _dsu_union(island_parent_out, worldid, first_tree, tree, tree_island_out)
+
+  return kernel
 
 
 @wp.kernel
@@ -298,8 +379,28 @@ def direct_dsu(m: types.Model, d: types.Data, island_parent: wp.array2d[int]):
     dim=(d.nworld, m.ntree),
     inputs=[d.nisland, d.tree_island, island_parent],
   )
+  if m.nflex > 0:
+    wp.launch(
+      _dsu_flex_star_union(bool(m.opt.enableflags & EnableBit.SLEEP)),
+      dim=(d.nworld, m.nflex),
+      inputs=[
+        m.body_treeid,
+        m.flex_interp,
+        m.flex_nodeadr,
+        m.flex_nodenum,
+        m.flex_vertadr,
+        m.flex_vertnum,
+        m.flex_nodebodyid,
+        m.flex_vertbodyid,
+        m.flex_has_dynamic_body,
+        m.flex_root_tree,
+        d.flex_awake,
+        d.tree_island,
+        island_parent,
+      ],
+    )
   wp.launch_tiled(
-    _island_dsu,
+    _island_dsu(m.nflex > 0),
     dim=(d.nworld, nchunk),
     inputs=[
       m.nv,
@@ -313,8 +414,10 @@ def direct_dsu(m: types.Model, d: types.Data, island_parent: wp.array2d[int]):
       m.eq_obj2id,
       m.eq_objtype,
       m.is_sparse,
+      m.flex_root_tree,
       d.nefc,
       d.contact.geom,
+      d.contact.flex,
       d.efc.type,
       d.efc.id,
       d.efc.J_rownnz,
@@ -564,123 +667,146 @@ def _island_map_constraints(
   island_nefc_out[worldid, islandid] = ne_mapped + nf_mapped + nother_mapped
 
 
-@wp.kernel
-def _compute_efc_tree(
-  # Model:
-  nv: int,
-  body_treeid: wp.array[int],
-  jnt_dofadr: wp.array[int],
-  dof_treeid: wp.array[int],
-  geom_bodyid: wp.array[int],
-  site_bodyid: wp.array[int],
-  eq_type: wp.array[int],
-  eq_obj1id: wp.array[int],
-  eq_obj2id: wp.array[int],
-  eq_objtype: wp.array[int],
-  is_sparse: bool,
-  # Data in:
-  nefc_in: wp.array[int],
-  contact_geom_in: wp.array[wp.vec2i],
-  efc_type_in: wp.array2d[int],
-  efc_id_in: wp.array2d[int],
-  efc_J_rownnz_in: wp.array2d[int],
-  efc_J_rowadr_in: wp.array2d[int],
-  efc_J_colind_in: wp.array3d[int],
-  efc_J_in: wp.array3d[float],
-  njmax_in: int,
-  # Out:
-  efc_tree_out: wp.array2d[int],
-):
-  """Compute the first non-negative tree for each constraint."""
-  worldid, efcid = wp.tid()
-
-  if efcid >= wp.min(njmax_in, nefc_in[worldid]):
-    return
-
-  efc_type = efc_type_in[worldid, efcid]
-  efc_id = efc_id_in[worldid, efcid]
-
-  tree = int(-1)
-  use_generic = int(0)
-
-  # equality (connect/weld)
-  if efc_type == ConstraintType.EQUALITY:
-    eq_t = eq_type[efc_id]
-
-    if eq_t == EqType.CONNECT or eq_t == EqType.WELD:
-      b1 = eq_obj1id[efc_id]
-      b2 = eq_obj2id[efc_id]
-
-      if eq_objtype[efc_id] == ObjType.SITE:
-        b1 = site_bodyid[b1]
-        b2 = site_bodyid[b2]
-
-      t1 = body_treeid[b1]
-      t2 = body_treeid[b2]
-      if t1 >= 0:
-        tree = t1
-      else:
-        tree = t2
-    else:
-      # JOINT, TENDON, FLEX: generic scan
-      use_generic = 1
-
-  # joint friction
-  elif efc_type == ConstraintType.FRICTION_DOF:
-    tree = dof_treeid[efc_id]
-
-  # joint limit
-  elif efc_type == ConstraintType.LIMIT_JOINT:
-    tree = dof_treeid[jnt_dofadr[efc_id]]
-
-  # contact
-  elif (
-    efc_type == ConstraintType.CONTACT_FRICTIONLESS
-    or efc_type == ConstraintType.CONTACT_PYRAMIDAL
-    or efc_type == ConstraintType.CONTACT_ELLIPTIC
+def _compute_efc_tree(has_flex: bool):
+  @wp.kernel(module="unique")
+  def kernel(
+    # Model:
+    nv: int,
+    body_treeid: wp.array[int],
+    jnt_dofadr: wp.array[int],
+    dof_treeid: wp.array[int],
+    geom_bodyid: wp.array[int],
+    site_bodyid: wp.array[int],
+    eq_type: wp.array[int],
+    eq_obj1id: wp.array[int],
+    eq_obj2id: wp.array[int],
+    eq_objtype: wp.array[int],
+    is_sparse: bool,
+    flex_root_tree: wp.array[int],
+    # Data in:
+    nefc_in: wp.array[int],
+    contact_geom_in: wp.array[wp.vec2i],
+    contact_flex_in: wp.array[wp.vec2i],
+    efc_type_in: wp.array2d[int],
+    efc_id_in: wp.array2d[int],
+    efc_J_rownnz_in: wp.array2d[int],
+    efc_J_rowadr_in: wp.array2d[int],
+    efc_J_colind_in: wp.array3d[int],
+    efc_J_in: wp.array3d[float],
+    njmax_in: int,
+    # Out:
+    efc_tree_out: wp.array2d[int],
   ):
-    geom_pair = contact_geom_in[efc_id]
-    g1 = geom_pair[0]
-    g2 = geom_pair[1]
+    """Compute the first non-negative tree for each constraint."""
+    worldid, efcid = wp.tid()
 
-    if g1 >= 0 and g2 >= 0:
-      t1 = body_treeid[geom_bodyid[g1]]
-      t2 = body_treeid[geom_bodyid[g2]]
-      if t1 >= 0:
-        tree = t1
+    if efcid >= wp.min(njmax_in, nefc_in[worldid]):
+      return
+
+    efc_type = efc_type_in[worldid, efcid]
+    efc_id = efc_id_in[worldid, efcid]
+
+    tree = int(-1)
+    use_generic = int(0)
+
+    # equality (connect/weld)
+    if efc_type == ConstraintType.EQUALITY:
+      eq_t = eq_type[efc_id]
+
+      if eq_t == EqType.CONNECT or eq_t == EqType.WELD:
+        b1 = eq_obj1id[efc_id]
+        b2 = eq_obj2id[efc_id]
+
+        if eq_objtype[efc_id] == ObjType.SITE:
+          b1 = site_bodyid[b1]
+          b2 = site_bodyid[b2]
+
+        t1 = body_treeid[b1]
+        t2 = body_treeid[b2]
+        if t1 >= 0:
+          tree = t1
+        else:
+          tree = t2
+      elif wp.static(has_flex) and (eq_t == EqType.FLEX or eq_t == EqType.FLEXSTRAIN):
+        tree = flex_root_tree[eq_obj1id[efc_id]]
       else:
-        tree = t2
+        # JOINT, TENDON: generic scan
+        use_generic = 1
+
+    # joint friction
+    elif efc_type == ConstraintType.FRICTION_DOF:
+      tree = dof_treeid[efc_id]
+
+    # joint limit
+    elif efc_type == ConstraintType.LIMIT_JOINT:
+      tree = dof_treeid[jnt_dofadr[efc_id]]
+
+    # contact
+    elif (
+      efc_type == ConstraintType.CONTACT_FRICTIONLESS
+      or efc_type == ConstraintType.CONTACT_PYRAMIDAL
+      or efc_type == ConstraintType.CONTACT_ELLIPTIC
+    ):
+      geom_pair = contact_geom_in[efc_id]
+      g1 = geom_pair[0]
+      g2 = geom_pair[1]
+
+      if g1 >= 0 and g2 >= 0:
+        t1 = body_treeid[geom_bodyid[g1]]
+        t2 = body_treeid[geom_bodyid[g2]]
+        if t1 >= 0:
+          tree = t1
+        else:
+          tree = t2
+      elif wp.static(has_flex):
+        flex_pair = contact_flex_in[efc_id]
+        if g1 >= 0 and g2 < 0:
+          t1 = body_treeid[geom_bodyid[g1]]
+          flex_id = flex_pair[1] if flex_pair[1] >= 0 else flex_pair[0]
+          t2 = flex_root_tree[flex_id]
+          tree = t1 if t1 >= 0 else t2
+        elif g1 < 0 and g2 >= 0:
+          t1 = body_treeid[geom_bodyid[g2]]
+          flex_id = flex_pair[0] if flex_pair[0] >= 0 else flex_pair[1]
+          t2 = flex_root_tree[flex_id]
+          tree = t1 if t1 >= 0 else t2
+        elif g1 < 0 and g2 < 0:
+          flex_id = flex_pair[0] if flex_pair[0] >= 0 else flex_pair[1]
+          tree = flex_root_tree[flex_id]
+        else:
+          use_generic = 1
+      else:
+        use_generic = 1
+
     else:
-      # flex contacts: generic scan
+      # generic: scan Jacobian row
       use_generic = 1
 
-  else:
-    # generic: scan Jacobian row
-    use_generic = 1
-
-  if use_generic:
-    count = nv
-    rowadr = 0
-    if is_sparse:
-      count = efc_J_rownnz_in[worldid, efcid]
-      rowadr = efc_J_rowadr_in[worldid, efcid]
-
-    for i in range(count):
-      dof = i
+    if use_generic:
+      count = nv
+      rowadr = 0
       if is_sparse:
-        sparseid = rowadr + i
-        dof = efc_J_colind_in[worldid, 0, sparseid]
-      else:
-        J_val = efc_J_in[worldid, efcid, dof]
-        if J_val == 0.0:
-          continue
+        count = efc_J_rownnz_in[worldid, efcid]
+        rowadr = efc_J_rowadr_in[worldid, efcid]
 
-      t = dof_treeid[dof]
-      if t >= 0:
-        tree = t
-        break
+      for i in range(count):
+        dof = i
+        if is_sparse:
+          sparseid = rowadr + i
+          dof = efc_J_colind_in[worldid, 0, sparseid]
+        else:
+          J_val = efc_J_in[worldid, efcid, dof]
+          if J_val == 0.0:
+            continue
 
-  efc_tree_out[worldid, efcid] = tree
+        t = dof_treeid[dof]
+        if t >= 0:
+          tree = t
+          break
+
+    efc_tree_out[worldid, efcid] = tree
+
+  return kernel
 
 
 @wp.kernel
@@ -781,7 +907,7 @@ def compute_island_mapping(m: types.Model, d: types.Data):
   )
 
   wp.launch(
-    _compute_efc_tree,
+    _compute_efc_tree(m.nflex > 0),
     dim=(d.nworld, d.njmax),
     inputs=[
       m.nv,
@@ -795,8 +921,10 @@ def compute_island_mapping(m: types.Model, d: types.Data):
       m.eq_obj2id,
       m.eq_objtype,
       m.is_sparse,
+      m.flex_root_tree,
       d.nefc,
       d.contact.geom,
+      d.contact.flex,
       d.efc.type,
       d.efc.id,
       d.efc.J_rownnz,

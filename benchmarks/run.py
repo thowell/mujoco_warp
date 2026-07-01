@@ -169,11 +169,16 @@ def _view_benchmark(bm: dict, input_dir: Path):
     (benchmark_root / bm["mjcf"]).as_posix(),
     "--nworld=1",
   ]
-  for field in ("nconmax", "nccdmax", "njmax"):
-    if field in bm:
+  for field in bm:
+    if field in ("name", "assets", "mjcf", "_dir", "nworld"):
+      continue
+    if field == "replay":
+      cmd.append(f"--replay={(benchmark_root / bm['replay'])}")
+    elif isinstance(bm[field], (list, tuple)):
+      for val in bm[field]:
+        cmd.append(f"--{field}={val}")
+    else:
       cmd.append(f"--{field}={bm[field]}")
-  if "replay" in bm:
-    cmd.append(f"--replay={(benchmark_root / bm['replay'])}")
 
   log.info("Command: uv run %s", " ".join(cmd))
   subprocess.run(("uv", "run") + tuple(cmd), cwd=input_dir, check=True)

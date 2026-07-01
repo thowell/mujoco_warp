@@ -38,6 +38,8 @@ BENCHMARKS = [
     "nworld": 32,
     "nconmax": 6400,
     "njmax": 6400,
+    "override": ["opt.enableflags=SLEEP", "opt.sleep_tolerance=0.01"],
+    "init_asleep": True,
     "replay": "lift_cloth.npz",
     "assets": [(ASSETS[0], "aloha")],
   },
