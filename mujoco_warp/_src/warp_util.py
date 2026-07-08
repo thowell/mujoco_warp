@@ -19,7 +19,7 @@ import warnings
 
 import warp as wp
 
-_STACK = None
+_STACKS = {}
 
 
 class EventTracer:
@@ -36,40 +36,46 @@ class EventTracer:
       print(tracer.trace())
   """
 
-  def __init__(self, enabled: bool = True):
-    global _STACK
-    if _STACK is not None:
-      raise ValueError("only one EventTracer can run at a time")
-    if enabled:
-      _STACK = {}
+  def __init__(self, device=None, enabled: bool = True):
+    self.device = wp.get_device(device)
+    self.device_str = str(self.device)
+    self.enabled = enabled
+    if self.enabled:
+      if self.device_str in _STACKS and _STACKS[self.device_str] is not None:
+        raise ValueError(f"only one EventTracer can run at a time on device {self.device}")
 
   def __enter__(self):
+    if self.enabled:
+      _STACKS[self.device_str] = {}
     return self
 
   def trace(self) -> dict:
     """Calculates elapsed times for every node of the trace."""
-    global _STACK
+    if not self.enabled:
+      return {}
 
-    if _STACK is None:
+    stack = _STACKS.get(self.device_str)
+    if stack is None:
       return {}
 
     ret = {}
 
-    for k, v in _STACK.items():
+    for k, v in stack.items():
       events, sub_stack = v
       # push into next level of stack
-      saved_stack, _STACK = _STACK, sub_stack
+      saved_stack = stack
+      _STACKS[self.device_str] = sub_stack
       sub_trace = self.trace()
       # pop!
-      _STACK = saved_stack
+      _STACKS[self.device_str] = saved_stack
       events = tuple(wp.get_event_elapsed_time(beg, end) for beg, end in events)
       ret[k] = (events, sub_trace)
 
     return ret
 
   def __exit__(self, type, value, traceback):
-    global _STACK
-    _STACK = None
+    if self.enabled:
+      _STACKS[self.device_str] = None
 
 
 def _merge(a: dict, b: dict) -> dict:
@@ -92,8 +98,10 @@ def event_scope(fn, name: str = ""):
 
   @functools.wraps(fn)
   def wrapper(*args, **kwargs):
-    global _STACK
-    if _STACK is None:
+    device = wp.get_device()
+    device_str = str(device)
+    stack = _STACKS.get(device_str)
+    if stack is None:
       return fn(*args, **kwargs)
 
     for frame_info in inspect.stack():
@@ -101,19 +109,21 @@ def event_scope(fn, name: str = ""):
         return fn(*args, **kwargs)
 
     # push into next level of stack
-    saved_stack, _STACK = _STACK, {}
+    saved_stack = stack
+    _STACKS[device_str] = {}
     beg = wp.Event(enable_timing=True)
     end = wp.Event(enable_timing=True)
     wp.record_event(beg)
     res = fn(*args, **kwargs)
     wp.record_event(end)
     # pop back up to current level
-    sub_stack, _STACK = _STACK, saved_stack
+    sub_stack = _STACKS[device_str]
+    _STACKS[device_str] = saved_stack
     # append events and substack
-    prev_events, prev_substack = _STACK.get(name, ((), {}))
+    prev_events, prev_substack = saved_stack.get(name, ((), {}))
     events = prev_events + ((beg, end),)
     sub_stack = _merge(prev_substack, sub_stack)
-    _STACK[name] = (events, sub_stack)
+    saved_stack[name] = (events, sub_stack)
     return res
 
   return wrapper

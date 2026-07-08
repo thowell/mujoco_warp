@@ -74,7 +74,9 @@ def _dataclass_memory(dataclass, prefix: str = "") -> dict[str, int]:
 
 def _flatten_trace(trace: dict[str, float]) -> dict[str, float]:
   """Flatten the event trace into a dictionary of metrics."""
-  steps = cli.NSTEP.value * cli.NWORLD.value
+  nworld_val = cli.parse_nworld(cli.NWORLD.value)
+  nworld = sum(nworld_val) if isinstance(nworld_val, list) else nworld_val
+  steps = cli.NSTEP.value * nworld
   metrics = {}
 
   def flatten(prefix: str, trace):
@@ -89,27 +91,11 @@ def _flatten_trace(trace: dict[str, float]) -> dict[str, float]:
   return metrics
 
 
-def _sum_trace(stack1, stack2):
-  """Recursively sum event trace stacks."""
-  ret = {}
-
-  for k in stack1.keys() | stack2.keys():
-    if k not in stack1:
-      ret[k] = stack2[k]
-    elif k not in stack2:
-      ret[k] = stack1[k]
-    else:
-      times1, sub_stack1 = stack1[k]
-      times2, sub_stack2 = stack2[k]
-      times = [t1 + t2 for t1, t2 in zip(times1, times2)]
-      ret[k] = (times, _sum_trace(sub_stack1, sub_stack2))
-
-  return ret
-
-
 def _print_trace(trace, indent):
   """Recursively print event trace."""
-  steps = cli.NSTEP.value * cli.NWORLD.value
+  nworld_val = cli.parse_nworld(cli.NWORLD.value)
+  nworld = sum(nworld_val) if isinstance(nworld_val, list) else nworld_val
+  steps = cli.NSTEP.value * nworld
 
   for k, v in trace.items():
     times, sub_trace = v
@@ -149,9 +135,8 @@ def _main(argv: Sequence[str]):
 
   wp.config.quiet = flags.FLAGS["verbosity"].value < 1
   wp.init()
-  device = wp.get_device(cli.DEVICE.value)
-  if device == "cpu":
-    raise ValueError("testspeed available for gpu only")
+  nworld_val = cli.parse_nworld(cli.NWORLD.value)
+  multigpu = isinstance(nworld_val, list)
 
   if _CLEAR_WARP_CACHE.value:
     wp.clear_kernel_cache()
@@ -167,14 +152,53 @@ def _main(argv: Sequence[str]):
     print(f"Loading model from: {path}...\n")
 
   mjm = cli.load_model(path)
-  free_mem_at_init = wp.get_device(device).free_memory
-  m, d, rc, ctrls = cli.init_structs(_FUNCS[_FUNCTION.value], mjm)
-  m.opt.warn_overflow = _OVERFLOW_BEHAVIOR.value == "continue"
-  timestep = m.opt.timestep.numpy()[0]
+
+  if multigpu:
+    devices = wp.get_cuda_devices()
+    if not devices:
+      raise ValueError("No CUDA devices found for multi-gpu benchmark")
+    num_devices = len(devices)
+    if len(nworld_val) > num_devices:
+      raise ValueError(f"Number of nworld values ({len(nworld_val)}) exceeds number of available devices ({num_devices})")
+    devices = devices[: len(nworld_val)]
+    nworld_per_device = nworld_val
+    total_nworld = sum(nworld_per_device)
+    models = {}
+    datas = {}
+    rcs = {}
+    ctrls = None
+    free_mem_at_init = {}
+    for idx, device in enumerate(devices):
+      device_str = str(device)
+      free_mem_at_init[device_str] = wp.get_device(device).free_memory
+      m_dev, d_dev, rc_dev, c_dev = cli.init_structs(_FUNCS[_FUNCTION.value], mjm, device=device, nworld=nworld_per_device[idx])
+      m_dev.opt.warn_overflow = _OVERFLOW_BEHAVIOR.value == "continue"
+      models[device_str] = m_dev
+      datas[device_str] = d_dev
+      rcs[device_str] = rc_dev
+      if ctrls is None:
+        ctrls = c_dev
+    m = models[str(devices[0])]
+    rc = rcs[str(devices[0])]
+    d = datas[str(devices[0])]
+    timestep = m.opt.timestep.numpy()[0]
+  else:
+    device = wp.get_device(cli.DEVICE.value)
+    if device == "cpu":
+      raise ValueError("testspeed available for gpu only")
+    free_mem_at_init = {str(device): wp.get_device(device).free_memory}
+    m, d, rc, ctrls = cli.init_structs(_FUNCS[_FUNCTION.value], mjm, device=device, nworld=nworld_val)
+    m.opt.warn_overflow = _OVERFLOW_BEHAVIOR.value == "continue"
+    timestep = m.opt.timestep.numpy()[0]
+    total_nworld = d.nworld
+    devices = [device]
+    datas = {str(device): d}
+    models = {str(device): m}
+    rcs = {str(device): rc}
 
   if _FORMAT.value == "human":
     # Model
-    print("Model")
+    print("Model" + (" (on device 0)" if multigpu else ""))
     if _INFO.value:
       size_fields = [f.name for f in dataclasses.fields(m) if f.type is int and getattr(m, f.name) > 0]
     else:
@@ -246,7 +270,15 @@ def _main(argv: Sequence[str]):
         f"  broadphase: {m.opt.broadphase.name} broadphase_filter: {m.opt.broadphase_filter.name}"
       )
 
-    print(f"Data\n  nworld: {d.nworld} naconmax: {d.naconmax} njmax: {d.njmax}")
+    if multigpu:
+      print(f"Data (Multi-GPU: {len(devices)} devices)")
+      for idx, device in enumerate(devices):
+        device_str = str(device)
+        d_dev = datas[device_str]
+        print(f"  Device {device}: nworld: {d_dev.nworld} naconmax: {d_dev.naconmax} njmax: {d_dev.njmax}")
+      print(f"  Total nworld: {total_nworld}")
+    else:
+      print(f"Data\n  nworld: {d.nworld} naconmax: {d.naconmax} njmax: {d.njmax}")
     print(
       f"Rolling out {cli.NSTEP.value} {_FUNCTION.value}s at dt = {f'{timestep:g}' if timestep < 0.001 else f'{timestep:.3f}'}..."
     )
@@ -258,60 +290,84 @@ def _main(argv: Sequence[str]):
   def callback(step, step_trace, latency):
     nonlocal runtime, trace
     runtime += latency
-    nacon.append(np.max([d.nacon.numpy()[0], d.ncollision.numpy()[0]]))
-    nefc.append(np.max(d.nefc.numpy()))
-    solver_niter.append(d.solver_niter.numpy())
-    trace = _sum_trace(trace, step_trace)
-
+    step_nacon = max(np.max([datas[str(dev)].nacon.numpy()[0], datas[str(dev)].ncollision.numpy()[0]]) for dev in devices)
+    step_nefc = max(np.max(datas[str(dev)].nefc.numpy()) for dev in devices)
+    nacon.append(step_nacon)
+    nefc.append(step_nefc)
+    step_solver_niter = np.concatenate([datas[str(dev)].solver_niter.numpy() for dev in devices])
+    solver_niter.append(step_solver_niter)
+    trace = cli._sum_trace(trace, step_trace)
     if _OVERFLOW_BEHAVIOR.value == "error":
-      overflows = d.overflow.numpy()
-      if np.any(overflows != 0):
-        world_ids = np.where(overflows != 0)[0]
-        n_worlds = len(world_ids)
-        print(f"\nSimulation aborted: overflow detected in {n_worlds} world{'s' if n_worlds > 1 else ''}:")
-        for wid in world_ids[:10]:
-          mask = overflows[wid]
-          active_flags = [f.name for f in OverflowType if mask & f.value]
-          print(f"  World {wid}: {', '.join(active_flags)}")
-        if n_worlds > 10:
-          print(f"  ... and {n_worlds - 10} more worlds (reporting truncated to first 10)")
-        sys.exit(1)
+      for device in devices:
+        device_str = str(device)
+        overflows = datas[device_str].overflow.numpy()
+        if np.any(overflows != 0):
+          world_ids = np.where(overflows != 0)[0]
+          n_worlds = len(world_ids)
+          if multigpu:
+            print(
+              f"\nSimulation aborted: overflow detected on device {device} in {n_worlds} world{'s' if n_worlds > 1 else ''}:"
+            )
+          else:
+            print(f"\nSimulation aborted: overflow detected in {n_worlds} world{'s' if n_worlds > 1 else ''}:")
+          for wid in world_ids[:10]:
+            mask = overflows[wid]
+            active_flags = [f.name for f in OverflowType if mask & f.value]
+            print(f"  World {wid}: {', '.join(active_flags)}")
+          if n_worlds > 10:
+            print(f"  ... and {n_worlds - 10} more worlds (reporting truncated to first 10)")
+          sys.exit(1)
 
   if _FUNCTION.value == "render":
-    with wp.ScopedCapture() as step_capture:
-      mjw.step(m, d)
 
-    def render_callback(step, step_trace, latency):
-      callback(step, step_trace, latency)
-      wp.capture_launch(step_capture.graph)
-      wp.synchronize()
-
-    # TODO(team): Support specifying multiple functions to benchmark them together,
-    # e.g., `mjwarp-testspeed --function=refit_bvh --function=render`
     def refit_and_render(m, d, rc):
       mjw.refit_bvh(m, d, rc)
       mjw.render(m, d, rc)
 
-    jit_duration = cli.unroll(refit_and_render, m, d, rc, render_callback, ctrls)
-  else:
-    jit_duration = cli.unroll(_FUNCS[_FUNCTION.value], m, d, rc, callback, ctrls)
+    step_captures = {}
+    for device in devices:
+      device_str = str(device)
+      with wp.ScopedDevice(device):
+        with wp.ScopedCapture(device) as step_capture:
+          mjw.step(models[device_str], datas[device_str])
+        step_captures[device_str] = step_capture.graph
 
-  nconverged = np.sum(~np.any(np.isnan(d.qpos.numpy()), axis=1))
-  steps = cli.NWORLD.value * cli.NSTEP.value
-  model_mem = _dataclass_memory(m)
-  data_mem = _dataclass_memory(d)
-  total_mem = free_mem_at_init - wp.get_device(device).free_memory
+    def render_callback(step, step_trace, latency):
+      callback(step, step_trace, latency)
+      for device in devices:
+        device_str = str(device)
+        with wp.ScopedDevice(device):
+          wp.capture_launch(step_captures[device_str])
+      for device in devices:
+        wp.synchronize_device(device)
+
+    if multigpu:
+      jit_duration = cli.unroll_multigpu(refit_and_render, models, datas, rcs, devices, render_callback, ctrls)
+    else:
+      jit_duration = cli.unroll(refit_and_render, m, d, rc, render_callback, ctrls)
+  else:
+    if multigpu:
+      jit_duration = cli.unroll_multigpu(_FUNCS[_FUNCTION.value], models, datas, rcs, devices, callback, ctrls)
+    else:
+      jit_duration = cli.unroll(_FUNCS[_FUNCTION.value], m, d, rc, callback, ctrls)
+
+  nconverged = sum(np.sum(~np.any(np.isnan(datas[str(dev)].qpos.numpy()), axis=1)) for dev in devices)
+  model_mems = {str(device): _dataclass_memory(models[str(device)]) for device in devices}
+  data_mems = {str(device): _dataclass_memory(datas[str(device)]) for device in devices}
+  total_mems = {str(device): free_mem_at_init[str(device)] - wp.get_device(device).free_memory for device in devices}
+
+  steps = total_nworld * cli.NSTEP.value
 
   if _FORMAT.value == "human":
     print(f"""
-Summary for {d.nworld} parallel rollouts
+Summary for {total_nworld} parallel rollouts{" (Multi-GPU)" if multigpu else ""}
 
 Total JIT time: {jit_duration:.2f} s
 Total simulation time: {runtime:.2f} s
 Total steps per second: {steps / runtime:,.0f}
 Total realtime factor: {steps * timestep / runtime:,.2f} x
 Total time per step: {1e9 * runtime / steps:.2f} ns
-Total converged worlds: {nconverged} / {d.nworld}""")
+Total converged worlds: {nconverged} / {total_nworld}""")
 
     if trace:
       print("\nEvent trace:\n")
@@ -343,29 +399,42 @@ Total converged worlds: {nconverged} / {d.nworld}""")
       _print_table(matrix, ("mean", "std", "min", "max"), "solver niter")
 
     if _MEMORY.value:
-      device_mem = wp.get_device(device).total_memory
-      for mem, name in [(model_mem, "\nModel"), (data_mem, "Data")]:
-        mem_total = sum(mem.values())
-        print(f"{name} memory {mem_total / 1024**2:.2f} MiB ({100 * mem_total / device_mem:.2f}% of device memory):")
-        fields = [(f, c) for f, c in mem.items() if c / total_mem >= 0.01]
-        for field, capacity in fields:
-          print(f" {field}: {capacity / 1024**2:.2f} MiB ({100 * capacity / device_mem:.2f}%)")
-        if not fields:
-          print(" (no field >= 1% of total memory)")
-      other_mem = total_mem - sum(model_mem.values()) - sum(data_mem.values())
-      print(f"Other memory: {other_mem / 1024**2:.2f} MiB ({100 * other_mem / device_mem:.2f}% of device memory)")
-      print(f"Total memory: {total_mem / 1024**2:.2f} MiB ({100 * total_mem / device_mem:.2f}% of device memory)")
+      for device in devices:
+        device_str = str(device)
+        if multigpu:
+          print(f"\n--- Device {device} Memory Report ---")
+        else:
+          print()
+        device_mem = wp.get_device(device).total_memory
+        model_mem_dev = model_mems[device_str]
+        data_mem_dev = data_mems[device_str]
+        total_mem_dev = total_mems[device_str]
+        for mem, name in [(model_mem_dev, "Model"), (data_mem_dev, "Data")]:
+          mem_total = sum(mem.values())
+          print(f"{name} memory {mem_total / 1024**2:.2f} MiB ({100 * mem_total / device_mem:.2f}% of device memory):")
+          fields = [(f, c) for f, c in mem.items() if c / total_mem_dev >= 0.01]
+          for field, capacity in fields:
+            print(f" {field}: {capacity / 1024**2:.2f} MiB ({100 * capacity / device_mem:.2f}%)")
+          if not fields:
+            print(" (no field >= 1% of total memory)")
+        other_mem = total_mem_dev - sum(model_mem_dev.values()) - sum(data_mem_dev.values())
+        print(f"Other memory: {other_mem / 1024**2:.2f} MiB ({100 * other_mem / device_mem:.2f}% of device memory)")
+        print(f"Total memory: {total_mem_dev / 1024**2:.2f} MiB ({100 * total_mem_dev / device_mem:.2f}% of device memory)")
   else:
+    model_memory = sum(sum(m.values()) for m in model_mems.values())
+    data_memory = sum(sum(d.values()) for d in data_mems.values())
+    total_memory = sum(total_mems.values())
+
     metrics = {
       "jit_duration": jit_duration,
       "run_time": runtime,
       "steps_per_second": steps / runtime,
       "converged_worlds": int(nconverged),
-      "model_memory": sum(model_mem.values()),
-      "data_memory": sum(data_mem.values()),
-      "total_memory": total_mem,
-      "ncon_mean": np.mean(nacon) / cli.NWORLD.value,
-      "ncon_p95": np.percentile(nacon, 95) / cli.NWORLD.value,
+      "model_memory": model_memory,
+      "data_memory": data_memory,
+      "total_memory": total_memory,
+      "ncon_mean": np.mean(nacon) / total_nworld,
+      "ncon_p95": np.percentile(nacon, 95) / total_nworld,
       "nefc_mean": np.mean(nefc),
       "nefc_p95": np.percentile(nefc, 95),
       "solver_niter_mean": np.mean(solver_niter),

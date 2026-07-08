@@ -31,7 +31,15 @@ from mujoco_warp._src.io import override_model
 from mujoco_warp._src.util_misc import halton
 
 # shared flags for cli tool
-NWORLD = flags.DEFINE_integer("nworld", 8192, "number of parallel rollouts")
+NWORLD = flags.DEFINE_string("nworld", "8192", "number of parallel rollouts (comma-separated list for multi-gpu)")
+
+
+def parse_nworld(val: str) -> list[int] | int:
+  if "," in val:
+    return [int(x) for x in val.split(",")]
+  return int(val)
+
+
 NSTEP = flags.DEFINE_integer("nstep", 1000, "number of steps per rollout")
 NCONMAX = flags.DEFINE_integer("nconmax", None, "override maximum number of contacts per world")
 NJMAX = flags.DEFINE_integer("njmax", None, "override maximum number of constraints per world")
@@ -104,18 +112,20 @@ def _ctrl_noise(
   step: int,
   ctrlnoisestd: float,
   ctrlnoiserate: float,
+  world_offset: int,
   # Data out:
   ctrl_out: wp.array2d[float],
 ):
-  worldid, actid = wp.tid()
+  worldid_local, actid = wp.tid()
+  worldid_global = worldid_local + world_offset
 
   # convert rate and scale to discrete time (Ornstein-Uhlenbeck)
-  rate = wp.exp(-opt_timestep[worldid % opt_timestep.shape[0]] / ctrlnoiserate)
+  rate = wp.exp(-opt_timestep[worldid_local % opt_timestep.shape[0]] / ctrlnoiserate)
   scale = ctrlnoisestd * wp.sqrt(1.0 - rate * rate)
 
   midpoint = 0.0
   halfrange = 1.0
-  ctrlrange = actuator_ctrlrange[worldid % actuator_ctrlrange.shape[0], actid]
+  ctrlrange = actuator_ctrlrange[worldid_local % actuator_ctrlrange.shape[0], actid]
   is_limited = actuator_ctrllimited[actid]
   if is_limited:
     midpoint = 0.5 * (ctrlrange[1] + ctrlrange[0])
@@ -124,20 +134,23 @@ def _ctrl_noise(
     midpoint = ctrl_center[actid]
 
   # exponential convergence to midpoint at ctrlnoiserate
-  ctrl = rate * ctrl_in[worldid, actid] + (1.0 - rate) * midpoint
+  ctrl = rate * ctrl_in[worldid_local, actid] + (1.0 - rate) * midpoint
 
-  # add noise
-  ctrl += scale * halfrange * (2.0 * halton((step + 1) * (worldid + 1), actid + 2) - 1.0)
+  # add noise (use global world ID)
+  ctrl += scale * halfrange * (2.0 * halton((step + 1) * (worldid_global + 1), actid + 2) - 1.0)
 
   # clip to range if limited
   if is_limited:
     ctrl = wp.clamp(ctrl, ctrlrange[0], ctrlrange[1])
 
-  ctrl_out[worldid, actid] = ctrl
+  ctrl_out[worldid_local, actid] = ctrl
 
 
 def init_structs(
-  fn: Callable[..., None], mjm: mujoco.MjModel
+  fn: Callable[..., None],
+  mjm: mujoco.MjModel,
+  device: str | wp.Device | None = None,
+  nworld: int | None = None,
 ) -> Tuple[mjw.Model, mjw.Data, mjw.RenderContext | None, list[np.ndarray] | None]:
   """Initialize device structs."""
   mjd = mujoco.MjData(mjm)
@@ -151,7 +164,14 @@ def init_structs(
     mujoco.mj_resetDataKeyframe(mjm, mjd, KEYFRAME.value)
     ctrls = [mjd.ctrl.copy() for _ in range(NSTEP.value)]
 
-  with wp.ScopedDevice(wp.get_device(DEVICE.value)):
+  device = wp.get_device(device or DEVICE.value)
+  if nworld is None:
+    parsed = parse_nworld(NWORLD.value)
+    if isinstance(parsed, list):
+      raise ValueError("nworld list configuration must be resolved to a single integer for init_structs")
+    nworld = parsed
+
+  with wp.ScopedDevice(device):
     m = mjw.put_model(mjm)
     if OVERRIDE.value:
       override_model(m, OVERRIDE.value)
@@ -161,7 +181,7 @@ def init_structs(
     d = mjw.put_data(
       mjm,
       mjd,
-      nworld=NWORLD.value,
+      nworld=nworld,
       nconmax=NCONMAX.value,
       njmax=NJMAX.value,
       njmax_nnz=NJMAX_NNZ.value,
@@ -174,7 +194,7 @@ def init_structs(
 
     rc = mjw.create_render_context(
       mjm,
-      nworld=NWORLD.value,
+      nworld=nworld,
       cam_res=(RENDER_WIDTH.value, RENDER_HEIGHT.value),
       render_rgb=RENDER_RGB.value,
       render_depth=RENDER_DEPTH.value,
@@ -194,7 +214,7 @@ def unroll(
   rc: mjw.RenderContext | None,
   callback: Callable[[int, dict, float], None] | None = None,
   ctrls: list[np.ndarray] | None = None,
-) -> dict:
+) -> float:
   """Unroll a function on batched Data and return some statistics.
 
   Args:
@@ -208,40 +228,130 @@ def unroll(
   Returns:
     jit_duration: Time to JIT capture the function.
   """
-  with wp.ScopedDevice(wp.get_device(DEVICE.value)):
-    with warp_util.EventTracer(enabled=EVENT_TRACE.value) as tracer:
-      jit_beg = time.perf_counter()
-      with wp.ScopedCapture() as capture:
-        fn(*(m, d) if rc is None else (m, d, rc))
-      jit_end = time.perf_counter()
+  device = wp.get_device(DEVICE.value)
+  device_str = str(device)
+  return unroll_multigpu(
+    fn=fn,
+    models={device_str: m},
+    datas={device_str: d},
+    rcs={device_str: rc},
+    devices=[device],
+    callback=callback,
+    ctrls=ctrls,
+  )
 
-      for i in range(NSTEP.value):
-        with wp.ScopedStream(wp.get_stream()):
-          if ctrls is not None:
-            center = wp.array(ctrls[i], dtype=wp.float32)
-            wp.launch(
-              _ctrl_noise,
-              dim=(d.nworld, m.nu),
-              inputs=[
-                m.opt.timestep,
-                m.actuator_ctrllimited,
-                m.actuator_ctrlrange,
-                d.ctrl,
-                center,
-                i,
-                NOISE_STD.value,
-                NOISE_RATE.value,
-              ],
-              outputs=[d.ctrl],
-            )
-            wp.synchronize()
 
-          run_beg = time.perf_counter()
-          wp.capture_launch(capture.graph)
-          wp.synchronize()
-          run_end = time.perf_counter()
+def _sum_trace(stack1, stack2):
+  """Recursively sum event trace stacks."""
+  ret = {}
 
-        if callback:
-          callback(i, tracer.trace(), run_end - run_beg)
+  for k in stack1.keys() | stack2.keys():
+    if k not in stack1:
+      ret[k] = stack2[k]
+    elif k not in stack2:
+      ret[k] = stack1[k]
+    else:
+      times1, sub_stack1 = stack1[k]
+      times2, sub_stack2 = stack2[k]
+      times = [t1 + t2 for t1, t2 in zip(times1, times2)]
+      ret[k] = (times, _sum_trace(sub_stack1, sub_stack2))
+
+  return ret
+
+
+def unroll_multigpu(
+  fn: Callable[..., None],
+  models: dict[str, mjw.Model],
+  datas: dict[str, mjw.Data],
+  rcs: dict[str, mjw.RenderContext | None],
+  devices: list[wp.Device],
+  callback: Callable[[int, dict, float], None] | None = None,
+  ctrls: list[np.ndarray] | None = None,
+) -> float:
+  """Unroll a function on multiple GPUs and return JIT compilation time."""
+  device_strs = [str(device) for device in devices]
+  # Calculate world offsets for noise invariance
+  offsets = {}
+  current_offset = 0
+  for idx, device in enumerate(devices):
+    device_str = device_strs[idx]
+    offsets[device_str] = current_offset
+    current_offset += datas[device_str].nworld
+
+  # Capture graphs on each device
+  jit_beg = time.perf_counter()
+  captures = {}
+  tracers = {}
+
+  for idx, device in enumerate(devices):
+    device_str = device_strs[idx]
+    with wp.ScopedDevice(device):
+      tracers[device_str] = warp_util.EventTracer(device=device, enabled=EVENT_TRACE.value)
+      with tracers[device_str]:
+        with wp.ScopedCapture(device) as capture:
+          m = models[device_str]
+          d = datas[device_str]
+          rc = rcs[device_str]
+          if rc is not None:
+            fn(m, d, rc)
+          else:
+            fn(m, d)
+        captures[device_str] = capture.graph
+  jit_end = time.perf_counter()
+
+  # Main rollout loop
+  for i in range(NSTEP.value):
+    # 1. Launch noise on all devices
+    if ctrls is not None:
+      for idx, device in enumerate(devices):
+        device_str = device_strs[idx]
+        with wp.ScopedDevice(device):
+          m = models[device_str]
+          d = datas[device_str]
+          center = wp.array(ctrls[i], dtype=wp.float32, device=device)
+          wp.launch(
+            _ctrl_noise,
+            dim=(d.nworld, m.nu),
+            inputs=[
+              m.opt.timestep,
+              m.actuator_ctrllimited,
+              m.actuator_ctrlrange,
+              d.ctrl,
+              center,
+              i,
+              NOISE_STD.value,
+              NOISE_RATE.value,
+              offsets[device_str],
+            ],
+            outputs=[d.ctrl],
+            device=device,
+          )
+      # Synchronize noise launch on all devices before starting physics timer
+      for device in devices:
+        wp.synchronize_device(device)
+
+    step_beg = time.perf_counter()
+
+    # 2. Launch graphs on all devices
+    for idx, device in enumerate(devices):
+      device_str = device_strs[idx]
+      with wp.ScopedDevice(device):
+        wp.capture_launch(captures[device_str])
+
+    # 3. Synchronize all devices
+    for device in devices:
+      wp.synchronize_device(device)
+
+    step_end = time.perf_counter()
+    latency = step_end - step_beg
+
+    if callback:
+      # Aggregate traces from all devices
+      step_trace = {}
+      if EVENT_TRACE.value:
+        for idx, device in enumerate(devices):
+          device_str = device_strs[idx]
+          step_trace = _sum_trace(step_trace, tracers[device_str].trace())
+      callback(i, step_trace, latency)
 
   return jit_end - jit_beg
