@@ -80,6 +80,7 @@ def _create_solver_context(m: types.Model, d: types.Data) -> SolverContext:
   alloc_h = m.opt.solver == types.SolverType.NEWTON
   alloc_hfactor = alloc_h and nv > _BLOCK_CHOLESKY_DIM
   alloc_mgrad = m.opt.solver == types.SolverType.CG
+  alloc_incremental = _use_incremental(m)
 
   return SolverContext(
     Jaref=wp.empty((nworld, njmax), dtype=float),
@@ -98,15 +99,15 @@ def _create_solver_context(m: types.Model, d: types.Data) -> SolverContext:
     improvement=wp.empty((nworld,), dtype=float),
     ls_exhausted=wp.zeros((nworld,), dtype=bool),
     search_unchanged=wp.empty((nworld,), dtype=bool),
-    prev_grad=wp.empty((nworld, nv), dtype=float),
-    prev_Mgrad=wp.empty((nworld, nv), dtype=float),
-    beta=wp.empty((nworld,), dtype=float),
-    beta_den=wp.empty((nworld,), dtype=float),
+    prev_grad=wp.empty((nworld, nv), dtype=float) if alloc_mgrad else wp.empty((nworld, 0), dtype=float),
+    prev_Mgrad=wp.empty((nworld, nv), dtype=float) if alloc_mgrad else wp.empty((nworld, 0), dtype=float),
+    beta=wp.empty((nworld,), dtype=float) if alloc_mgrad else wp.empty((0,), dtype=float),
+    beta_den=wp.empty((nworld,), dtype=float) if alloc_mgrad else wp.empty((0,), dtype=float),
     h=wp.empty((nworld, nv_pad, nv_pad), dtype=float) if alloc_h else wp.empty((nworld, 0, 0), dtype=float),
     hfactor=wp.empty((nworld, nv_pad, nv_pad), dtype=float) if alloc_hfactor else wp.empty((nworld, 0, 0), dtype=float),
-    quad_changed_ids=wp.empty((nworld, njmax), dtype=int) if alloc_h else wp.empty((nworld, 0), dtype=int),
-    quad_changed_count=wp.empty((nworld,), dtype=int) if alloc_h else wp.empty((0,), dtype=int),
-    state_changed_count=wp.empty((nworld,), dtype=int) if alloc_h else wp.empty((0,), dtype=int),
+    quad_changed_ids=wp.empty((nworld, njmax), dtype=int) if alloc_incremental else wp.empty((nworld, 0), dtype=int),
+    quad_changed_count=wp.empty((nworld,), dtype=int) if alloc_incremental else wp.empty((0,), dtype=int),
+    state_changed_count=wp.empty((nworld,), dtype=int) if alloc_incremental else wp.empty((0,), dtype=int),
   )
 
 
@@ -4107,32 +4108,21 @@ def solve_compact(m: types.Model, d: types.Data):
 @event_scope
 def _compact_gather(m: types.Model, d: types.Data):
   nvp = d.nvmax_pad
-  # gather compacted dense inertia (identity-padded tail)
-  wp.launch(
-    _init_compact_inertia,
-    dim=(d.nworld, nvp, nvp),
-    inputs=[d.ncdof],
-    outputs=[d.cM],
-  )
-
-  wp.launch(
-    _gather_M_sparse,
-    dim=(d.nworld, m.nv),
-    inputs=[m.M_rownnz, m.M_rowadr, m.M_colind, d.M, d.dof_cdof],
-    outputs=[d.cM],
-  )
-  # gather the compacted dense constraint Jacobian (active columns only); on
-  # the incremental Newton path for sparse models every consumer reads the
-  # full-coordinate sparse J directly and no gather is needed
-  if m.is_sparse and not _use_incremental(m):
-    d.cJ.zero_()
+  # gather compacted dense inertia and Jacobian only for dense models;
+  # sparse models read sparse M and J directly through compaction maps
+  if not m.is_sparse:
     wp.launch(
-      _gather_J_sparse,
-      dim=(d.nworld, d.njmax),
-      inputs=[d.nefc, d.dof_cdof, d.efc.J_rownnz, d.efc.J_rowadr, d.efc.J_colind, d.efc.J],
-      outputs=[d.cJ],
+      _init_compact_inertia,
+      dim=(d.nworld, nvp, nvp),
+      inputs=[d.ncdof],
+      outputs=[d.cM],
     )
-  elif not m.is_sparse:
+    wp.launch(
+      _gather_M_sparse,
+      dim=(d.nworld, m.nv),
+      inputs=[m.M_rownnz, m.M_rowadr, m.M_colind, d.M, d.dof_cdof],
+      outputs=[d.cM],
+    )
     d.cJ.zero_()
     wp.launch(
       _gather_J_dense,
