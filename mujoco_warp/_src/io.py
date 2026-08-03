@@ -475,6 +475,8 @@ def put_model(mjm: mujoco.MjModel, batch_sizes: dict[str, int] | None = None) ->
       raise NotImplementedError("Flex-SDF collision is not implemented.")
     if (mjm.geom_type == mujoco.mjtGeom.mjGEOM_HFIELD).any():
       raise NotImplementedError("Flex-HField collision is not implemented.")
+    if (mjm.flex_internal != 0).any():
+      raise NotImplementedError("Flex internal collisions are not implemented.")
   m.nmaxcondim = np.concatenate(condim_arrays).max()
   m.nmaxpyramid = np.maximum(1, 2 * (m.nmaxcondim - 1))
   m.has_sdf_geom = (mjm.geom_type == mujoco.mjtGeom.mjGEOM_SDF).any()
@@ -1087,7 +1089,6 @@ def put_model(mjm: mujoco.MjModel, batch_sizes: dict[str, int] | None = None) ->
 
   flex_elemflexid = np.zeros(mjm.nflexelem, dtype=np.int32)
   flex_shellflexid = np.zeros(mjm.nflexshelldata, dtype=np.int32)
-  flex_evpairflexid = np.zeros(mjm.nflexevpair, dtype=np.int32)
   flex_vertflexid = np.zeros(mjm.nflexvert, dtype=np.int32)
   flex_shelladr = np.zeros(mjm.nflex, dtype=np.int32)
 
@@ -1102,10 +1103,6 @@ def put_model(mjm: mujoco.MjModel, batch_sizes: dict[str, int] | None = None) ->
       elem_start = mjm.flex_elemadr[fi]
       elem_num = mjm.flex_elemnum[fi]
       flex_elemflexid[elem_start : elem_start + elem_num] = fi
-
-      ev_start = mjm.flex_evpairadr[fi]
-      ev_num = mjm.flex_evpairnum[fi]
-      flex_evpairflexid[ev_start : ev_start + ev_num] = fi
 
       flex_shelladr[fi] = shell_offset
       shell_num = mjm.flex_shellnum[fi]
@@ -1183,7 +1180,6 @@ def put_model(mjm: mujoco.MjModel, batch_sizes: dict[str, int] | None = None) ->
 
   m.flex_elemflexid = flex_elemflexid
   m.flex_shellflexid = flex_shellflexid
-  m.flex_evpairflexid = flex_evpairflexid
   m.flex_vertflexid = flex_vertflexid
   m.flex_shelladr = flex_shelladr
 
@@ -1564,6 +1560,16 @@ def _default_njmax_nnz(mjm: mujoco.MjModel, nconmax: int, njmax: int) -> int:
             max_contact_nnz,
             _body_pair_nnz(mjm, flex_body_list[idx1], flex_body_list[idx2]),
           )
+
+    # flex-flex collision
+    for fj in range(fi + 1, mjm.nflex):
+      fct_j = mjm.flex_contype[fj]
+      fca_j = mjm.flex_conaffinity[fj]
+      if (fct & fca_j) or (fct_j & fca):
+        dim_i = mjm.flex_dim[fi]
+        dim_j = mjm.flex_dim[fj]
+        nnz_flex_flex = (dim_i + dim_j + 2) * 3
+        max_contact_nnz = max(max_contact_nnz, nnz_flex_flex)
 
   total_nnz += njmax * max_contact_nnz
 

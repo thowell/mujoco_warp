@@ -1187,58 +1187,6 @@ class FlexCollisionTest(parameterized.TestCase):
           self.assertGreater(dist, 1e-3, f"Duplicate contacts found at positions: {pos[i]} and {pos[j]} in world {w}")
 
   @parameterized.parameters(1, 2)
-  def test_flex_internal_collision(self, nworld):
-    """Test that predefined element-vertex internal collisions generate contacts."""
-    mjm, _, m, d = test_data.fixture(
-      xml="""
-      <mujoco>
-        <worldbody>
-          <flexcomp name="cloth" type="grid" count="3 3 1" spacing=".2 .2 .1" pos="0 0 0"
-                    radius=".02" dim="2" mass=".5">
-            <contact selfcollide="none" internal="true" margin="0.05"/>
-          </flexcomp>
-        </worldbody>
-      </mujoco>
-      """,
-      nworld=nworld,
-    )
-
-    self.assertGreater(m.nflexevpair, 0)
-
-    evpair = m.flex_evpair.numpy()[0]
-    e = int(evpair[0])
-    v = int(evpair[1])
-
-    dim = int(m.flex_dim.numpy()[0])
-    elem_data_idx = int(m.flex_elemdataadr.numpy()[0]) + e * (dim + 1)
-    v_indices = m.flex_elem.numpy()[elem_data_idx : elem_data_idx + dim + 1]
-
-    v0_global_idx = int(m.flex_vertadr.numpy()[0]) + int(v_indices[0])
-    v_global_idx = int(m.flex_vertadr.numpy()[0]) + v
-
-    xpos = d.flexvert_xpos.numpy()
-    for w in range(nworld):
-      p0 = xpos[w, v0_global_idx]
-      xpos[w, v_global_idx] = p0 + np.array([0.0, 0.0, 0.01])
-    d.flexvert_xpos.assign(xpos)
-
-    mjw.collision(m, d)
-
-    nacon = int(d.nacon.numpy()[0])
-    self.assertGreater(nacon, 0, "Expected at least one contact from internal self-collision")
-
-    contacts_worldid = d.contact.worldid.numpy()[:nacon]
-    for w in range(nworld):
-      w_indices = np.where(contacts_worldid == w)[0]
-      self.assertGreater(len(w_indices), 0, f"Expected contacts in world {w}")
-      idx = w_indices[0]
-      self.assertEqual(int(d.contact.geom.numpy()[idx, 0]), -1)
-      self.assertEqual(int(d.contact.geom.numpy()[idx, 1]), -1)
-      self.assertEqual(int(d.contact.flex.numpy()[idx, 0]), 0)
-      self.assertEqual(int(d.contact.flex.numpy()[idx, 1]), 0)
-      self.assertEqual(int(d.contact.dim.numpy()[idx]), 3)
-
-  @parameterized.parameters(1, 2)
   def test_flex_self_collision_1d(self, nworld):
     """Test active element self-collisions for 1D ropes (Capsule-Capsule)."""
     mjm, _, m, d = test_data.fixture(
@@ -1254,7 +1202,6 @@ class FlexCollisionTest(parameterized.TestCase):
       nworld=nworld,
     )
     m.flex_selfcollide.assign(np.array([4], dtype=np.int32))
-    m.nflexevpair = 0
 
     v0_global_idx = int(m.flex_vertadr.numpy()[0])
     v_global_idx = int(m.flex_vertadr.numpy()[0]) + 3
@@ -1389,7 +1336,6 @@ class FlexCollisionTest(parameterized.TestCase):
       nworld=nworld,
     )
     m.flex_selfcollide.assign(np.array([4], dtype=np.int32))
-    m.nflexevpair = 0
 
     v0_global_idx = int(m.flex_vertadr.numpy()[0])
     v_global_idx = int(m.flex_vertadr.numpy()[0]) + 3
@@ -1501,11 +1447,11 @@ class FlexCollisionTest(parameterized.TestCase):
         <!-- Two distinct grid flex comps to test multi-flex models -->
         <flexcomp name="cloth1" type="grid" count="3 3 1" spacing=".2 .2 .1" pos="0 0 0"
                   radius=".02" dim="2" mass=".5">
-          <contact selfcollide="none" internal="true"/>
+          <contact selfcollide="none" internal="false"/>
         </flexcomp>
         <flexcomp name="cloth2" type="grid" count="4 4 1" spacing=".2 .2 .1" pos="1 1 0"
                   radius=".02" dim="2" mass=".5">
-          <contact selfcollide="none" internal="true"/>
+          <contact selfcollide="none" internal="false"/>
         </flexcomp>
       </worldbody>
     </mujoco>
@@ -1515,12 +1461,10 @@ class FlexCollisionTest(parameterized.TestCase):
     self.assertEqual(m.nflex, 2)
 
     flex_elemflexid = m.flex_elemflexid.numpy()
-    flex_evpairflexid = m.flex_evpairflexid.numpy()
     flex_shellflexid = m.flex_shellflexid.numpy()
     flex_vertflexid = m.flex_vertflexid.numpy()
 
     self.assertEqual(len(flex_elemflexid), m.nflexelem)
-    self.assertEqual(len(flex_evpairflexid), m.nflexevpair)
     self.assertEqual(len(flex_shellflexid), m.nflexshelldata)
     self.assertEqual(len(flex_vertflexid), m.nflexvert)
 
@@ -1532,14 +1476,6 @@ class FlexCollisionTest(parameterized.TestCase):
         flex_elemflexid[elem_start : elem_start + elem_num],
         i,
         err_msg=f"Element mapping mismatch for flex {i}",
-      )
-
-      evpair_start = m.flex_evpairadr.numpy()[i]
-      evpair_num = m.flex_evpairnum.numpy()[i]
-      np.testing.assert_array_equal(
-        flex_evpairflexid[evpair_start : evpair_start + evpair_num],
-        i,
-        err_msg=f"Element-vertex pair mapping mismatch for flex {i}",
       )
 
       self.assertEqual(m.flex_shelladr.numpy()[i], shell_offset)
@@ -1673,6 +1609,35 @@ class FlexCollisionTest(parameterized.TestCase):
       self.assertGreater(plane_contacts, 0, f"Expected at least one contact with the plane in world {w}")
 
   @parameterized.parameters(1, 2)
+  def test_plane_cloth_no_fps_limit(self, nworld):
+    """Test that flex-geom contacts are not limited to MJ_MAXCONPAIR (50)."""
+    xml = """
+    <mujoco>
+      <option solver="CG" tolerance="1e-6" timestep=".001"/>
+      <size memory="10M"/>
+
+      <worldbody>
+        <light pos="0 0 3" dir="0 0 -1"/>
+        <geom type="plane" size="5 5 .1" pos="0 0 0"/>
+        <flexcomp type="grid" count="10 10 1" spacing=".1 .1 .1" pos="-.5 -.5 0.01"
+                  radius=".02" name="cloth" dim="2" mass=".5">
+          <contact condim="3" solref="0.01 1" solimp=".95 .99 .0001"
+                   selfcollide="none" conaffinity="1" contype="1"/>
+          <edge damping="0.01"/>
+        </flexcomp>
+      </worldbody>
+    </mujoco>
+    """
+    _, _, m, d = test_data.fixture(xml=xml, nworld=nworld)
+
+    mjw.kinematics(m, d)
+    mjw.collision(m, d)
+
+    nacon = int(d.nacon.numpy()[0])
+    expected_contacts = 100 * nworld
+    self.assertEqual(nacon, expected_contacts, f"Expected {expected_contacts} contacts, got {nacon}")
+
+  @parameterized.parameters(1, 2)
   def test_mixed_flex_broadphase_and_narrowphase(self, nworld):
     """Test that broadphase and narrowphase run correctly with mixed 2D and 3D flexes."""
     xml = """
@@ -1681,12 +1646,12 @@ class FlexCollisionTest(parameterized.TestCase):
         <!-- 2D Cloth -->
         <flexcomp name="cloth" type="grid" count="3 3 1" spacing=".2 .2 .1" pos="0 0 0"
                   radius=".02" dim="2" mass=".5">
-          <contact selfcollide="none" internal="true"/>
+          <contact selfcollide="none" internal="false"/>
         </flexcomp>
         <!-- 3D Softbody -->
         <flexcomp name="softbody" type="grid" count="3 3 3" spacing=".2 .2 .2" pos="1 1 0"
                   radius=".02" dim="3" mass="1.0">
-          <contact selfcollide="none" internal="true"/>
+          <contact selfcollide="none" internal="false"/>
         </flexcomp>
         <!-- A sphere positioned near the cloth to generate contact -->
         <body pos="0 0 0.05">
@@ -1799,174 +1764,6 @@ class FlexCollisionTest(parameterized.TestCase):
     """Test that loading a model with unsupported geoms and Flex raises NotImplementedError."""
     with self.assertRaises(NotImplementedError):
       test_data.fixture(xml=xml)
-
-
-class FlexInternalCollisionTest(parameterized.TestCase):
-  """Tests for internal (self-collision element-vertex) contacts."""
-
-  def _get_sorted_internal_contacts(self, d_or_mjd, ncon, world_idx=0, is_warp=True):
-    """Helper to extract and sort internal contacts (vert[0] >= 0)."""
-    contacts = []
-    if is_warp:
-      contacts_worldid = d_or_mjd.contact.worldid.numpy()[:ncon]
-      for i in range(ncon):
-        if contacts_worldid[i] != world_idx:
-          continue
-        vert = d_or_mjd.contact.vert.numpy()[i]
-        if vert[0] >= 0:  # Internal element-vertex contact
-          contacts.append(
-            {
-              "dist": d_or_mjd.contact.dist.numpy()[i],
-              "pos": d_or_mjd.contact.pos.numpy()[i],
-              "frame": d_or_mjd.contact.frame.numpy()[i],
-              "geom": d_or_mjd.contact.geom.numpy()[i],
-              "flex": d_or_mjd.contact.flex.numpy()[i],
-              "elem": d_or_mjd.contact.elem.numpy()[i],
-              "vert": vert,
-            }
-          )
-    else:
-      for i in range(ncon):
-        c = d_or_mjd.contact[i]
-        if c.vert[0] >= 0:  # Internal element-vertex contact
-          # Extract 3x3 contact frame (normal is first row)
-          frame = c.frame.reshape(3, 3)
-          contacts.append(
-            {
-              "dist": c.dist,
-              "pos": c.pos,
-              "frame": frame,
-              "geom": c.geom,
-              "flex": c.flex,
-              "elem": c.elem,
-              "vert": c.vert,
-            }
-          )
-    # Sort by vert[0] (the colliding vertex ID)
-    contacts.sort(key=lambda x: x["vert"][0])
-    return contacts
-
-  def _assert_contact_parity(self, w_contacts, m_contacts):
-    self.assertEqual(
-      len(w_contacts),
-      len(m_contacts),
-      f"Contact count mismatch: Warp {len(w_contacts)} vs MuJoCo {len(m_contacts)}",
-    )
-    for i in range(len(w_contacts)):
-      w_con = w_contacts[i]
-      m_con = m_contacts[i]
-
-      # Compare distance and positions.
-      np.testing.assert_allclose(
-        w_con["dist"],
-        m_con["dist"],
-        atol=_TOLERANCE,
-        err_msg=f"dist mismatch for contact {i}",
-      )
-      np.testing.assert_allclose(
-        w_con["pos"],
-        m_con["pos"],
-        atol=_TOLERANCE,
-        err_msg=f"pos mismatch for contact {i}",
-      )
-
-      # Check normal alignment
-      w_normal = w_con["frame"][0]
-      m_normal = m_con["frame"][0]
-      cos_sim = np.dot(w_normal, m_normal)
-      self.assertGreater(
-        cos_sim,
-        0.99,
-        f"Normal mismatch for contact {i}: Warp {w_normal}, MuJoCo {m_normal}",
-      )
-
-      # Identifiers
-      self.assertEqual(w_con["geom"][0], m_con["geom"][0])
-      self.assertEqual(w_con["geom"][1], m_con["geom"][1])
-      self.assertEqual(w_con["flex"][0], m_con["flex"][0])
-      self.assertEqual(w_con["elem"][1], m_con["elem"][1])
-      self.assertEqual(w_con["vert"][0], m_con["vert"][0])
-
-  @parameterized.parameters(1, 2)
-  def test_internal_collision_cloth(self, nworld):
-    xml = """
-    <mujoco>
-      <worldbody>
-        <flexcomp name="cloth" type="grid" count="3 3 1" spacing="0.1 0.1 0.1" pos="0 0 0.05" dim="2" mass="1">
-          <contact internal="true" selfcollide="auto"/>
-        </flexcomp>
-      </worldbody>
-    </mujoco>
-    """
-    mjm, mjd, m, d = test_data.fixture(xml=xml, nworld=nworld)
-
-    # Displace Vertex 2 to Vertex 6 + (0, 0, 0.005)
-    # qpos [6, 7, 8] for Vertex 2
-    mjd.qpos[6] = 0.2
-    mjd.qpos[7] = -0.2
-    mjd.qpos[8] = 0.005
-
-    # Replicate to all worlds in Warp
-    qpos_np = np.tile(mjd.qpos, (nworld, 1))
-    d.qpos.assign(qpos_np.astype(np.float32))
-
-    d.nacon.fill_(-1)
-    mjw.kinematics(m, d)
-    mjw.flex(m, d)
-    mjw.collision(m, d)
-
-    mujoco.mj_kinematics(mjm, mjd)
-    mujoco.mj_flex(mjm, mjd)
-    mujoco.mj_collision(mjm, mjd)
-
-    w_contacts_0 = self._get_sorted_internal_contacts(d, d.nacon.numpy()[0], world_idx=0, is_warp=True)
-    m_contacts = self._get_sorted_internal_contacts(mjd, mjd.ncon, is_warp=False)
-    self.assertGreater(len(w_contacts_0), 0)
-    self.assertGreater(len(m_contacts), 0)
-
-    for w in range(nworld):
-      w_contacts = self._get_sorted_internal_contacts(d, d.nacon.numpy()[0], world_idx=w, is_warp=True)
-      self._assert_contact_parity(w_contacts, m_contacts)
-
-  @parameterized.parameters(1, 2)
-  def test_internal_collision_rope(self, nworld):
-    xml = """
-    <mujoco>
-      <worldbody>
-        <flexcomp name="rope" type="grid" count="5 1 1" spacing="0.1 0.1 0.1" pos="0 0 0.05" dim="1" mass="1">
-          <contact internal="true" selfcollide="auto"/>
-        </flexcomp>
-      </worldbody>
-    </mujoco>
-    """
-    mjm, mjd, m, d = test_data.fixture(xml=xml, nworld=nworld)
-
-    # Displace Vertex 4 to Edge 0 center + (0, 0, 0.005)
-    # v4 is joints 12, 13, 14
-    mjd.qpos[12] = -0.35
-    mjd.qpos[13] = 0.0
-    mjd.qpos[14] = 0.005
-
-    qpos_np = np.tile(mjd.qpos, (nworld, 1))
-    d.qpos.assign(qpos_np.astype(np.float32))
-
-    d.nacon.fill_(-1)
-    mjw.kinematics(m, d)
-    mjw.flex(m, d)
-    mjw.collision(m, d)
-
-    mujoco.mj_kinematics(mjm, mjd)
-    mujoco.mj_flex(mjm, mjd)
-    mujoco.mj_collision(mjm, mjd)
-
-    w_contacts_0 = self._get_sorted_internal_contacts(d, d.nacon.numpy()[0], world_idx=0, is_warp=True)
-    m_contacts = self._get_sorted_internal_contacts(mjd, mjd.ncon, is_warp=False)
-    self.assertGreater(len(w_contacts_0), 0)
-    self.assertGreater(len(m_contacts), 0)
-
-    for w in range(nworld):
-      w_contacts = self._get_sorted_internal_contacts(d, d.nacon.numpy()[0], world_idx=w, is_warp=True)
-      self._assert_contact_parity(w_contacts, m_contacts)
 
 
 class FlexDynamicsTest(parameterized.TestCase):
@@ -2592,6 +2389,161 @@ class FlexSensorTest(parameterized.TestCase):
         atol=_TOLERANCE,
         err_msg=f"sensordata mismatch (world {w})",
       )
+
+
+class FlexFlexCollisionTest(parameterized.TestCase):
+  """Tests for flex-flex collisions."""
+
+  @parameterized.product(
+    test_case=[
+      (
+        "1d_1d",
+        """
+        <mujoco>
+          <worldbody>
+            <!-- Two line flexes overlapping at origin -->
+            <flexcomp name="rope1" type="grid" count="2 1 1" spacing=".2 .2 .1" pos="0 -0.01 0"
+                      radius=".02" dim="1" mass=".5">
+              <contact selfcollide="none" contype="1" conaffinity="1"/>
+            </flexcomp>
+            <flexcomp name="rope2" type="grid" count="2 1 1" spacing=".2 .2 .1" pos="0 0.01 0"
+                      radius=".02" dim="1" mass=".5">
+              <contact selfcollide="none" contype="1" conaffinity="1"/>
+            </flexcomp>
+          </worldbody>
+        </mujoco>
+        """,
+        True,
+      ),
+      (
+        "2d_2d",
+        """
+        <mujoco>
+          <worldbody>
+            <!-- Two cloth grids placed one slightly above the other, overlapping in X/Y -->
+            <flexcomp name="cloth1" type="grid" count="3 3 1" spacing=".2 .2 .1" pos="0 0 0"
+                      radius=".02" dim="2" mass=".5">
+              <contact selfcollide="none" contype="1" conaffinity="1"/>
+            </flexcomp>
+            <flexcomp name="cloth2" type="grid" count="3 3 1" spacing=".2 .2 .1" pos="0.1 0.1 0.02"
+                      radius=".02" dim="2" mass=".5">
+              <contact selfcollide="none" contype="1" conaffinity="1"/>
+            </flexcomp>
+          </worldbody>
+        </mujoco>
+        """,
+        True,
+      ),
+      (
+        "1d_2d",
+        """
+        <mujoco>
+          <worldbody>
+            <!-- Cloth at origin -->
+            <flexcomp name="cloth" type="grid" count="3 3 1" spacing=".2 .2 .1" pos="0 0 0"
+                      radius=".02" dim="2" mass=".5">
+              <contact selfcollide="none" contype="1" conaffinity="1"/>
+            </flexcomp>
+            <!-- Rope passing through the cloth -->
+            <flexcomp name="rope" type="grid" count="2 1 1" spacing=".2 .2 .1" pos="0 0 0.01"
+                      radius=".02" dim="1" mass=".5">
+              <contact selfcollide="none" contype="1" conaffinity="1"/>
+            </flexcomp>
+          </worldbody>
+        </mujoco>
+        """,
+        True,
+      ),
+      (
+        "3d_3d",
+        """
+        <mujoco>
+          <worldbody>
+            <flexcomp name="cube1" type="grid" count="3 3 3" spacing="0.05 0.05 0.05" pos="0 0 0.1" dim="3" mass="1" radius="0.01">
+              <contact selfcollide="none" contype="1" conaffinity="1" condim="3"/>
+            </flexcomp>
+            <flexcomp name="cube2" type="grid" count="3 3 3" spacing="0.05 0.05 0.05" pos="0.08 0.08 0.18" dim="3" mass="1" radius="0.01">
+              <contact selfcollide="none" contype="1" conaffinity="1" condim="3"/>
+            </flexcomp>
+          </worldbody>
+        </mujoco>
+        """,
+        True,
+      ),
+      (
+        "bitmask_filtering",
+        """
+        <mujoco>
+          <worldbody>
+            <!-- Two cloths that would overlap, but contype/conaffinity do not match -->
+            <flexcomp name="cloth1" type="grid" count="3 3 1" spacing=".2 .2 .1" pos="0 0 0"
+                      radius=".02" dim="2" mass=".5">
+              <contact selfcollide="none" contype="1" conaffinity="2"/>
+            </flexcomp>
+            <flexcomp name="cloth2" type="grid" count="3 3 1" spacing=".2 .2 .1" pos="0 0 0.02"
+                      radius=".02" dim="2" mass=".5">
+              <contact selfcollide="none" contype="4" conaffinity="8"/>
+            </flexcomp>
+          </worldbody>
+        </mujoco>
+        """,
+        False,
+      ),
+    ],
+    nworld=[1, 2],
+  )
+  def test_flex_flex_collisions(self, test_case, nworld):
+    name, xml, expect_contacts = test_case
+    _, _, m, d = test_data.fixture(xml=xml, nworld=nworld)
+
+    self.assertEqual(m.nflex, 2)
+
+    mjw.kinematics(m, d)
+    if m.max_flex_dim == 3:
+      mjw.flex(m, d)
+    mjw.collision(m, d)
+
+    nacon = int(d.nacon.numpy()[0])
+    if expect_contacts:
+      self.assertGreater(nacon, 0, f"[{name}] Expected flex-flex contacts")
+    else:
+      self.assertEqual(nacon, 0, f"[{name}] Expected 0 contacts due to bitmask filtering")
+
+  @parameterized.parameters(1, 2)
+  def test_flex_flex_collision_shared_body_filtering(self, nworld):
+    """Test that flex-flex collisions exclude elements if vertices share a body."""
+    xml = """
+    <mujoco>
+      <worldbody>
+        <flexcomp name="cloth1" type="grid" count="3 3 1" spacing=".2 .2 .1" pos="0 0 0"
+                  radius=".02" dim="2" mass=".5">
+          <contact selfcollide="none" contype="1" conaffinity="1"/>
+        </flexcomp>
+        <flexcomp name="cloth2" type="grid" count="3 3 1" spacing=".2 .2 .1" pos="0 0 0.02"
+                  radius=".02" dim="2" mass=".5">
+          <contact selfcollide="none" contype="1" conaffinity="1"/>
+        </flexcomp>
+      </worldbody>
+    </mujoco>
+    """
+    _, _, m, d = test_data.fixture(xml=xml, nworld=nworld)
+
+    # First verify we get contacts normally
+    mjw.kinematics(m, d)
+    mjw.collision(m, d)
+    nacon = int(d.nacon.numpy()[0])
+    self.assertGreater(nacon, 0, "Expected baseline contacts before weld")
+
+    # Now weld all vertices of cloth1 and cloth2 to the same body ID (e.g. 1)
+    # So they are treated as sharing bodies.
+    vertbody = m.flex_vertbodyid.numpy()
+    vertbody[:] = 1
+    m.flex_vertbodyid.assign(vertbody)
+
+    # Run collision again
+    mjw.collision(m, d)
+    nacon = int(d.nacon.numpy()[0])
+    self.assertEqual(nacon, 0, "Expected 0 contacts due to shared body exclusion")
 
 
 if __name__ == "__main__":
