@@ -1064,7 +1064,6 @@ class Model:
     body_gravcomp: antigravity force, units of body weight   (*, nbody)
     body_contype: OR over all geom contypes                  (nbody,)
     body_conaffinity: OR over all geom conaffinities         (nbody,)
-
     oct_child: octree children                               (noct, 8)
     oct_aabb: octree axis-aligned bounding boxes             (noct, 2, 3)
     oct_coeff: octree interpolation coefficients             (noct, 8)
@@ -1122,6 +1121,7 @@ class Model:
     geom_margin: detect contact if dist<margin               (*, ngeom,)
     geom_gap: additional contact detection buffer            (*, ngeom,)
     geom_surfacevel: surface velocity in local frame: lin,ang(*, ngeom, 6)
+    geom_adhesion: adhesive force of contacts                (*, ngeom,)
     geom_fluid: fluid interaction parameters                 (ngeom, mjNFLUID)
     geom_rgba: rgba when material is omitted                 (*, ngeom, 4)
     site_type: geom type for rendering (GeomType)            (nsite,)
@@ -1252,6 +1252,7 @@ class Model:
     pair_solimp: solver impedance: contact                   (*, npair, mjNIMP)
     pair_margin: detect contact if dist<margin               (*, npair,)
     pair_gap: additional contact detection buffer            (*, npair,)
+    pair_adhesion: adhesive force of contacts                (*, npair,)
     pair_friction: tangent1, 2, spin, roll1, 2               (*, npair, 5)
     exclude_signature: body1 << 16 + body2                   (nexclude,)
     eq_type: constraint type (EqType)                        (neq,)
@@ -1363,6 +1364,7 @@ class Model:
       factorization is a per-block decision -- see M_tiles and m_block_layout
     qLD_block_total: packed length of the dense region per world (also the offset of the LDL region)
     qLD_block_adr: packed factor offset; Q_LD_BLOCK_* sentinel otherwise (nv,)
+    flg_adhesion: flag indicating if model has passive adhesion
     has_fluid: True if wind, density, or viscosity are non-zero at put_model time
     flg_surfacevel: whether model has non-zero surfacevel
     has_sdf_geom: whether the model contains SDF geoms
@@ -1612,6 +1614,7 @@ class Model:
   geom_margin: array("*", "ngeom", float)
   geom_gap: array("*", "ngeom", float)
   geom_surfacevel: array("*", "ngeom", vec6)
+  geom_adhesion: array("*", "ngeom", float)
   geom_fluid: array("ngeom", 12, float)
   geom_rgba: array("*", "ngeom", wp.vec4)
   site_type: array("nsite", int)
@@ -1742,6 +1745,7 @@ class Model:
   pair_solimp: array("*", "npair", vec5)
   pair_margin: array("*", "npair", float)
   pair_gap: array("*", "npair", float)
+  pair_adhesion: array("*", "npair", float)
   pair_friction: array("*", "npair", vec5)
   exclude_signature: array("nexclude", int)
   eq_type: array("neq", int)
@@ -1850,6 +1854,7 @@ class Model:
   is_sparse: bool
   qLD_block_total: int
   qLD_block_adr: array("nv", int)
+  flg_adhesion: bool
   has_fluid: bool
   flg_surfacevel: bool
   has_sdf_geom: bool
@@ -2010,6 +2015,7 @@ class Contact:
   worldid: array("naconmax", int)
   type: array("naconmax", int)
   geomcollisionid: array("naconmax", int)
+  adhesion: array("naconmax", float)
 
 
 @dataclasses.dataclass
@@ -2150,6 +2156,7 @@ class Data:
     qfrc_damper: passive damper force                           (nworld, nv)
     qfrc_gravcomp: passive gravity compensation force           (nworld, nv)
     qfrc_fluid: passive fluid force                             (nworld, nv)
+    qfrc_adhesion: passive adhesion force                       (nworld, nv)
     qfrc_passive: total passive force                           (nworld, nv)
     subtree_linvel: linear velocity of subtree com              (nworld, nbody, 3)
     subtree_angmom: angular momentum about subtree com          (nworld, nbody, 3)
@@ -2298,6 +2305,7 @@ class Data:
   qfrc_damper: array("nworld", "nv", float)
   qfrc_gravcomp: array("nworld", "nv", float)
   qfrc_fluid: array("nworld", "nv", float)
+  qfrc_adhesion: array("nworld", "nv", float)
   qfrc_passive: array("nworld", "nv", float)
   subtree_linvel: array("nworld", "nbody", wp.vec3)
   subtree_angmom: array("nworld", "nbody", wp.vec3)

@@ -3407,6 +3407,7 @@ class IOTest(parameterized.TestCase):
       "solref",
       "solreffriction",
       "solimp",
+      "adhesion",
       "dim",
       "geom",
     ]:
