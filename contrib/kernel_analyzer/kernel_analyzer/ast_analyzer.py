@@ -237,7 +237,7 @@ def analyze(source: str, filename: str, type_source: str) -> List[Issue]:
     return []
 
   issues: List[Issue] = []
-  for cls_name in ("Model", "Data", "Option", "Statistic"):
+  for cls_name in ("Model", "Data", "Option", "Statistic", "Constraint"):
     if cls_name in type_classes:
       for attr_name, attr_type in type_classes[cls_name]:
         if attr_type.startswith("wp.array"):

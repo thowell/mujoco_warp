@@ -445,11 +445,15 @@ class Model:
 class Data:
   qpos: array("nworld", "nq", float)
   bad_data_1: wp.array[float]
+
+class Constraint:
+  pos: array("nworld", "njmax", float)
+  bad_constraint_1: wp.array[float]
 """
     kernel_code = "pass"
     issues = ast_analyzer.analyze(kernel_code, "test.py", type_code)
     forbidden_issues = [i for i in issues if isinstance(i, ast_analyzer.DirectWpArrayForbidden)]
-    self.assertEqual(len(forbidden_issues), 5, forbidden_issues)
+    self.assertEqual(len(forbidden_issues), 6, forbidden_issues)
 
     flagged_attrs = {f"{i.class_name}.{i.attr_name}" for i in forbidden_issues}
     expected_attrs = {
@@ -458,6 +462,7 @@ class Data:
       "Data.bad_data_1",
       "Option.bad_opt_array",
       "Statistic.bad_stat_array",
+      "Constraint.bad_constraint_1",
     }
     self.assertEqual(flagged_attrs, expected_attrs)
 

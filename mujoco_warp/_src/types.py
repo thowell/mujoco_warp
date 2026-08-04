@@ -2035,8 +2035,8 @@ class Constraint:
   jtdaj_nblock: array("nworld", int)
   J_rownnz: array("nworld", "njmax", int)
   J_rowadr: array("nworld", "njmax", int)
-  J_colind: wp.array3d[int]
-  J: wp.array3d[float]
+  J_colind: array("nworld", 1, "njmax_nnz", int)
+  J: array("nworld", 1, "njmax_nnz", float)
   pos: array("nworld", "njmax", float)
   margin: array("nworld", "njmax", float)
   D: array("nworld", "njmax_pad", float)
