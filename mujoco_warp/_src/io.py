@@ -74,7 +74,12 @@ def _create_array(data: Any, spec, sizes: dict[str, int], batch_size: int = 1) -
       return None
     return wp.array(np.array(data), dtype=spec.dtype)
 
-  shape = tuple(batch_size if dim == "*" else (sizes[dim] if isinstance(dim, str) else dim) for dim in spec_shape)
+  shape = tuple(
+    batch_size
+    if dim == "*"
+    else (int(dim) if isinstance(dim, str) and dim.isdigit() else (sizes[dim] if isinstance(dim, str) else dim))
+    for dim in spec_shape
+  )
 
   is_batched = spec_shape[0] in ("*", "nworld")
 
@@ -1240,8 +1245,52 @@ def put_model(mjm: mujoco.MjModel, batch_sizes: dict[str, int] | None = None) ->
   else:
     m.flex_face = np.zeros((0, 9), dtype=np.int32)
 
-  # place m on device
   sizes = {f.name: getattr(m, f.name) for f in dataclasses.fields(types.Model) if f.type is int}
+  sizes.update(
+    {
+      "nbody_branches": len(m.body_branches),
+      "nbranch_start": len(m.body_branch_start),
+      "nbody_fluid_ellipsoid": len(m.body_fluid_ellipsoid_adr),
+      "nbody_fluid_box": len(m.body_fluid_box_adr),
+      "njnt_limited_slide_hinge": len(m.jnt_limited_slide_hinge_adr),
+      "njnt_limited_ball": len(m.jnt_limited_ball_adr),
+      "ndof_tri": len(m.dof_tri_row),
+      "nnxn_geom_pair": len(m.nxn_geom_pair),
+      "nnxn_geom_pair_filtered": len(m.nxn_geom_pair_filtered),
+      "neq_connect": len(m.eq_connect_adr),
+      "neq_wld": len(m.eq_wld_adr),
+      "neq_jnt": len(m.eq_jnt_adr),
+      "neq_ten": len(m.eq_ten_adr),
+      "neq_flex": len(m.eq_flex_adr),
+      "ntendon_jnt": len(m.tendon_jnt_adr),
+      "ntendon_site_pair": len(m.tendon_site_pair_adr),
+      "ntendon_geom": len(m.tendon_geom_adr),
+      "ntendon_limited": len(m.tendon_limited_adr),
+      "nten_wrapadr_site": len(m.ten_wrapadr_site),
+      "nwrap_jnt": len(m.wrap_jnt_adr),
+      "nwrap_site": len(m.wrap_site_adr),
+      "nwrap_site_pair": len(m.wrap_site_pair_adr),
+      "nwrap_geom": len(m.wrap_geom_adr),
+      "nsensor_pos": len(m.sensor_pos_adr),
+      "nsensor_limitpos": len(m.sensor_limitpos_adr),
+      "nsensor_vel": len(m.sensor_vel_adr),
+      "nsensor_limitvel": len(m.sensor_limitvel_adr),
+      "nsensor_acc": len(m.sensor_acc_adr),
+      "nsensor_touch": len(m.sensor_touch_adr),
+      "nsensor_limitfrc": len(m.sensor_limitfrc_adr),
+      "nsensor_tendonactfrc": len(m.sensor_tendonactfrc_adr),
+      "nsensor_collision_start_adr": len(m.sensor_collision_start_adr),
+      "nqLD_all_updates": len(m.qLD_all_updates),
+      "nqLD_level_offsets": len(m.qLD_level_offsets),
+      "nM_fullm": len(m.M_fullm_i),
+      "nM_fullm_upper": len(m.M_fullm_upper_i),
+      "nqD_fullm": len(m.qD_fullm_i),
+      "nv_plus_1": len(m.M_mulm_rowadr),
+      "nM_mulm": len(m.M_mulm_col),
+      "nflexelem_geom_pair_filtered": len(m.flexelem_geom_pair_filtered),
+      "nflexvert_geom_pair_filtered": len(m.flexvert_geom_pair_filtered),
+    }
+  )
   for f in dataclasses.fields(types.Model):
     if _is_array_spec(f.type):
       batch_size = batch_sizes.get(f.name, 1)
@@ -1734,8 +1783,16 @@ def make_data(
   sizes["njmax"] = njmax
   sizes["nvmax"] = nvmax
   sizes["nvmax_pad"] = _nvmax_pad(nvmax)
+  sizes["nvmax_pad_sq"] = sizes["nvmax_pad"] * sizes["nvmax_pad"]
   sizes["nflexintcell"] = _get_nflexintcell(mjm)
   sizes["nflexface"] = _get_nflexface(mjm)
+
+  # qLD holds the factor: a packed dense region for dense blocks followed
+  # by an nC-length LDL region for sparse blocks (present only when some block is sparse). Either
+  # region may be empty (pure dense / pure sparse).
+  _lay = m_block_layout(mjm)
+  qld_total = _lay["total"] + (mjm.nC if _lay["has_sparse"] else 0)
+  sizes["qld_total"] = qld_total
 
   if njmax_nnz is None:
     if is_sparse(mjm):
@@ -1787,8 +1844,6 @@ def make_data(
     "nvmax_pad": sizes["nvmax_pad"],
     "njmax_pad": sizes["njmax_pad"],
     "njmax_nnz": njmax_nnz,
-    "M": None,
-    "qLD": None,
     # world body
     "xquat": wp.array(np.tile(mjd.xquat, (nworld, 1)), shape=(nworld, mjm.nbody), dtype=wp.quat),
     "xmat": wp.array(np.tile(mjd.xmat, (nworld, 1)), shape=(nworld, mjm.nbody), dtype=wp.mat33),
@@ -1831,14 +1886,6 @@ def make_data(
     d_kwargs[f.name] = _create_array(None, f.type, sizes)
 
   d = types.Data(**d_kwargs)
-
-  # qLD holds the factor: a packed dense region for dense blocks followed
-  # by an nC-length LDL region for sparse blocks (present only when some block is sparse). Either
-  # region may be empty (pure dense / pure sparse).
-  d.M = wp.zeros((nworld, mjm.nC), dtype=float)
-  _lay = m_block_layout(mjm)
-  qld_total = _lay["total"] + (mjm.nC if _lay["has_sparse"] else 0)
-  d.qLD = wp.zeros((nworld, qld_total), dtype=float)
 
   _allocate_island_arrays(mjm, d, nworld, njmax, island_alloc, mjd)
   _allocate_compact_arrays(mjm, d, nworld, sizes["nvmax_pad"], sizes["njmax_pad"], compact_alloc)
@@ -1961,6 +2008,7 @@ def put_data(
   sizes["njmax"] = njmax
   sizes["nvmax"] = nvmax
   sizes["nvmax_pad"] = _nvmax_pad(nvmax)
+  sizes["nvmax_pad_sq"] = sizes["nvmax_pad"] * sizes["nvmax_pad"]
   sizes["nflexface"] = _get_nflexface(mjm)
 
   if njmax_nnz is None:
@@ -2079,7 +2127,6 @@ def put_data(
     "njmax_nnz": njmax_nnz,
     # fields set after initialization:
     "solver_niter": None,
-    "M": None,
     "qLD": None,
     "nacon": None,
     # island arrays
@@ -2113,7 +2160,6 @@ def put_data(
   d = types.Data(**d_kwargs)
   d.solver_niter = wp.full((nworld,), mjd.solver_niter[0], dtype=int)
 
-  d.M = wp.array(np.full((nworld, mjm.nC), mjd.M), dtype=float)
   # qLD = [packed block Cholesky | nC LDL region]. Block factors store their upper Cholesky
   # packed; the LDL region (present iff some block is sparse) holds MuJoCo's full L'DL factor (only
   # its sparse-block entries are read by the solve).

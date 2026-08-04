@@ -1833,7 +1833,7 @@ class Model:
   nmaxmeshdeg: int
   is_sparse: bool
   qLD_block_total: int
-  qLD_block_adr: wp.array[int]
+  qLD_block_adr: array("nv", int)
   has_fluid: bool
   has_sdf_geom: bool
   has_flex_selfcollide: bool
@@ -1841,85 +1841,85 @@ class Model:
   has_3d_flex: bool
   max_flex_dim: int
   block_dim: BlockDim
-  body_tree: tuple[wp.array[int], ...]
-  body_branches: wp.array[int]
-  body_branch_start: wp.array[int]
+  body_tree: tuple[array("nbody", int), ...]
+  body_branches: array("nbody_branches", int)
+  body_branch_start: array("nbranch_start", int)
   mocap_bodyid: array("nmocap", int)
   body_fluid_ellipsoid: array("nbody", bool)
-  body_fluid_ellipsoid_adr: wp.array[int]
-  body_fluid_box_adr: wp.array[int]
-  jnt_limited_slide_hinge_adr: wp.array[int]
-  jnt_limited_ball_adr: wp.array[int]
+  body_fluid_ellipsoid_adr: array("nbody_fluid_ellipsoid", int)
+  body_fluid_box_adr: array("nbody_fluid_box", int)
+  jnt_limited_slide_hinge_adr: array("njnt_limited_slide_hinge", int)
+  jnt_limited_ball_adr: array("njnt_limited_ball", int)
   body_isdofancestor: array("nbody", "nv_pad", int)
-  dof_tri_row: wp.array[int]
-  dof_tri_col: wp.array[int]
-  nxn_geom_pair: wp.array[wp.vec2i]
-  nxn_geom_pair_filtered: wp.array[wp.vec2i]
-  nxn_pairid: wp.array[wp.vec2i]
-  nxn_pairid_filtered: wp.array[wp.vec2i]
+  dof_tri_row: array("ndof_tri", int)
+  dof_tri_col: array("ndof_tri", int)
+  nxn_geom_pair: array("nnxn_geom_pair", wp.vec2i)
+  nxn_geom_pair_filtered: array("nnxn_geom_pair_filtered", wp.vec2i)
+  nxn_pairid: array("nnxn_geom_pair", wp.vec2i)
+  nxn_pairid_filtered: array("nnxn_geom_pair_filtered", wp.vec2i)
   geom_pair_type_count: tuple[int, ...]
   geom_plugin_index: array("ngeom", int)
-  eq_connect_adr: wp.array[int]
-  eq_wld_adr: wp.array[int]
-  eq_jnt_adr: wp.array[int]
-  eq_ten_adr: wp.array[int]
-  eq_flex_adr: wp.array[int]
-  eq_flexstrain_adr: wp.array[int]
-  tendon_jnt_adr: wp.array[int]
-  tendon_site_pair_adr: wp.array[int]
-  tendon_geom_adr: wp.array[int]
-  tendon_limited_adr: wp.array[int]
+  eq_connect_adr: array("neq_connect", int)
+  eq_wld_adr: array("neq_wld", int)
+  eq_jnt_adr: array("neq_jnt", int)
+  eq_ten_adr: array("neq_ten", int)
+  eq_flex_adr: array("neq_flex", int)
+  eq_flexstrain_adr: array("neq_flexstrain", int)
+  tendon_jnt_adr: array("ntendon_jnt", int)
+  tendon_site_pair_adr: array("ntendon_site_pair", int)
+  tendon_geom_adr: array("ntendon_geom", int)
+  tendon_limited_adr: array("ntendon_limited", int)
   max_ten_J_rownnz: int
-  ten_wrapadr_site: wp.array[int]
-  ten_wrapnum_site: wp.array[int]
-  wrap_jnt_adr: wp.array[int]
-  wrap_site_adr: wp.array[int]
-  wrap_site_pair_adr: wp.array[int]
-  wrap_geom_adr: wp.array[int]
+  ten_wrapadr_site: array("nten_wrapadr_site", int)
+  ten_wrapnum_site: array("ntendon", int)
+  wrap_jnt_adr: array("nwrap_jnt", int)
+  wrap_site_adr: array("nwrap_site", int)
+  wrap_site_pair_adr: array("nwrap_site_pair", int)
+  wrap_geom_adr: array("nwrap_geom", int)
   wrap_pulley_scale: array("nwrap", float)
-  actuator_trntype_body_adr: wp.array[int]
-  sensor_pos_adr: wp.array[int]
-  sensor_limitpos_adr: wp.array[int]
-  sensor_vel_adr: wp.array[int]
-  sensor_limitvel_adr: wp.array[int]
-  sensor_acc_adr: wp.array[int]
-  sensor_rangefinder_adr: wp.array[int]
-  rangefinder_sensor_adr: wp.array[int]
-  sensor_collision_start_adr: wp.array[int]
+  actuator_trntype_body_adr: array("nacttrnbody", int)
+  sensor_pos_adr: array("nsensor_pos", int)
+  sensor_limitpos_adr: array("nsensor_limitpos", int)
+  sensor_vel_adr: array("nsensor_vel", int)
+  sensor_limitvel_adr: array("nsensor_limitvel", int)
+  sensor_acc_adr: array("nsensor_acc", int)
+  sensor_rangefinder_adr: array("nrangefinder", int)
+  rangefinder_sensor_adr: array("nsensor", int)
+  sensor_collision_start_adr: array("nsensor_collision_start_adr", int)
   collision_sensor_adr: array("nsensor", int)
-  sensor_touch_adr: wp.array[int]
-  sensor_limitfrc_adr: wp.array[int]
+  sensor_touch_adr: array("nsensor_touch", int)
+  sensor_limitfrc_adr: array("nsensor_limitfrc", int)
   sensor_e_potential: bool
   sensor_e_kinetic: bool
-  sensor_tendonactfrc_adr: wp.array[int]
+  sensor_tendonactfrc_adr: array("nsensor_tendonactfrc", int)
   sensor_subtree_vel: bool
   sensor_contact_adr: array("nsensorcontact", int)
   sensor_adr_to_contact_adr: array("nsensor", int)
   sensor_rne_postconstraint: bool
   sensor_rangefinder_bodyid: array("nrangefinder", int)
   taxel_vertadr: array("nsensortaxel", int)
-  taxel_sensorid: wp.array[int]
+  taxel_sensorid: array("nsensortaxel", int)
   M_tiles: tuple[TileSet, ...]
-  qLD_updates: tuple[wp.array[wp.vec3i], ...]
-  qLD_all_updates: wp.array[wp.vec3i]
-  qLD_level_offsets: wp.array[int]
+  qLD_updates: tuple[array("nqLD_all_updates", wp.vec3i), ...]
+  qLD_all_updates: array("nqLD_all_updates", wp.vec3i)
+  qLD_level_offsets: array("nqLD_level_offsets", int)
   # TODO(team): Remove M_fullm_i/j and M_elemid by iterating the M CSR layout
   # directly in the solver/derivative kernels
-  M_fullm_i: wp.array[int]
-  M_fullm_j: wp.array[int]
-  M_elemid: wp.array2d[int]  # (row, col) -> CSR madr address; -1 if col is not a chain ancestor of row
-  M_hinit_i: wp.array[int]  # row index of each CSR M entry (for densifying M into the dense Newton H)
-  M_fullm_upper_i: wp.array[int]
-  M_fullm_upper_j: wp.array[int]
-  M_fullm_upper_elemid: wp.array[int]
-  qD_fullm_i: wp.array[int]  # D-structure (full square) row indices for RNE derivatives
-  qD_fullm_j: wp.array[int]  # D-structure (full square) column indices for RNE derivatives
+  M_fullm_i: array("nM_fullm", int)
+  M_fullm_j: array("nM_fullm", int)
+  M_elemid: array("nv", "nv", int)  # (row, col) -> CSR madr address; -1 if col is not a chain ancestor of row
+  M_hinit_i: array("nC", int)  # row index of each CSR M entry (for densifying M into the dense Newton H)
+  M_fullm_upper_i: array("nM_fullm_upper", int)
+  M_fullm_upper_j: array("nM_fullm_upper", int)
+  M_fullm_upper_elemid: array("nM_fullm_upper", int)
+  qD_fullm_i: array("nqD_fullm", int)  # D-structure (full square) row indices for RNE derivatives
+  qD_fullm_j: array("nqD_fullm", int)  # D-structure (full square) column indices for RNE derivatives
   # Gather-based sparse mul_m indices (thread per DOF, no atomics)
-  M_mulm_rowadr: wp.array[int]  # start address for each row [nv+1]
-  M_mulm_col: wp.array[int]  # column index to gather from
-  M_mulm_madr: wp.array[int]  # matrix address to read
-  flexelem_geom_pair_filtered: wp.array[wp.vec2i]
-  flexvert_geom_pair_filtered: wp.array[wp.vec2i]
+  M_mulm_rowadr: array("nv_plus_1", int)  # start address for each row [nv+1]
+  M_mulm_col: array("nM_mulm", int)  # column index to gather from
+  M_mulm_madr: array("nM_mulm", int)  # matrix address to read
+  flexelem_geom_pair_filtered: array("nflexelem_geom_pair_filtered", wp.vec2i)
+  flexvert_geom_pair_filtered: array("nflexvert_geom_pair_filtered", wp.vec2i)
   flex_elemflexid: array("nflexelem", int)
   flex_shellflexid: array("nflexshelldata", int)
   flex_evpairflexid: array("nflexevpair", int)
@@ -2003,9 +2003,9 @@ class Constraint:
   Attributes:
     type: constraint type (ConstraintType)            (nworld, njmax)
     id: id of object of specific type                 (nworld, njmax)
-    jtdaj_adr: first efc row of each JTDAJ block   (nworld, njmax)
-    jtdaj_nrow: efc rows per JTDAJ block            (nworld, njmax)
-    jtdaj_nblock: number of JTDAJ blocks             (nworld,)
+    jtdaj_adr: first efc row of each JTDAJ block      (nworld, njmax)
+    jtdaj_nrow: efc rows per JTDAJ block              (nworld, njmax)
+    jtdaj_nblock: number of JTDAJ blocks              (nworld,)
     J_rownnz: number of non-zeros in J row            (nworld, 0) dense
                                                       (nworld, njmax) sparse
     J_rowadr: row start address in colind array       (nworld, 0) dense
@@ -2154,7 +2154,7 @@ class Data:
     tree_island: island ID per tree (-1 if unconstrained)       (nworld, ntree)
     dof_island: island ID per DOF (-1 if unconstrained)         (nworld, nv)
     island_dofadr: island start address in dof vector           (nworld, ntree)
-    island_idofadr: island start address in idof vector          (nworld, ntree)
+    island_idofadr: island start address in idof vector         (nworld, ntree)
     island_nv: DOFs per island                                  (nworld, ntree)
     island_nefc: constraints per island                         (nworld, ntree)
     island_ne: equality constraints per island                  (nworld, ntree)
@@ -2171,8 +2171,8 @@ class Data:
     cdof_dof: compacted DOF -> global DOF; -1 if unused         (nworld, nvmax_pad)
     ctol: compacted-solve main tolerance (nv/nvmax_pad scaled)  (1,)
     cls_tol: compacted-solve linesearch tolerance               (1,)
-    cdof_tri_row: row index of compacted Hessian dof-pairs      (nvmax_pad^2,)
-    cdof_tri_col: col index of compacted Hessian dof-pairs      (nvmax_pad^2,)
+    cdof_tri_row: row index of compacted Hessian dof-pairs      (nvmax_pad_sq,)
+    cdof_tri_col: col index of compacted Hessian dof-pairs      (nvmax_pad_sq,)
     cM: compacted dense inertia                                 (nworld, nvmax_pad, nvmax_pad)
     cqLD: compacted upper Cholesky factor                       (nworld, nvmax_pad, nvmax_pad)
     crhs: compacted smooth-solve right-hand side                (nworld, nvmax_pad, 1)
@@ -2265,8 +2265,8 @@ class Data:
   moment_colind: array("nworld", "nJmom", int)
   actuator_moment: array("nworld", "nJmom", float)
   crb: array("nworld", "nbody", vec10)
-  M: wp.array2d[float]
-  qLD: wp.array2d[float]
+  M: array("nworld", "nC", float)
+  qLD: array("nworld", "qld_total", float)
   qLDiagInv: array("nworld", "nv", float)
   tree_awake: array("nworld", "ntree", int)
   body_awake: array("nworld", "nbody", int)
@@ -2315,21 +2315,21 @@ class Data:
   ncdof: array("nworld", int)
   dof_cdof: array("nworld", "nv", int)
   cdof_dof: array("nworld", "nvmax_pad", int)
-  ctol: wp.array[float]
-  cls_tol: wp.array[float]
-  cdof_tri_row: wp.array[int]
-  cdof_tri_col: wp.array[int]
-  cM: wp.array3d[float]
-  cqLD: wp.array3d[float]
-  crhs: wp.array3d[float]
-  cx: wp.array3d[float]
-  cJ: wp.array3d[float]
-  cMa: wp.array2d[float]
-  cqfrc_smooth: wp.array2d[float]
-  cqacc_smooth: wp.array2d[float]
-  cqacc_warmstart: wp.array2d[float]
-  cqacc: wp.array2d[float]
-  cqfrc_constraint: wp.array2d[float]
+  ctol: array(1, float)
+  cls_tol: array(1, float)
+  cdof_tri_row: array("nvmax_pad_sq", int)
+  cdof_tri_col: array("nvmax_pad_sq", int)
+  cM: array("nworld", "nvmax_pad", "nvmax_pad", float)
+  cqLD: array("nworld", "nvmax_pad", "nvmax_pad", float)
+  crhs: array("nworld", "nvmax_pad", 1, float)
+  cx: array("nworld", "nvmax_pad", 1, float)
+  cJ: array("nworld", "njmax_pad", "nvmax_pad", float)
+  cMa: array("nworld", "nvmax_pad", float)
+  cqfrc_smooth: array("nworld", "nvmax_pad", float)
+  cqacc_smooth: array("nworld", "nvmax_pad", float)
+  cqacc_warmstart: array("nworld", "nvmax_pad", float)
+  cqacc: array("nworld", "nvmax_pad", float)
+  cqfrc_constraint: array("nworld", "nvmax_pad", float)
 
   # warp only fields:
   nworld: int
