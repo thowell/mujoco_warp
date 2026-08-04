@@ -103,7 +103,6 @@ def _create_constraint(
   mjm,
   nworld: int,
   njmax: int,
-  njmax_nnz: int,
   sizes: dict,
   mjd=None,
 ) -> types.Constraint:
@@ -1809,7 +1808,7 @@ def make_data(
   contact = types.Contact(**contact_kwargs)
   contact.efc_address = wp.array(np.full((naconmax, sizes["nmaxpyramid"]), -1, dtype=int), dtype=int)
 
-  efc = _create_constraint(mjm, nworld, njmax, njmax_nnz, sizes)
+  efc = _create_constraint(mjm, nworld, njmax, sizes)
 
   if is_sparse(mjm):
     efc.J_rownnz = wp.zeros((nworld, njmax), dtype=int)
@@ -2059,9 +2058,7 @@ def put_data(
   contact.geomcollisionid = wp.empty((naconmax,), dtype=int)  # TODO(team): set values
 
   # create efc
-  efc_kwargs = {"J_rownnz": None, "J_rowadr": None, "J_colind": None, "J": None}
-
-  efc = _create_constraint(mjm, nworld, njmax, njmax_nnz, sizes, mjd)
+  efc = _create_constraint(mjm, nworld, njmax, sizes, mjd)
 
   # make_constraint builds the block list in-kernel; put_data does not run it, so build it here
   # -- otherwise solving a put_data state would assemble an empty J^T D J.
