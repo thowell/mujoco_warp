@@ -1037,7 +1037,7 @@ def ccd_kernel_builder(
     overflow_out: wp.array[int],
   ):
     tid = wp.tid()
-    for collisionid in range(tid, ncollision_in[0], grid_stride_in):
+    for collisionid in range(tid, wp.min(ncollision_in[0], naconmax_in), grid_stride_in):
       geoms = collision_pair_in[collisionid]
       g1 = geoms[0]
       g2 = geoms[1]
