@@ -25,6 +25,8 @@ import mujoco_warp as mjw
 from mujoco_warp import ConeType
 from mujoco_warp import test_data
 from mujoco_warp._src import bvh
+from mujoco_warp._src import io
+from mujoco_warp._src import types
 
 _TOLERANCE = 5e-4
 
@@ -1355,6 +1357,52 @@ class FlexCollisionTest(parameterized.TestCase):
     self.assertEqual(nacon, 0, "Expected 0 contacts due to weld same-body exclusion")
 
   @parameterized.parameters(1, 2)
+  def test_flex_self_collision_bitmask_filtering(self, nworld):
+    """Test that flex self-collision requires (flex_contype & flex_conaffinity) != 0."""
+    # Disjoint bitmasks: contype="1" conaffinity="2" (1 & 2 == 0)
+    _, _, m_disjoint, d_disjoint = test_data.fixture(
+      xml="""
+      <mujoco>
+        <worldbody>
+          <flexcomp name="rope" type="grid" count="4 1 1" spacing=".2 .2 .1" pos="0 0 0"
+                    radius=".02" dim="1" mass=".5">
+            <contact selfcollide="auto" contype="1" conaffinity="2"/>
+          </flexcomp>
+        </worldbody>
+      </mujoco>
+      """,
+      nworld=nworld,
+    )
+    self.assertFalse(m_disjoint.has_flex_selfcollide)
+
+    # Overlapping bitmasks: contype="3" conaffinity="1" (3 & 1 == 1 != 0)
+    _, _, m_overlap, d_overlap = test_data.fixture(
+      xml="""
+      <mujoco>
+        <worldbody>
+          <flexcomp name="rope" type="grid" count="4 1 1" spacing=".2 .2 .1" pos="0 0 0"
+                    radius=".02" dim="1" mass=".5">
+            <contact selfcollide="auto" contype="3" conaffinity="1"/>
+          </flexcomp>
+        </worldbody>
+      </mujoco>
+      """,
+      nworld=nworld,
+    )
+    self.assertTrue(m_overlap.has_flex_selfcollide)
+
+    v0_idx = int(m_overlap.flex_vertadr.numpy()[0])
+    v3_idx = v0_idx + 3
+    xpos = d_overlap.flexvert_xpos.numpy()
+    for w in range(nworld):
+      xpos[w, v3_idx] = xpos[w, v0_idx] + np.array([0.0, 0.0, 0.01])
+    d_overlap.flexvert_xpos.assign(xpos)
+
+    mjw.collision(m_overlap, d_overlap)
+    nacon = int(d_overlap.nacon.numpy()[0])
+    self.assertGreater(nacon, 0, "Expected self-collision contacts when contype & conaffinity != 0")
+
+  @parameterized.parameters(1, 2)
   def test_flex_self_collision_no_adjacent_contacts(self, nworld):
     """Test that a flat cloth does not generate any self-collision contacts."""
     _, _, m, d = test_data.fixture(
@@ -2158,6 +2206,109 @@ class FlexContactParityTest(parameterized.TestCase):
       m_contacts = self._get_sorted_contacts(mjd, mjd.ncon, is_warp=False)
       self._assert_contact_parity(w_contacts, m_contacts)
 
+  @parameterized.parameters(1, 2)
+  def test_contact_flex_flex_rope_margin(self, nworld):
+    xml = """
+    <mujoco>
+      <worldbody>
+        <flexcomp name="rope1" type="grid" count="2 1 1" spacing="0.2 0.2 0.1" pos="0 0 0" radius="0.02" dim="1" mass="0.5">
+          <contact selfcollide="none" contype="1" conaffinity="1" margin="0.01"/>
+        </flexcomp>
+        <flexcomp name="rope2" type="grid" count="2 1 1" spacing="0.2 0.2 0.1" pos="0 0 0.045" euler="0 0 90" radius="0.02" dim="1" mass="0.5">
+          <contact selfcollide="none" contype="1" conaffinity="1" margin="0.01"/>
+        </flexcomp>
+      </worldbody>
+    </mujoco>
+    """
+    mjm, mjd, m, d = test_data.fixture(xml=xml, nworld=nworld)
+
+    d.nacon.fill_(-1)
+    mjw.kinematics(m, d)
+    mjw.collision(m, d)
+
+    mujoco.mj_kinematics(mjm, mjd)
+    mujoco.mj_collision(mjm, mjd)
+
+    self.assertEqual(d.nacon.numpy()[0], nworld * 1)
+    self.assertEqual(mjd.ncon, 1)
+
+    for w in range(nworld):
+      w_contacts = self._get_sorted_contacts(d, d.nacon.numpy()[0], world_idx=w, is_warp=True)
+      m_contacts = self._get_sorted_contacts(mjd, mjd.ncon, is_warp=False)
+      self._assert_contact_parity(w_contacts, m_contacts)
+
+  @parameterized.parameters(1, 2)
+  def test_contact_flex_flex_cloth(self, nworld):
+    xml = """
+    <mujoco>
+      <worldbody>
+        <flexcomp name="tri1" type="direct" dim="2" radius="0.01" mass="0.5"
+                  point="0 0 0  0.1 0 0  0 0.1 0"
+                  element="0 1 2">
+          <contact selfcollide="none" contype="1" conaffinity="1"/>
+        </flexcomp>
+        <flexcomp name="tri2" type="direct" dim="2" radius="0.01" mass="0.5"
+                  point="0 0 0.015  0.1 0 0.015  0 0.1 0.015"
+                  element="0 1 2">
+          <contact selfcollide="none" contype="1" conaffinity="1"/>
+        </flexcomp>
+      </worldbody>
+    </mujoco>
+    """
+    mjm, mjd, m, d = test_data.fixture(xml=xml, nworld=nworld)
+
+    d.nacon.fill_(-1)
+    mjw.kinematics(m, d)
+    mjw.collision(m, d)
+
+    mujoco.mj_kinematics(mjm, mjd)
+    mujoco.mj_collision(mjm, mjd)
+
+    self.assertEqual(d.nacon.numpy()[0], nworld * 1)
+    self.assertEqual(mjd.ncon, 1)
+
+    for w in range(nworld):
+      w_contacts = self._get_sorted_contacts(d, d.nacon.numpy()[0], world_idx=w, is_warp=True)
+      m_contacts = self._get_sorted_contacts(mjd, mjd.ncon, is_warp=False)
+      self._assert_contact_parity(w_contacts, m_contacts)
+
+  @parameterized.parameters(1, 2)
+  def test_contact_flex_flex_tet(self, nworld):
+    xml = """
+    <mujoco>
+      <worldbody>
+        <flexcomp name="tet1" type="direct" dim="3" radius="0.01" mass="0.5"
+                  point="0 0 0  0.1 0 0  0 0.1 0  0 0 0.1"
+                  element="0 1 2 3">
+          <contact selfcollide="none" contype="1" conaffinity="1"/>
+        </flexcomp>
+        <flexcomp name="tet2" type="direct" dim="3" radius="0.01" mass="0.5"
+                  point="0 0 0.015  0.1 0 0.015  0 0.1 0.015  0 0 0.115"
+                  element="0 1 2 3">
+          <contact selfcollide="none" contype="1" conaffinity="1"/>
+        </flexcomp>
+      </worldbody>
+    </mujoco>
+    """
+    mjm, mjd, m, d = test_data.fixture(xml=xml, nworld=nworld)
+
+    d.nacon.fill_(-1)
+    mjw.kinematics(m, d)
+    mjw.flex(m, d)
+    mjw.collision(m, d)
+
+    mujoco.mj_kinematics(mjm, mjd)
+    mujoco.mj_flex(mjm, mjd)
+    mujoco.mj_collision(mjm, mjd)
+
+    self.assertEqual(d.nacon.numpy()[0], nworld * 1)
+    self.assertEqual(mjd.ncon, 1)
+
+    for w in range(nworld):
+      w_contacts = self._get_sorted_contacts(d, d.nacon.numpy()[0], world_idx=w, is_warp=True)
+      m_contacts = self._get_sorted_contacts(mjd, mjd.ncon, is_warp=False)
+      self._assert_contact_parity(w_contacts, m_contacts, atol=1e-4)
+
 
 class FlexContactConstraintTest(parameterized.TestCase):
   """Tests for flex contact constraint generation (efc matrices) parity."""
@@ -2544,6 +2695,281 @@ class FlexFlexCollisionTest(parameterized.TestCase):
     mjw.collision(m, d)
     nacon = int(d.nacon.numpy()[0])
     self.assertEqual(nacon, 0, "Expected 0 contacts due to shared body exclusion")
+
+
+class FlexContactNnzTest(parameterized.TestCase):
+  """Tests for contact Jacobian non-zero (NNZ) bounds across flex types."""
+
+  @parameterized.named_parameters(
+    (
+      "rope_plane",
+      """
+      <mujoco>
+        <worldbody>
+          <geom type="plane" size="1 1 .01"/>
+          <flexcomp name="rope" type="grid" count="4 1 1" spacing=".2 .2 .1" pos="0 0 .1" radius=".02" dim="1" mass=".5">
+            <contact selfcollide="none" contype="1" conaffinity="1"/>
+          </flexcomp>
+        </worldbody>
+      </mujoco>
+      """,
+      6,
+    ),
+    (
+      "rope_rope",
+      """
+      <mujoco>
+        <worldbody>
+          <flexcomp name="rope1" type="grid" count="4 1 1" spacing=".2 .2 .1" pos="0 0 0" radius=".02" dim="1" mass=".5">
+            <contact selfcollide="none" contype="1" conaffinity="1"/>
+          </flexcomp>
+          <flexcomp name="rope2" type="grid" count="4 1 1" spacing=".2 .2 .1" pos="0 0 .1" radius=".02" dim="1" mass=".5">
+            <contact selfcollide="none" contype="1" conaffinity="1"/>
+          </flexcomp>
+        </worldbody>
+      </mujoco>
+      """,
+      12,
+    ),
+    (
+      "rope_self",
+      """
+      <mujoco>
+        <worldbody>
+          <flexcomp name="rope" type="grid" count="4 1 1" spacing=".2 .2 .1" pos="0 0 0" radius=".02" dim="1" mass=".5">
+            <contact selfcollide="auto" contype="1" conaffinity="1"/>
+          </flexcomp>
+        </worldbody>
+      </mujoco>
+      """,
+      12,
+    ),
+    (
+      "cloth_plane",
+      """
+      <mujoco>
+        <worldbody>
+          <geom type="plane" size="1 1 .01"/>
+          <flexcomp name="cloth" type="grid" count="3 3 1" spacing=".2 .2 .1" pos="0 0 .1" radius=".02" dim="2" mass=".5">
+            <contact selfcollide="none" contype="1" conaffinity="1"/>
+          </flexcomp>
+        </worldbody>
+      </mujoco>
+      """,
+      9,
+    ),
+    (
+      "cloth_cloth",
+      """
+      <mujoco>
+        <worldbody>
+          <flexcomp name="cloth1" type="grid" count="3 3 1" spacing=".2 .2 .1" pos="0 0 0" radius=".02" dim="2" mass=".5">
+            <contact selfcollide="none" contype="1" conaffinity="1"/>
+          </flexcomp>
+          <flexcomp name="cloth2" type="grid" count="3 3 1" spacing=".2 .2 .1" pos="0 0 .1" radius=".02" dim="2" mass=".5">
+            <contact selfcollide="none" contype="1" conaffinity="1"/>
+          </flexcomp>
+        </worldbody>
+      </mujoco>
+      """,
+      18,
+    ),
+    (
+      "cloth_self",
+      """
+      <mujoco>
+        <worldbody>
+          <flexcomp name="cloth" type="grid" count="3 3 1" spacing=".2 .2 .1" pos="0 0 0" radius=".02" dim="2" mass=".5">
+            <contact selfcollide="auto" contype="1" conaffinity="1"/>
+          </flexcomp>
+        </worldbody>
+      </mujoco>
+      """,
+      18,
+    ),
+    (
+      "tet_plane",
+      """
+      <mujoco>
+        <worldbody>
+          <geom type="plane" size="1 1 .01"/>
+          <flexcomp name="solid" type="grid" count="2 2 2" spacing=".1 .1 .1" pos="0 0 .1" radius=".02" dim="3" mass=".5">
+            <contact selfcollide="none" contype="1" conaffinity="1"/>
+          </flexcomp>
+        </worldbody>
+      </mujoco>
+      """,
+      12,
+    ),
+    (
+      "tet_tet",
+      """
+      <mujoco>
+        <worldbody>
+          <flexcomp name="solid1" type="grid" count="2 2 2" spacing=".1 .1 .1" pos="0 0 0" radius=".02" dim="3" mass=".5">
+            <contact selfcollide="none" contype="1" conaffinity="1"/>
+          </flexcomp>
+          <flexcomp name="solid2" type="grid" count="2 2 2" spacing=".1 .1 .1" pos="0 0 .1" radius=".02" dim="3" mass=".5">
+            <contact selfcollide="none" contype="1" conaffinity="1"/>
+          </flexcomp>
+        </worldbody>
+      </mujoco>
+      """,
+      24,
+    ),
+    (
+      "trilinear_3d_solid_plane",
+      """
+      <mujoco>
+        <worldbody>
+          <geom type="plane" size="1 1 .01"/>
+          <flexcomp name="cube" type="grid" count="3 3 3" spacing=".1 .1 .1" pos="0 0 .1" radius=".02" dim="3" mass=".5" dof="trilinear">
+            <contact selfcollide="none" contype="1" conaffinity="1"/>
+          </flexcomp>
+        </worldbody>
+      </mujoco>
+      """,
+      24,
+    ),
+    (
+      "trilinear_3d_solid_solid",
+      """
+      <mujoco>
+        <worldbody>
+          <flexcomp name="cube1" type="grid" count="3 3 3" spacing=".1 .1 .1" pos="0 0 0" radius=".02" dim="3" mass=".5" dof="trilinear">
+            <contact selfcollide="none" contype="1" conaffinity="1"/>
+          </flexcomp>
+          <flexcomp name="cube2" type="grid" count="3 3 3" spacing=".1 .1 .1" pos="0 0 .1" radius=".02" dim="3" mass=".5" dof="trilinear">
+            <contact selfcollide="none" contype="1" conaffinity="1"/>
+          </flexcomp>
+        </worldbody>
+      </mujoco>
+      """,
+      48,
+    ),
+    (
+      "mixed_rope_trilinear",
+      """
+      <mujoco>
+        <worldbody>
+          <flexcomp name="rope" type="grid" count="4 1 1" spacing=".2 .2 .1" pos="0 0 0" radius=".02" dim="1" mass=".5">
+            <contact selfcollide="none" contype="1" conaffinity="1"/>
+          </flexcomp>
+          <flexcomp name="cube" type="grid" count="3 3 3" spacing=".1 .1 .1" pos="0 0 .1" radius=".02" dim="3" mass=".5" dof="trilinear">
+            <contact selfcollide="none" contype="1" conaffinity="1"/>
+          </flexcomp>
+        </worldbody>
+      </mujoco>
+      """,
+      30,
+    ),
+    (
+      "kinematic_tree_rope",
+      """
+      <mujoco>
+        <worldbody>
+          <body name="arm" pos="0 0 0">
+            <joint name="hinge" type="hinge" axis="0 0 1"/>
+            <geom type="sphere" size=".05"/>
+            <flexcomp name="rope" type="grid" count="4 1 1" spacing=".2 .2 .1" pos="0 0 0" radius=".02" dim="1" mass=".5">
+              <contact selfcollide="none" contype="1" conaffinity="1"/>
+            </flexcomp>
+          </body>
+          <geom type="plane" size="1 1 .01"/>
+        </worldbody>
+      </mujoco>
+      """,
+      8,
+    ),
+  )
+  def test_flex_contact_nnz_static_estimates(self, xml: str, expected_nnz: int):
+    """Verifies that _calculate_max_contact_nnz produces expected upper bounds."""
+    mjm = mujoco.MjModel.from_xml_string(xml)
+    max_nnz = io._calculate_max_contact_nnz(mjm)
+    self.assertEqual(max_nnz, expected_nnz)
+
+  @parameterized.named_parameters(
+    (
+      "rope_collision",
+      """
+      <mujoco>
+        <option jacobian="sparse"/>
+        <worldbody>
+          <flexcomp name="rope1" type="grid" count="4 1 1" spacing=".2 .2 .1" pos="0 0 0" radius=".02" dim="1" mass=".5">
+            <contact selfcollide="none" contype="1" conaffinity="1"/>
+          </flexcomp>
+          <flexcomp name="rope2" type="grid" count="4 1 1" spacing=".2 .2 .1" pos="0 0 0.02" radius=".02" dim="1" mass=".5">
+            <contact selfcollide="none" contype="1" conaffinity="1"/>
+          </flexcomp>
+        </worldbody>
+      </mujoco>
+      """,
+    ),
+    (
+      "cloth_collision",
+      """
+      <mujoco>
+        <option jacobian="sparse"/>
+        <worldbody>
+          <flexcomp name="cloth1" type="grid" count="3 3 1" spacing=".2 .2 .1" pos="0 0 0" radius=".02" dim="2" mass=".5">
+            <contact selfcollide="none" contype="1" conaffinity="1"/>
+          </flexcomp>
+          <flexcomp name="cloth2" type="grid" count="3 3 1" spacing=".2 .2 .1" pos="0 0 0.02" radius=".02" dim="2" mass=".5">
+            <contact selfcollide="none" contype="1" conaffinity="1"/>
+          </flexcomp>
+        </worldbody>
+      </mujoco>
+      """,
+    ),
+    (
+      "tet_collision",
+      """
+      <mujoco>
+        <option jacobian="sparse"/>
+        <worldbody>
+          <flexcomp name="solid1" type="grid" count="2 2 2" spacing=".1 .1 .1" pos="0 0 0" radius=".02" dim="3" mass=".5">
+            <contact selfcollide="none" contype="1" conaffinity="1"/>
+          </flexcomp>
+          <flexcomp name="solid2" type="grid" count="2 2 2" spacing=".1 .1 .1" pos="0 0 0.02" radius=".02" dim="3" mass=".5">
+            <contact selfcollide="none" contype="1" conaffinity="1"/>
+          </flexcomp>
+        </worldbody>
+      </mujoco>
+      """,
+    ),
+  )
+  def test_flex_contact_nnz_runtime_bound(self, xml: str):
+    """Verifies that actual contact Jacobian row NNZ never exceeds the estimated upper bound."""
+    mjm, _, m, d = test_data.fixture(xml=xml)
+    estimated_max_nnz = io._calculate_max_contact_nnz(mjm)
+
+    mjw.kinematics(m, d)
+    if m.max_flex_dim == 3:
+      mjw.flex(m, d)
+    mjw.collision(m, d)
+    mjw.make_constraint(m, d)
+
+    nacon = int(d.nacon.numpy()[0])
+    self.assertGreater(nacon, 0, "Expected active contacts")
+
+    nefc = int(d.nefc.numpy()[0])
+    efc_types = d.efc.type.numpy()[0, :nefc]
+    efc_rownnz = d.efc.J_rownnz.numpy()[0, :nefc]
+
+    contact_types = (
+      types.ConstraintType.CONTACT_FRICTIONLESS,
+      types.ConstraintType.CONTACT_PYRAMIDAL,
+      types.ConstraintType.CONTACT_ELLIPTIC,
+    )
+    for idx in range(nefc):
+      if efc_types[idx] in contact_types:
+        actual_nnz = int(efc_rownnz[idx])
+        self.assertGreater(actual_nnz, 0)
+        self.assertLessEqual(
+          actual_nnz,
+          estimated_max_nnz,
+          f"Contact row {idx} actual NNZ ({actual_nnz}) exceeded static estimate ({estimated_max_nnz})",
+        )
 
 
 if __name__ == "__main__":

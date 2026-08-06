@@ -481,7 +481,9 @@ def put_model(mjm: mujoco.MjModel, batch_sizes: dict[str, int] | None = None) ->
   m.nmaxpyramid = np.maximum(1, 2 * (m.nmaxcondim - 1))
   m.has_sdf_geom = (mjm.geom_type == mujoco.mjtGeom.mjGEOM_SDF).any()
   m.has_ellipsoid_geom = (mjm.geom_type == mujoco.mjtGeom.mjGEOM_ELLIPSOID).any()
-  m.has_flex_selfcollide = bool(mjm.nflex > 0 and np.any(mjm.flex_selfcollide != 0))
+  m.has_flex_selfcollide = bool(
+    mjm.nflex > 0 and np.any((mjm.flex_selfcollide != 0) & ((mjm.flex_contype & mjm.flex_conaffinity) != 0))
+  )
   m.has_3d_flex = bool(mjm.nflex > 0 and np.any(mjm.flex_dim == 3))
   m.max_flex_dim = int(np.max(mjm.flex_dim)) if mjm.nflex > 0 else 0
   m.block_dim = types.BlockDim()
@@ -1366,6 +1368,131 @@ def _body_set_nnz(mjm: mujoco.MjModel, bodies) -> int:
   return len(active_dofs)
 
 
+def _calculate_max_contact_nnz(mjm: mujoco.MjModel) -> int:
+  """Returns the maximum number of non-zeros for a single contact constraint."""
+  max_contact_nnz = 0
+
+  # contact pairs
+  for i in range(mjm.npair):
+    g1, g2 = mjm.pair_geom1[i], mjm.pair_geom2[i]
+    b1, b2 = mjm.geom_bodyid[g1], mjm.geom_bodyid[g2]
+    max_contact_nnz = max(max_contact_nnz, _body_pair_nnz(mjm, b1, b2))
+
+  # filter geom-geom pairs (unique body pairs, filtered)
+  body_pair_seen = set()
+  for i in range(mjm.ngeom):
+    bi = mjm.geom_bodyid[i]
+    cti, cai = mjm.geom_contype[i], mjm.geom_conaffinity[i]
+    for j in range(i + 1, mjm.ngeom):
+      bj = mjm.geom_bodyid[j]
+      if bi == bj:
+        continue
+      if mjm.body_weldid[bi] == 0 and mjm.body_weldid[bj] == 0:
+        continue
+      bp = (min(bi, bj), max(bi, bj))
+      if bp in body_pair_seen:
+        continue
+      ctj, caj = mjm.geom_contype[j], mjm.geom_conaffinity[j]
+      if not ((cti & caj) or (ctj & cai)):
+        continue
+      body_pair_seen.add(bp)
+      max_contact_nnz = max(max_contact_nnz, _body_pair_nnz(mjm, bi, bj))
+
+  if mjm.nflex == 0:
+    return max_contact_nnz
+
+  # Compute upper bound NNZ contribution for each flex individually
+  flex_nnz = [0] * mjm.nflex
+  for fi in range(mjm.nflex):
+    if mjm.flex_interp[fi] == 0:
+      vert_start = mjm.flex_vertadr[fi]
+      dim = mjm.flex_dim[fi]
+      elem_num = mjm.flex_elemnum[fi]
+      elem_data_start = mjm.flex_elemdataadr[fi]
+      if elem_num > 0:
+        for e in range(elem_num):
+          elem_bodies = {
+            mjm.flex_vertbodyid[vert_start + mjm.flex_elem[elem_data_start + e * (dim + 1) + k]] for k in range(dim + 1)
+          }
+          flex_nnz[fi] = max(flex_nnz[fi], _body_set_nnz(mjm, elem_bodies))
+      else:
+        for v in range(mjm.flex_vertnum[fi]):
+          flex_nnz[fi] = max(
+            flex_nnz[fi],
+            _body_set_nnz(mjm, {mjm.flex_vertbodyid[vert_start + v]}),
+          )
+    else:
+      order = abs(mjm.flex_interp[fi])
+      is_shell = mjm.flex_interp[fi] < 0
+      cx, cy, cz = mjm.flex_cellnum[fi]
+      nstart = mjm.flex_nodeadr[fi]
+      dim = mjm.flex_dim[fi]
+      nx = cx * order + 1
+      ny = cy * order + 1 if dim > 1 else 1
+      nz = cz * order + 1 if dim > 2 else 1
+
+      ci, cj, ck = cx // 2, cy // 2, cz // 2
+      cell_bodies = set()
+
+      for li in range(order + 1):
+        for lj in range(order + 1 if dim > 1 else 1):
+          for lk in range(order + 1 if dim > 2 else 1):
+            gi = ci + li
+            gj = cj + lj
+            gk = ck + lk
+
+            is_interior = False
+            if is_shell:
+              is_interior = (
+                (gi > 0 and gi < cx * order)
+                and (gj > 0 and gj < cy * order if dim > 1 else True)
+                and (gk > 0 and gk < cz * order if dim > 2 else True)
+              )
+
+            if is_interior:
+              for bi in (0, gi, nx - 1):
+                for bj in (0, gj, ny - 1 if dim > 1 else 0):
+                  for bk in (0, gk, nz - 1 if dim > 2 else 0):
+                    if (
+                      bi == 0
+                      or bi == nx - 1
+                      or (dim > 1 and (bj == 0 or bj == ny - 1))
+                      or (dim > 2 and (bk == 0 or bk == nz - 1))
+                    ):
+                      node_idx = bi * ny * nz + bj * nz + bk
+                      cell_bodies.add(mjm.flex_nodebodyid[nstart + node_idx])
+            else:
+              node_idx = gi * ny * nz + gj * nz + gk
+              cell_bodies.add(mjm.flex_nodebodyid[nstart + node_idx])
+
+      flex_nnz[fi] = _body_set_nnz(mjm, cell_bodies)
+
+  geom_nnz = [_body_set_nnz(mjm, {mjm.geom_bodyid[g]}) for g in range(mjm.ngeom)]
+
+  for fi in range(mjm.nflex):
+    fct = mjm.flex_contype[fi]
+    fca = mjm.flex_conaffinity[fi]
+
+    # flex-geom contacts
+    for g in range(mjm.ngeom):
+      ct, ca = mjm.geom_contype[g], mjm.geom_conaffinity[g]
+      if (fct & ca) or (ct & fca):
+        max_contact_nnz = max(max_contact_nnz, flex_nnz[fi] + geom_nnz[g])
+
+    # flex self-collision
+    if mjm.flex_selfcollide[fi] and (fct & fca):
+      max_contact_nnz = max(max_contact_nnz, 2 * flex_nnz[fi])
+
+    # flex-flex collision
+    for fj in range(fi + 1, mjm.nflex):
+      fct_j = mjm.flex_contype[fj]
+      fca_j = mjm.flex_conaffinity[fj]
+      if (fct & fca_j) or (fct_j & fca):
+        max_contact_nnz = max(max_contact_nnz, flex_nnz[fi] + flex_nnz[fj])
+
+  return max_contact_nnz
+
+
 def _default_njmax_nnz(mjm: mujoco.MjModel, nconmax: int, njmax: int) -> int:
   """Returns a heuristic estimate for the number of non-zeros in the sparse constraint Jacobian.
 
@@ -1455,122 +1582,8 @@ def _default_njmax_nnz(mjm: mujoco.MjModel, nconmax: int, njmax: int) -> int:
     if mjm.tendon_limited[i]:
       total_nnz += mjm.ten_J_rownnz[i]
 
-  # contact constraints: njmax rows at max body-pair non-zeros
-  max_contact_nnz = 0
-
-  # contact pairs
-  for i in range(mjm.npair):
-    g1, g2 = mjm.pair_geom1[i], mjm.pair_geom2[i]
-    b1, b2 = mjm.geom_bodyid[g1], mjm.geom_bodyid[g2]
-    max_contact_nnz = max(max_contact_nnz, _body_pair_nnz(mjm, b1, b2))
-
-  # filter geom-geom pairs (unique body pairs, filtered)
-  body_pair_seen = set()
-  for i in range(mjm.ngeom):
-    bi = mjm.geom_bodyid[i]
-    cti, cai = mjm.geom_contype[i], mjm.geom_conaffinity[i]
-    for j in range(i + 1, mjm.ngeom):
-      bj = mjm.geom_bodyid[j]
-      if bi == bj:
-        continue
-      if mjm.body_weldid[bi] == 0 and mjm.body_weldid[bj] == 0:
-        continue
-      bp = (min(bi, bj), max(bi, bj))
-      if bp in body_pair_seen:
-        continue
-      ctj, caj = mjm.geom_contype[j], mjm.geom_conaffinity[j]
-      if not ((cti & caj) or (ctj & cai)):
-        continue
-      body_pair_seen.add(bp)
-      max_contact_nnz = max(max_contact_nnz, _body_pair_nnz(mjm, bi, bj))
-
-  # flex vertex contacts
-  for fi in range(mjm.nflex):
-    fct = mjm.flex_contype[fi]
-    fca = mjm.flex_conaffinity[fi]
-
-    vert_start = mjm.flex_vertadr[fi]
-    vert_count = mjm.flex_vertnum[fi]
-    flex_bodies = {mjm.flex_vertbodyid[vert_start + v] for v in range(vert_count)}
-
-    geom_bodies = set()
-    for g in range(mjm.ngeom):
-      ct, ca = mjm.geom_contype[g], mjm.geom_conaffinity[g]
-      if (fct & ca) or (ct & fca):
-        geom_bodies.add(mjm.geom_bodyid[g])
-
-    if mjm.flex_interp[fi] == 0:
-      for fb in flex_bodies:
-        for gb in geom_bodies:
-          if fb != gb:
-            max_contact_nnz = max(max_contact_nnz, _body_pair_nnz(mjm, fb, gb))
-    else:
-      order = abs(mjm.flex_interp[fi])
-      is_shell = mjm.flex_interp[fi] < 0
-      cx, cy, cz = mjm.flex_cellnum[fi]
-      nstart = mjm.flex_nodeadr[fi]
-      dim = mjm.flex_dim[fi]
-      nx = cx * order + 1
-      ny = cy * order + 1 if dim > 1 else 1
-      nz = cz * order + 1 if dim > 2 else 1
-
-      ci, cj, ck = cx // 2, cy // 2, cz // 2
-      cell_bodies = set()
-
-      for li in range(order + 1):
-        for lj in range(order + 1 if dim > 1 else 1):
-          for lk in range(order + 1 if dim > 2 else 1):
-            gi = ci + li
-            gj = cj + lj
-            gk = ck + lk
-
-            is_interior = False
-            if is_shell:
-              is_interior = (
-                (gi > 0 and gi < cx * order)
-                and (gj > 0 and gj < cy * order if dim > 1 else True)
-                and (gk > 0 and gk < cz * order if dim > 2 else True)
-              )
-
-            if is_interior:
-              for bi in (0, gi, nx - 1):
-                for bj in (0, gj, ny - 1 if dim > 1 else 0):
-                  for bk in (0, gk, nz - 1 if dim > 2 else 0):
-                    if (
-                      bi == 0
-                      or bi == nx - 1
-                      or (dim > 1 and (bj == 0 or bj == ny - 1))
-                      or (dim > 2 and (bk == 0 or bk == nz - 1))
-                    ):
-                      node_idx = bi * ny * nz + bj * nz + bk
-                      cell_bodies.add(mjm.flex_nodebodyid[nstart + node_idx])
-            else:
-              node_idx = gi * ny * nz + gj * nz + gk
-              cell_bodies.add(mjm.flex_nodebodyid[nstart + node_idx])
-
-      for gb in geom_bodies:
-        max_contact_nnz = max(max_contact_nnz, _body_set_nnz(mjm, cell_bodies | {gb}))
-
-    # flex self-collision
-    if mjm.flex_selfcollide[fi]:
-      flex_body_list = sorted(flex_bodies)
-      for idx1 in range(len(flex_body_list)):
-        for idx2 in range(idx1 + 1, len(flex_body_list)):
-          max_contact_nnz = max(
-            max_contact_nnz,
-            _body_pair_nnz(mjm, flex_body_list[idx1], flex_body_list[idx2]),
-          )
-
-    # flex-flex collision
-    for fj in range(fi + 1, mjm.nflex):
-      fct_j = mjm.flex_contype[fj]
-      fca_j = mjm.flex_conaffinity[fj]
-      if (fct & fca_j) or (fct_j & fca):
-        dim_i = mjm.flex_dim[fi]
-        dim_j = mjm.flex_dim[fj]
-        nnz_flex_flex = (dim_i + dim_j + 2) * 3
-        max_contact_nnz = max(max_contact_nnz, nnz_flex_flex)
-
+  # contact constraints: njmax rows at max contact non-zeros
+  max_contact_nnz = _calculate_max_contact_nnz(mjm)
   total_nnz += njmax * max_contact_nnz
 
   return int(min(max(total_nnz, 1), njmax * mjm.nv))
