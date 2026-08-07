@@ -1323,6 +1323,8 @@ def _default_nconmax(mjm: mujoco.MjModel, mjd: Optional[mujoco.MjData] = None) -
   has_sdf = (mjm.geom_type == mujoco.mjtGeom.mjGEOM_SDF).any()
   has_flex = mjm.nflex > 0
   nconmax = max(mjm.nv * 0.35 * (mjm.nhfield > 0) * 10 + 45, 256 * has_flex, 64 * has_sdf, mjd.ncon if mjd else 0)
+  if nconmax > valid_sizes[-1]:
+    return int(nconmax)
   return int(valid_sizes[np.searchsorted(valid_sizes, nconmax)])
 
 
@@ -1336,6 +1338,8 @@ def _default_njmax(mjm: mujoco.MjModel, mjd: Optional[mujoco.MjData] = None) -> 
   has_sdf = (mjm.geom_type == mujoco.mjtGeom.mjGEOM_SDF).any()
   has_flex = mjm.nflex > 0
   njmax = max(mjm.nv * 2.26 * (mjm.nhfield > 0) * 18 + 53, 512 * has_flex, 256 * has_sdf, mjd.nefc if mjd else 0)
+  if njmax > valid_sizes[-1]:
+    return int(njmax)
   return int(valid_sizes[np.searchsorted(valid_sizes, njmax)])
 
 

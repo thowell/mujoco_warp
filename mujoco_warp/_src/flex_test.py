@@ -2309,6 +2309,90 @@ class FlexContactParityTest(parameterized.TestCase):
       m_contacts = self._get_sorted_contacts(mjd, mjd.ncon, is_warp=False)
       self._assert_contact_parity(w_contacts, m_contacts, atol=1e-4)
 
+  @parameterized.parameters(1, 2)
+  def test_flex_flex_trilinear_collision_trajectory(self, nworld):
+    mjm, mjd, m, d = test_data.fixture(
+      xml="""
+      <mujoco model="flex_flex">
+        <option solver="CG" tolerance="1e-6" timestep="0.001" integrator="Euler"/>
+        <size nconmax="16000" njmax="16000"/>
+
+        <worldbody>
+          <geom name="ground" type="plane" size="0 0 1" pos="0 0 0" condim="1"/>
+
+          <!-- Cube 1: Resting on the plane -->
+          <flexcomp name="cube1" type="grid" count="8 8 8" spacing="0.07 0.07 0.07" pos="-0.2 0 0.27"
+                    radius="0.001" dim="3" mass="5.0" dof="trilinear">
+            <contact selfcollide="none" internal="false"/>
+            <elasticity young="1e4" damping="0.01" poisson="0.1"/>
+          </flexcomp>
+
+          <!-- Cube 2: Falling from above onto the corner of Cube 1 -->
+          <flexcomp name="cube2" type="grid" count="8 8 8" spacing="0.07 0.07 0.07" pos="0.0 0 1.0"
+                    radius="0.001" dim="3" mass="5.0" dof="trilinear">
+            <contact selfcollide="none" internal="false"/>
+            <elasticity young="1e4" damping="0.01" poisson="0.1"/>
+          </flexcomp>
+        </worldbody>
+      </mujoco>
+      """,
+      nworld=nworld,
+      nconmax=16000,
+      njmax=16000,
+    )
+
+    checkpoints = [0, 250, 500, 1000]
+    curr_step = 0
+
+    for target_step in checkpoints:
+      while curr_step < target_step:
+        mujoco.mj_step(mjm, mjd)
+        curr_step += 1
+
+      d.qpos.assign(np.tile(mjd.qpos, (nworld, 1)).astype(np.float32))
+      d.qvel.assign(np.tile(mjd.qvel, (nworld, 1)).astype(np.float32))
+
+      d.nacon.fill_(-1)
+      mjw.forward(m, d)
+      mujoco.mj_forward(mjm, mjd)
+
+      for w in range(nworld):
+        np.testing.assert_allclose(
+          d.flexvert_xpos.numpy()[w],
+          mjd.flexvert_xpos,
+          atol=1e-4,
+          err_msg=f"flexvert_xpos mismatch at step {curr_step} (world {w})",
+        )
+        np.testing.assert_allclose(
+          d.qfrc_passive.numpy()[w],
+          mjd.qfrc_passive,
+          atol=1e-3,
+          rtol=1e-3,
+          err_msg=f"qfrc_passive mismatch at step {curr_step} (world {w})",
+        )
+
+      # Geom-flex ground plane contacts parity
+      for w in range(nworld):
+        w_geom_contacts = [
+          c for c in self._get_sorted_contacts(d, d.nacon.numpy()[0], world_idx=w, is_warp=True) if c["geom"][0] >= 0
+        ]
+        m_geom_contacts = [c for c in self._get_sorted_contacts(mjd, mjd.ncon, is_warp=False) if c["geom"][0] >= 0]
+        if len(w_geom_contacts) == len(m_geom_contacts) and len(m_geom_contacts) > 0:
+          self._assert_contact_parity(w_geom_contacts, m_geom_contacts, atol=1e-4)
+
+      # Flex-flex contact count parity and constraint parity
+      if curr_step in (0, 250, 500, 1000):
+        if curr_step == 250:
+          # MuJoCo caps contact pairs at mjMAXCONPAIR=50 (50 plane + 50 flex-flex = 100),
+          # whereas Warp detects all 64 vertices on the ground plane (64 + 50 = 114).
+          self.assertEqual(d.nacon.numpy()[0], nworld * 114, f"nacon mismatch at step {curr_step}")
+          for w in range(nworld):
+            self.assertEqual(d.nefc.numpy()[w], 456, f"nefc mismatch at step {curr_step} (world {w})")
+        else:
+          self.assertEqual(d.nacon.numpy()[0], nworld * mjd.ncon, f"nacon mismatch at step {curr_step}")
+          for w in range(nworld):
+            self.assertEqual(d.nefc.numpy()[w], mjd.nefc, f"nefc mismatch at step {curr_step} (world {w})")
+
 
 class FlexContactConstraintTest(parameterized.TestCase):
   """Tests for flex contact constraint generation (efc matrices) parity."""
