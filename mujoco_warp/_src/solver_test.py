@@ -212,9 +212,10 @@ class SolverTest(parameterized.TestCase):
     solver_niter = wp.zeros(1, dtype=int)
     nsolving = wp.ones(1, dtype=int)
     done = wp.zeros(1, dtype=bool)
+    overflow = wp.zeros(1, dtype=int)
 
     wp.launch(
-      solver._solve_done,
+      solver._solve_done(False),
       dim=1,
       inputs=[
         1,
@@ -226,12 +227,71 @@ class SolverTest(parameterized.TestCase):
         wp.array([2.0e-6], dtype=float),
         done,
       ],
-      outputs=[solver_niter, nsolving, done],
+      outputs=[solver_niter, overflow, nsolving, done],
     )
 
     self.assertTrue(done.numpy()[0])
     self.assertEqual(solver_niter.numpy()[0], 1)
     self.assertEqual(nsolving.numpy()[0], 0)
+    self.assertEqual(overflow.numpy()[0], 0)
+
+  def test_solve_done_iterations_overflow(self):
+    """Newton records overflow when iteration limit reached without convergence."""
+    solver_niter = wp.zeros(1, dtype=int)
+    nsolving = wp.ones(1, dtype=int)
+    done = wp.zeros(1, dtype=bool)
+    overflow = wp.zeros(1, dtype=int)
+
+    wp.launch(
+      solver._solve_done(False),
+      dim=1,
+      inputs=[
+        1,
+        wp.array([1.0e-6], dtype=float),
+        1,
+        wp.array([1.0], dtype=float),
+        wp.array([1.0], dtype=float),
+        wp.array([1.0], dtype=float),
+        wp.array([1.0], dtype=float),
+        done,
+      ],
+      outputs=[solver_niter, overflow, nsolving, done],
+    )
+
+    self.assertTrue(done.numpy()[0])
+    self.assertEqual(solver_niter.numpy()[0], 1)
+    self.assertEqual(nsolving.numpy()[0], 0)
+    self.assertTrue(overflow.numpy()[0] & types.OverflowType.ITERATIONS)
+
+  def test_solve_cg_finalize_iterations_overflow(self):
+    """CG records overflow when iteration limit reached without convergence."""
+    solver_niter = wp.zeros(1, dtype=int)
+    nsolving = wp.ones(1, dtype=int)
+    done = wp.zeros(1, dtype=bool)
+    overflow = wp.zeros(1, dtype=int)
+    beta = wp.zeros(1, dtype=float)
+
+    wp.launch(
+      solver._solve_cg_finalize(False),
+      dim=1,
+      inputs=[
+        1,
+        wp.array([1.0e-6], dtype=float),
+        1,
+        wp.array([1.0], dtype=float),
+        wp.array([1.0], dtype=float),
+        wp.array([1.0], dtype=float),
+        wp.array([1.0], dtype=float),
+        done,
+        wp.array([1.0], dtype=float),
+      ],
+      outputs=[solver_niter, overflow, beta, nsolving, done],
+    )
+
+    self.assertTrue(done.numpy()[0])
+    self.assertEqual(solver_niter.numpy()[0], 1)
+    self.assertEqual(nsolving.numpy()[0], 0)
+    self.assertTrue(overflow.numpy()[0] & types.OverflowType.ITERATIONS)
 
   # Transition cases use powers of two so the exact delta is below the absolute-cost ulp.
   @parameterized.named_parameters(
@@ -571,6 +631,52 @@ class SolverTest(parameterized.TestCase):
 
     self.assertGreater(d.qacc.numpy()[0, 0], 0.03)
     self.assertGreater(ctx.improvement.numpy()[0], 5.0e-4)
+
+  def test_linesearch_iterations_overflow(self):
+    """Linesearch records overflow when iteration limit reached without convergence."""
+    _, _, m, d = test_data.fixture(
+      "constraints.xml",
+      overrides={
+        "opt.cone": ConeType.PYRAMIDAL,
+        "opt.jacobian": mujoco.mjtJacobian.mjJAC_DENSE,
+        "opt.iterations": 0,
+        "opt.ls_iterations": 0,
+      },
+    )
+    ctx = solver._create_solver_context(m, d)
+
+    m.stat.meaninertia.fill_(1.0e9)
+    d.ne = wp.array([1], dtype=int)
+    d.nf = wp.array([0], dtype=int)
+    d.nefc = wp.array([4], dtype=int)
+    d.nacon = wp.array([0], dtype=int)
+    d.M.zero_()
+    d.qacc.zero_()
+    d.efc.Ma.zero_()
+    d.qfrc_smooth.zero_()
+
+    efc_j = np.zeros(d.efc.J.shape, dtype=np.float32)
+    efc_j[0, :4, 0] = [1.0, -1.0, -1.0, 1.0]
+    d.efc.J.assign(efc_j)
+
+    efc_d = np.zeros(d.efc.D.shape, dtype=np.float32)
+    efc_d[0, :4] = [0.0030866014, 1.7318993, 4555.986, 0.14425136]
+    d.efc.D.assign(efc_d)
+    d.efc.frictionloss.zero_()
+
+    search = np.zeros(ctx.search.shape, dtype=np.float32)
+    search[0, 0] = 1.0
+    ctx.search.assign(search)
+    jaref = np.zeros(ctx.Jaref.shape, dtype=np.float32)
+    jaref[0, :4] = [-4.634305, 1.5213286, 0.03916324, 1.388601]
+    ctx.Jaref.assign(jaref)
+    ctx.search_dot.fill_(1.0)
+    ctx.done.fill_(False)
+    ctx.search_unchanged.fill_(False)
+
+    solver._linesearch(m, d, ctx)
+
+    self.assertTrue(d.overflow.numpy()[0] & types.OverflowType.LS_ITERATIONS)
 
   @parameterized.parameters(
     (ConeType.PYRAMIDAL, SolverType.CG, 10, 5, mujoco.mjtJacobian.mjJAC_DENSE),
