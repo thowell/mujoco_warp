@@ -159,6 +159,8 @@ class OverflowType(enum.IntFlag):
     CONTACT_MATCH: contact match sensor overflow
     NVMAX: nvmax overflow (islands)
     EPA_HORIZON: EPA horizon buffer overflow
+    ITERATIONS: solver iteration limit reached
+    LS_ITERATIONS: linesearch iteration limit reached
   """
 
   NEFC = 1 << 0
@@ -170,6 +172,8 @@ class OverflowType(enum.IntFlag):
   CONTACT_MATCH = 1 << 6
   NVMAX = 1 << 7
   EPA_HORIZON = 1 << 8
+  ITERATIONS = 1 << 9
+  LS_ITERATIONS = 1 << 10
 
 
 class CamLightType(enum.IntEnum):
