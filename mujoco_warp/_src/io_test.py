@@ -1085,6 +1085,236 @@ class IOTest(parameterized.TestCase):
     with self.assertRaises(ValueError, msg="naccdmax.*naconmax"):
       mjwarp.put_data(mjm, mjd, nconmax=16, naconmax=16, naccdmax=17)
 
+  def test_put_data_island(self):
+    """Test that all island fields are correctly initialized from MjData by put_data."""
+    xml = """
+    <mujoco>
+      <worldbody>
+        <body name="a1">
+          <joint type="free"/>
+          <geom size=".1"/>
+        </body>
+        <body name="a2" pos="1 0 0">
+          <joint type="free"/>
+          <geom size=".1"/>
+        </body>
+        <body name="b1" pos="5 0 0">
+          <joint type="free"/>
+          <geom size=".1"/>
+        </body>
+        <body name="b2" pos="6 0 0">
+          <joint type="free"/>
+          <geom size=".1"/>
+        </body>
+        <body name="c_unconstrained" pos="10 0 0">
+          <joint type="free"/>
+          <geom size=".1"/>
+        </body>
+      </worldbody>
+      <equality>
+        <weld body1="a1" body2="a2"/>
+        <weld body1="b1" body2="b2"/>
+      </equality>
+    </mujoco>
+    """
+    nworld = 2
+    mjm, mjd, _, d = test_data.fixture(xml=xml, nworld=nworld)
+
+    self.assertGreater(mjd.nisland, 0)
+    self.assertGreater(mjd.nidof, 0)
+    self.assertGreater(mjd.nefc, 0)
+
+    nisland = mjd.nisland
+    nidof = mjd.nidof
+    nefc = mjd.nefc
+
+    fields = [
+      ("tree_island", mjm.ntree),
+      ("dof_island", mjm.nv),
+      ("island_dofadr", nisland),
+      ("island_idofadr", nisland),
+      ("island_nv", nisland),
+      ("island_nefc", nisland),
+      ("island_ne", nisland),
+      ("island_nf", nisland),
+      ("island_iefcadr", nisland),
+      ("map_dof2idof", mjm.nv),
+      ("map_idof2dof", mjm.nv),
+      ("map_efc2iefc", nefc),
+      ("map_iefc2efc", nefc),
+    ]
+
+    for w in range(nworld):
+      # Test warp helper island ID arrays
+      dof_islandid = d.dof_islandid.numpy()[w]
+      np.testing.assert_array_equal(dof_islandid[:nidof], mjd.dof_island[mjd.map_idof2dof[:nidof]])
+      np.testing.assert_array_equal(dof_islandid[nidof:], np.full(mjm.nv - nidof, -1))
+      np.testing.assert_array_equal(d.efc_islandid.numpy()[w, :nefc], mjd.efc_island[mjd.map_iefc2efc[:nefc]])
+
+      # Test roundtrip with get_data_into
+      result = mujoco.MjData(mjm)
+      mujoco.mj_forward(mjm, result)
+      mjwarp.get_data_into(result, mjm, d, world_id=w)
+
+      for obj in (d, result):
+        get_val = lambda name: getattr(obj, name).numpy()[w] if obj is d else getattr(obj, name)
+        self.assertEqual(get_val("nisland"), nisland)
+        self.assertEqual(get_val("nidof"), nidof)
+        for name, sz in fields:
+          np.testing.assert_array_equal(get_val(name)[:sz], getattr(mjd, name)[:sz])
+        np.testing.assert_array_equal(
+          obj.efc.island.numpy()[w, :nefc] if obj is d else obj.efc_island[:nefc],
+          mjd.efc_island[:nefc],
+        )
+
+  def test_put_data_island_unconstrained(self):
+    """Test put_data island initialization for unconstrained model (nisland=0)."""
+    xml = """
+    <mujoco>
+      <worldbody>
+        <body name="free_body">
+          <joint type="free"/>
+          <geom size=".1"/>
+        </body>
+      </worldbody>
+    </mujoco>
+    """
+    nworld = 2
+    mjm, mjd, _, d = test_data.fixture(xml=xml, nworld=nworld)
+
+    self.assertEqual(mjd.nisland, 0)
+    self.assertEqual(mjd.nefc, 0)
+
+    for w in range(nworld):
+      self.assertEqual(d.nisland.numpy()[w], 0)
+      self.assertEqual(d.nidof.numpy()[w], 0)
+      np.testing.assert_array_equal(d.tree_island.numpy()[w], np.full(mjm.ntree, -1))
+      np.testing.assert_array_equal(d.dof_island.numpy()[w], np.full(mjm.nv, -1))
+      np.testing.assert_array_equal(d.dof_islandid.numpy()[w], np.full(mjm.nv, -1))
+      np.testing.assert_array_equal(d.efc_islandid.numpy()[w], np.full(d.njmax, -1))
+
+  @parameterized.parameters(1, 2)
+  def test_put_data_island_sleep(self, nworld):
+    """Test put_data with sleeping islands and verify they remain asleep after a Warp step."""
+    mjm, mjd, _, _ = test_data.fixture(
+      xml="""
+      <mujoco>
+        <option sleep_tolerance="0.01" gravity="0 0 0">
+          <flag sleep="enable" island="enable"/>
+        </option>
+        <worldbody>
+          <body name="a1">
+            <joint type="free"/>
+            <geom size=".1"/>
+          </body>
+          <body name="a2" pos="1 0 0">
+            <joint type="free"/>
+            <geom size=".1"/>
+          </body>
+          <body name="b1" pos="5 0 0">
+            <joint type="free"/>
+            <geom size=".1"/>
+          </body>
+          <body name="b2" pos="6 0 0">
+            <joint type="free"/>
+            <geom size=".1"/>
+          </body>
+          <body name="c1" pos="10 0 0">
+            <joint name="j_c1" type="free"/>
+            <geom size=".1"/>
+          </body>
+          <body name="c2" pos="11 0 0">
+            <joint name="j_c2" type="free"/>
+            <geom size=".1"/>
+          </body>
+        </worldbody>
+        <equality>
+          <weld body1="a1" body2="a2"/>
+          <weld body1="b1" body2="b2"/>
+          <weld body1="c1" body2="c2"/>
+        </equality>
+      </mujoco>
+      """
+    )
+
+    # Set velocity for island 2 so it stays awake while islands 0 and 1 go to sleep
+    mjd.qvel[24] = 1.0
+    mjd.qvel[30] = 1.0
+
+    for _ in range(mujoco.mjMINAWAKE + 1):
+      mujoco.mj_step(mjm, mjd)
+
+    self.assertEqual(mjd.nisland, 1)
+    self.assertTrue(np.all(mjd.tree_asleep[:4] >= 0))
+    self.assertTrue(np.all(mjd.tree_asleep[4:] < 0))
+    self.assertTrue(np.all(mjd.tree_awake[:4] == 0))
+    self.assertTrue(np.all(mjd.tree_awake[4:] == 1))
+    self.assertEqual(mjd.body_awake[0], types.SleepState.STATIC)
+    self.assertTrue(np.all(mjd.body_awake[1:5] == types.SleepState.ASLEEP))
+    self.assertTrue(np.all(mjd.body_awake[5:7] == types.SleepState.AWAKE))
+
+    m = mjwarp.put_model(mjm)
+    d = io.put_data(mjm, mjd, nworld=nworld)
+
+    nisland = mjd.nisland
+    nidof = mjd.nidof
+    nefc = mjd.nefc
+
+    fields = [
+      ("tree_island", mjm.ntree),
+      ("dof_island", mjm.nv),
+      ("island_dofadr", nisland),
+      ("island_idofadr", nisland),
+      ("island_nv", nisland),
+      ("island_nefc", nisland),
+      ("island_ne", nisland),
+      ("island_nf", nisland),
+      ("island_iefcadr", nisland),
+      ("map_dof2idof", mjm.nv),
+      ("map_idof2dof", mjm.nv),
+      ("map_efc2iefc", nefc),
+      ("map_iefc2efc", nefc),
+    ]
+
+    for w in range(nworld):
+      # Test roundtrip with get_data_into
+      result = mujoco.MjData(mjm)
+      io.get_data_into(result, mjm, d, world_id=w)
+
+      for obj in (d, result):
+        get_val = lambda name: getattr(obj, name).numpy()[w] if obj is d else getattr(obj, name)
+        self.assertEqual(get_val("nisland"), nisland)
+        self.assertEqual(get_val("nidof"), nidof)
+        for name, sz in fields:
+          np.testing.assert_array_equal(get_val(name)[:sz], getattr(mjd, name)[:sz])
+        np.testing.assert_array_equal(
+          obj.efc.island.numpy()[w, :nefc] if obj is d else obj.efc_island[:nefc],
+          mjd.efc_island[:nefc],
+        )
+        np.testing.assert_array_equal(get_val("tree_asleep"), mjd.tree_asleep)
+        np.testing.assert_array_equal(get_val("body_awake"), mjd.body_awake)
+
+      np.testing.assert_array_equal(d.dof_islandid.numpy()[w, :nidof], mjd.dof_island[mjd.map_idof2dof[:nidof]])
+      np.testing.assert_array_equal(d.efc_islandid.numpy()[w, :nefc], mjd.efc_island[mjd.map_iefc2efc[:nefc]])
+      np.testing.assert_array_equal(d.tree_awake.numpy()[w], (mjd.tree_asleep < 0).astype(int))
+
+    mjwarp.step(m, d)
+
+    # Verify that sleeping islands remain asleep and the awake island remains awake after stepping.
+    for w in range(nworld):
+      np.testing.assert_array_equal(d.tree_asleep.numpy()[w][:4], mjd.tree_asleep[:4])
+      self.assertTrue(np.all(d.tree_asleep.numpy()[w][4:] < 0))
+      np.testing.assert_array_equal(d.tree_awake.numpy()[w], [0, 0, 0, 0, 1, 1])
+      self.assertEqual(d.ntree_awake.numpy()[w], 2)
+      self.assertEqual(d.body_awake.numpy()[w, 0], types.SleepState.STATIC)
+      self.assertTrue(np.all(d.body_awake.numpy()[w, 1:5] == types.SleepState.ASLEEP))
+      self.assertTrue(np.all(d.body_awake.numpy()[w, 5:7] == types.SleepState.AWAKE))
+      self.assertEqual(d.nbody_awake.numpy()[w], 3)
+      self.assertEqual(d.nv_awake.numpy()[w], 12)
+      np.testing.assert_array_equal(d.qvel.numpy()[w, :24], np.zeros(24))
+      np.testing.assert_array_equal(d.qacc.numpy()[w, :24], np.zeros(24))
+      self.assertTrue(np.any(d.qvel.numpy()[w, 24:] != 0.0))
+
   def test_noslip_solver(self):
     with self.assertRaises(NotImplementedError):
       test_data.fixture(
