@@ -127,20 +127,27 @@ def _ray_quad(a: float, b: float, c: float) -> Tuple[float, wp.vec2]:
 
 @wp.func
 def _orthogonal_basis(vec: wp.vec3) -> Tuple[wp.vec3, wp.vec3]:
-  """Computes two orthogonal basis vectors b0, b1 perpendicular to vec."""
-  if wp.abs(vec[0]) < wp.abs(vec[1]):
-    if wp.abs(vec[0]) < wp.abs(vec[2]):
-      b0 = wp.vec3(0.0, vec[2], -vec[1])
-    else:
-      b0 = wp.vec3(vec[1], -vec[0], 0.0)
-  else:
-    if wp.abs(vec[1]) < wp.abs(vec[2]):
-      b0 = wp.vec3(-vec[2], 0.0, vec[0])
-    else:
-      b0 = wp.vec3(vec[1], -vec[0], 0.0)
+  """Computes two orthonormal basis vectors b0, b1 perpendicular to unit vector vec.
 
-  b0 = wp.normalize(b0)
-  b1 = wp.normalize(wp.cross(vec, b0))
+  Reference:
+    Duff et al. (2017), "Building an Orthonormal Basis, Revisited", JCGT 6(1).
+    Refines Frisvad (2012), "Building an Orthonormal Basis from a 3D Unit Vector
+    Without Normalization", JCGT 1(1), to remove the singularity without branching.
+  """
+  sign = wp.where(vec[2] >= 0.0, 1.0, -1.0)
+  a = -1.0 / (sign + vec[2])
+  b = vec[0] * vec[1] * a
+
+  b0 = wp.vec3(
+    1.0 + sign * vec[0] * vec[0] * a,
+    sign * b,
+    -sign * vec[0],
+  )
+  b1 = wp.vec3(
+    b,
+    sign + vec[1] * vec[1] * a,
+    -vec[1],
+  )
   return b0, b1
 
 

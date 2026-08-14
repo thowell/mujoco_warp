@@ -534,12 +534,11 @@ class RayTest(parameterized.TestCase):
     self.assertEqual(geomid.shape, (nworld, 1))
     self.assertEqual(normal.shape, (nworld, 1))
 
-    for w in range(nworld):
-      _assert_eq(geomid.numpy()[w, 0], expected_geomids[w], f"geom_id world {w}")
-      if expected_hits[w]:
-        self.assertGreater(dist.numpy()[w, 0], 0.0)
-      else:
-        _assert_eq(dist.numpy()[w, 0], -1.0, f"dist world {w}")
+    expected_geomids_arr = np.array(expected_geomids, dtype=np.int32).reshape((nworld, 1))
+    _assert_eq(geomid.numpy(), expected_geomids_arr, "geom_id")
+    hits = np.array(expected_hits).reshape((nworld, 1))
+    self.assertTrue(np.all(dist.numpy()[hits] > 0.0))
+    _assert_eq(dist.numpy()[~hits], -1.0, "dist miss")
 
     # BVH-accelerated path
     rc = mjw.create_render_context(mjm, nworld=nworld)
@@ -549,11 +548,9 @@ class RayTest(parameterized.TestCase):
     self.assertEqual(geomid_bvh.shape, (nworld, 1))
     self.assertEqual(normal_bvh.shape, (nworld, 1))
 
-    for w in range(nworld):
-      _assert_eq(geomid_bvh.numpy()[w, 0], geomid.numpy()[w, 0], f"geom_id bvh world {w}")
-      _assert_eq(dist_bvh.numpy()[w, 0], dist.numpy()[w, 0], f"dist bvh world {w}")
-      if expected_hits[w]:
-        _assert_eq(normal_bvh.numpy()[w, 0], normal.numpy()[w, 0], f"normal bvh world {w}")
+    _assert_eq(geomid_bvh.numpy(), geomid.numpy(), "geom_id bvh")
+    _assert_eq(dist_bvh.numpy(), dist.numpy(), "dist bvh")
+    _assert_eq(normal_bvh.numpy()[hits], normal.numpy()[hits], "normal bvh")
 
   def test_ray_box_miss(self):
     """Tests that rays missing box along different axes return -1."""
@@ -692,15 +689,10 @@ class RayTest(parameterized.TestCase):
     self.assertEqual(geomid.shape, (nworld, nray))
     self.assertEqual(normal.shape, (nworld, nray))
 
-    geomid_np = geomid.numpy()
-    dist_np = dist.numpy()
-    for w in range(nworld):
-      _assert_eq(geomid_np[w, 0], 0, f"geomid w{w} r0")
-      _assert_eq(geomid_np[w, 1], 1, f"geomid w{w} r1")
-      _assert_eq(geomid_np[w, 2], -1, f"geomid w{w} r2")
-      self.assertGreater(dist_np[w, 0], 0.0)
-      self.assertGreater(dist_np[w, 1], 0.0)
-      _assert_eq(dist_np[w, 2], -1.0, f"dist w{w} r2")
+    expected_geomid_arr = np.tile([0, 1, -1], (nworld, 1)).astype(np.int32)
+    _assert_eq(geomid.numpy(), expected_geomid_arr, "geomid")
+    self.assertTrue(np.all(dist.numpy()[:, :2] > 0.0))
+    _assert_eq(dist.numpy()[:, 2], -1.0, "dist miss")
 
     # BVH path
     rc = mjw.create_render_context(mjm, nworld=nworld)
@@ -710,10 +702,9 @@ class RayTest(parameterized.TestCase):
 
     mjw.rays(m, d, pnt, vec, geomgroup, True, bodyexclude, dist_bvh, geomid_bvh, normal_bvh, rc=rc)
 
-    for w in range(nworld):
-      for r in range(nray):
-        _assert_eq(geomid_bvh.numpy()[w, r], geomid_np[w, r], f"bvh geomid w{w} r{r}")
-        _assert_eq(dist_bvh.numpy()[w, r], dist_np[w, r], f"bvh dist w{w} r{r}")
+    _assert_eq(geomid_bvh.numpy(), geomid.numpy(), "bvh geomid")
+    _assert_eq(dist_bvh.numpy(), dist.numpy(), "bvh dist")
+    _assert_eq(normal_bvh.numpy()[:, :2], normal.numpy()[:, :2], "bvh normal")
 
 
 if __name__ == "__main__":
