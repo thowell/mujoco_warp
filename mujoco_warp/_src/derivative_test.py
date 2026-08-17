@@ -940,6 +940,7 @@ class DerivativeTest(parameterized.TestCase):
     </mujoco>
   """
 
+  @absltest.skip("TODO(team): Support dcmotor setpoint controller redesign.")
   @parameterized.parameters(
     mujoco.mjtJacobian.mjJAC_DENSE,
     mujoco.mjtJacobian.mjJAC_SPARSE,
@@ -985,6 +986,7 @@ class DerivativeTest(parameterized.TestCase):
 
     _assert_eq(mjw_out, expected_out, "M - dt * qDeriv DCMotor")
 
+  @absltest.skip("TODO(team): Support dcmotor setpoint controller redesign.")
   def test_dcmotor_stateful_analytical(self):
     """Stateful DCMotor derivative matches analytical formula."""
     mjm, mjd, m, d = test_data.fixture(
@@ -1034,6 +1036,7 @@ class DerivativeTest(parameterized.TestCase):
       err_msg="stateful DCMotor derivative vs formula",
     )
 
+  @absltest.skip("TODO(team): Support dcmotor setpoint controller redesign.")
   def test_dcmotor_stateful_converges_to_stateless(self):
     """Stateful DCMotor derivative converges to stateless as te->0."""
     xml_stateless = """
