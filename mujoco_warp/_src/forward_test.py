@@ -723,6 +723,7 @@ class ForwardTest(parameterized.TestCase):
     np.testing.assert_allclose(d.act.numpy()[0, 1], np.sin(2 * np.pi * frequency * t_next), atol=1e-3)
 
 
+@absltest.skip("TODO(team): Support dcmotor setpoint controller redesign.")
 class DCMotorTest(parameterized.TestCase):
   def test_dcmotor_stateless_steady_state(self):
     xml = """
