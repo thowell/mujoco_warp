@@ -723,7 +723,6 @@ class ForwardTest(parameterized.TestCase):
     np.testing.assert_allclose(d.act.numpy()[0, 1], np.sin(2 * np.pi * frequency * t_next), atol=1e-3)
 
 
-@absltest.skip("TODO(team): Support dcmotor setpoint controller redesign.")
 class DCMotorTest(parameterized.TestCase):
   def test_dcmotor_stateless_steady_state(self):
     xml = """
@@ -1227,6 +1226,7 @@ class DCMotorTest(parameterized.TestCase):
     force_actual = d.actuator_force.numpy()[0, 0]
     np.testing.assert_allclose(force_actual, 0.025097, atol=1e-5)
 
+  @absltest.skip("TODO(team): Support dcmotor setpoint controller redesign.")
   def test_dcmotor_int_velocity_equivalence(self):
     xml = """
     <mujoco>
@@ -1419,6 +1419,7 @@ class DCMotorTest(parameterized.TestCase):
     # Expect act_dot to be close to zero
     np.testing.assert_allclose(act_dot, 0.0, atol=1e-4)
 
+  @absltest.skip("TODO(team): Support dcmotor setpoint controller redesign.")
   def test_dcmotor_thermal_affects_force_with_controller(self):
     xml = """
     <mujoco>
@@ -1465,6 +1466,7 @@ class DCMotorTest(parameterized.TestCase):
     force_actual = d.actuator_force.numpy()[0, 0]
     np.testing.assert_allclose(force_actual, force_expected, atol=1e-5)
 
+  @absltest.skip("TODO(team): Support dcmotor setpoint controller redesign.")
   def test_dcmotor_stateless_position_mode(self):
     xml = """
     <mujoco>
@@ -1510,6 +1512,7 @@ class DCMotorTest(parameterized.TestCase):
     force_actual = d.actuator_force.numpy()[0, 0]
     np.testing.assert_allclose(force_actual, 0.2225, atol=1e-5)
 
+  @absltest.skip("TODO(team): Support dcmotor setpoint controller redesign.")
   def test_dcmotor_stateless_velocity_mode(self):
     xml = """
     <mujoco>
@@ -1546,6 +1549,7 @@ class DCMotorTest(parameterized.TestCase):
     force_actual = d.actuator_force.numpy()[0, 0]
     np.testing.assert_allclose(force_actual, 0.22375, atol=1e-5)
 
+  @absltest.skip("TODO(team): Support dcmotor setpoint controller redesign.")
   def test_dcmotor_stateful_velocity_mode(self):
     xml = """
     <mujoco>
@@ -1717,6 +1721,7 @@ class DCMotorTest(parameterized.TestCase):
     act_dot_actual = d.act_dot.numpy()[0, adr]
     np.testing.assert_allclose(act_dot_actual, -dimax, atol=1e-5)
 
+  @absltest.skip("TODO(team): Support dcmotor setpoint controller redesign.")
   def test_dcmotor_voltage_limit(self):
     xml = """
     <mujoco>
@@ -1755,6 +1760,7 @@ class DCMotorTest(parameterized.TestCase):
     force_actual = d.actuator_force.numpy()[0, 0]
     np.testing.assert_allclose(force_actual, -0.25, atol=1e-5)
 
+  @absltest.skip("TODO(team): Support dcmotor setpoint controller redesign.")
   def test_dcmotor_integral_clamp(self):
     xml = """
     <mujoco>
