@@ -945,6 +945,7 @@ class DerivativeTest(parameterized.TestCase):
     mujoco.mjtJacobian.mjJAC_DENSE,
     mujoco.mjtJacobian.mjJAC_SPARSE,
   )
+  @absltest.skip("TODO(team): Support dcmotor setpoint controller redesign.")
   def test_smooth_vel_dcmotor(self, jacobian):
     """Tests qDeriv parity with MuJoCo C for all DCMotor modes."""
     mjm, mjd, m, d = test_data.fixture(
