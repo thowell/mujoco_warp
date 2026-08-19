@@ -2507,6 +2507,16 @@ class RenderContext:
       fallback are controlled by `use_ambient_lighting`.
     geom_ray_types: tuple of GeomType int values present in the scene, used to
       statically eliminate unused intersection branches in the ray-cast kernels.
+    splat_position: Splat centers in world coordinates (nsplat, 3)
+    splat_rotation: Splat rotation as (w, x, y, z) (nsplat, 4)
+    splat_scale: Splat scale as standard deviation in each dimension (nsplat, 3)
+    splat_rgba: Splat color and opacity (nsplat, 4)
+    splat_bvh: Splat BVH
+    splat_lower: Splat lower bounds
+    splat_upper: Splat upper bounds
+    splat_bvh_id: Splat BVH id
+    splat_group_root: Per-world selected splat BVH root
+    splat_count: Number of splats
   """
 
   nrender: int
@@ -2571,4 +2581,14 @@ class RenderContext:
   enable_per_light_ambient: bool
   light_attenuation_is_default: bool
   has_spot_lights: bool
+  splat_position: array("*", wp.vec3)
+  splat_rotation: array("*", wp.quat)
+  splat_scale: array("*", wp.vec3)
+  splat_rgba: array("*", wp.vec4)
+  splat_bvh: Optional[wp.Bvh]
+  splat_lower: array("*", wp.vec3)
+  splat_upper: array("*", wp.vec3)
+  splat_bvh_id: wp.uint64
+  splat_group_root: array("nworld", int)
+  splat_count: int
   geom_ray_types: tuple = ()

@@ -4104,6 +4104,12 @@ def create_render_context(
   enable_specular: bool = True,
   enable_emission: bool = True,
   enable_per_light_ambient: bool = True,
+  splat_position: np.ndarray | None = None,
+  splat_rotation: np.ndarray | None = None,
+  splat_scale: np.ndarray | None = None,
+  splat_rgba: np.ndarray | None = None,
+  splat_adr: np.ndarray | None = None,
+  splat_group_id: np.ndarray | None = None,
 ) -> types.RenderContext:
   """Creates a render context on device.
 
@@ -4147,6 +4153,14 @@ def create_render_context(
                               the per-light ambient pass is removed at compile
                               time. Disable for performance when model lights
                               do not use ambient colors.
+    splat_position: Splat centers in world coordinates (nsplat, 3).
+    splat_rotation: Splat rotations as (w, x, y, z) (nsplat, 4).
+    splat_scale: Splat scales as standard deviation in each dimension (nsplat, 3).
+    splat_rgba: Splat color and opacity (nsplat, 4).
+    splat_adr: Offset of each splat in the splat attribute arrays,
+               if None then all splats are in one group.
+    splat_group_id: Splat id for each world (nworld,). If None then all worlds
+                    use the first splat group.
 
   Returns:
     The render context containing rendering fields and output arrays on device.
@@ -4155,6 +4169,53 @@ def create_render_context(
   mujoco.mj_forward(mjm, mjd)
 
   constructor = "cubql"
+
+  # Build grouped splat BVH.
+  splat_attribute = (splat_position, splat_rotation, splat_scale, splat_rgba)
+  if splat_position is None:
+    if any(value is not None for value in (*splat_attribute[1:], splat_adr, splat_group_id)):
+      raise ValueError("splat attributes, offsets, and group IDs must be supplied together")
+
+    splat_position = wp.empty(0, dtype=wp.vec3)
+    splat_rotation = wp.empty(0, dtype=wp.quat)
+    splat_scale = wp.empty(0, dtype=wp.vec3)
+    splat_rgba = wp.empty(0, dtype=wp.vec4)
+    splat_bvh = None
+    splat_bvh_id = wp.uint64(0)
+    splat_lower = wp.empty(0, dtype=wp.vec3)
+    splat_upper = wp.empty(0, dtype=wp.vec3)
+    splat_group_root = wp.empty(nworld, dtype=int)
+    splat_count = 0
+  else:
+    nsplat = splat_position.shape[0]
+    if (
+      splat_position.shape != (nsplat, 3)
+      or splat_rotation.shape != (nsplat, 4)
+      or splat_scale.shape != (nsplat, 3)
+      or splat_rgba.shape != (nsplat, 4)
+    ):
+      raise ValueError("splat attributes must have shapes (nsplat, 3), (nsplat, 4), (nsplat, 3), and (nsplat, 4)")
+    if splat_adr is not None and splat_adr.ndim != 1:
+      raise ValueError("splat_adr must be one-dimensional")
+    if splat_group_id is not None and splat_group_id.shape != (nworld,):
+      raise ValueError("splat_group_id must be of shape (nworld,)")
+
+    if splat_adr is None:
+      splat_adr = np.array([0, splat_position.shape[0]], dtype=np.int32)
+    if splat_group_id is None:
+      splat_group_id = np.zeros(nworld, dtype=np.int32)
+    (
+      splat_position,
+      splat_rotation,
+      splat_scale,
+      splat_rgba,
+      splat_bvh,
+      splat_bvh_id,
+      splat_lower,
+      splat_upper,
+      splat_group_root,
+      splat_count,
+    ) = bvh.build_splat_bvh(*splat_attribute, splat_adr, splat_group_id, constructor="sah")
 
   # Mesh BVHs – build for all meshes so per-world variants are available
   nmesh = mjm.nmesh
@@ -4401,6 +4462,16 @@ def create_render_context(
     enable_per_light_ambient=enable_per_light_ambient,
     light_attenuation_is_default=light_attenuation_is_default,
     has_spot_lights=has_spot_lights,
+    splat_position=splat_position,
+    splat_rotation=splat_rotation,
+    splat_scale=splat_scale,
+    splat_rgba=splat_rgba,
+    splat_bvh=splat_bvh,
+    splat_bvh_id=splat_bvh_id,
+    splat_lower=splat_lower,
+    splat_upper=splat_upper,
+    splat_group_root=splat_group_root,
+    splat_count=splat_count,
   )
 
   bvh.build_scene_bvh(mjm, mjd, rc, nworld)
