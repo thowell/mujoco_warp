@@ -16,6 +16,7 @@
 """Tests for io functions."""
 
 import dataclasses
+import tempfile
 import warnings
 from unittest import mock
 
@@ -458,6 +459,56 @@ _MESH_RANDOMIZE_XML = """
 
 
 class IOTest(parameterized.TestCase):
+  @parameterized.named_parameters(
+    dict(
+      testcase_name="control_timestamps",
+      times=np.array([0.0, 0.1, 0.4]),
+      expected_indices=[0, 1, 1, 1, 2, 2, 2],
+    ),
+    dict(
+      testcase_name="interval_boundaries",
+      times=np.array([0.0, 0.1, 0.4, 0.6]),
+      expected_indices=[0, 1, 1, 1, 2, 2],
+    ),
+    dict(
+      testcase_name="substep_interval",
+      times=np.array([0.0, 0.04, 0.06, 0.2]),
+      expected_indices=[0, 2],
+    ),
+    dict(
+      testcase_name="floating_point_boundaries",
+      times=np.array([0.0, 0.3, 0.6, 0.9]),
+      expected_indices=[0, 0, 0, 1, 1, 1, 2, 2, 2],
+    ),
+  )
+  def test_load_trajectory_npz_roundtrip(self, times, expected_indices):
+    model = mujoco.MjModel.from_xml_string(
+      """
+      <mujoco>
+        <option timestep="0.1"/>
+        <worldbody><body><joint name="joint"/><geom size="0.1"/></body></worldbody>
+        <actuator><motor joint="joint"/></actuator>
+      </mujoco>
+      """
+    )
+    data = mujoco.MjData(model)
+    ctrl = np.array([[1.0], [2.0], [3.0]])
+
+    with tempfile.TemporaryDirectory() as tmp_dir:
+      trajectory_path = f"{tmp_dir}/trajectory.npz"
+      np.savez(
+        trajectory_path,
+        ctrl=ctrl,
+        times=times,
+        qpos=np.array([[0.25]]),
+        qvel=np.array([[0.5]]),
+      )
+      loaded_ctrl = io.load_trajectory(trajectory_path, model, data)
+
+    np.testing.assert_array_equal(loaded_ctrl, ctrl[expected_indices])
+    np.testing.assert_array_equal(data.qpos, [0.25])
+    np.testing.assert_array_equal(data.qvel, [0.5])
+
   @parameterized.parameters((47, 48), (48, 64), (63, 64), (64, 80))
   def test_augmented_cholesky_padding(self, nv, expected):
     _, nv_pad = io._get_padded_sizes(nv, 0, False, types.TILE_SIZE_JTDAJ_DENSE, augment_cholesky=True)

@@ -4037,12 +4037,16 @@ def make_trajectory(model: mujoco.MjModel, keys: list[int]) -> np.ndarray:
 def load_trajectory(npz_path: str, mjm: mujoco.MjModel, mjd: mujoco.MjData) -> np.ndarray:
   """Load ctrl sequence from NPZ and interpolate to model timestep.
 
-  If the trajectory dt differs from mjm.opt.timestep, each ctrl value is held
-  constant (zero-order hold) for the appropriate number of physics steps.
+  Controls are sampled on the model timestep using zero-order hold. ``times``
+  may contain one timestamp per control or interval boundaries with one extra
+  final timestamp. For per-control timestamps, the final interval repeats the
+  preceding interval duration, or one model timestep for a single control.
+  Sub-timestep control intervals may be skipped when no model-timestep sample
+  falls within them.
 
   The NPZ file should contain:
     - 'ctrl': array of shape (nstep, nu) with ctrl values
-    - 'times': array of shape (nstep,) with timestamps
+    - 'times': array of shape (nstep,) or (nstep + 1,) with timestamps
     - 'qpos' (optional): array of shape (1, nq) - initial state
     - 'qvel' (optional): array of shape (1, nv) - initial state
   """
@@ -4050,8 +4054,18 @@ def load_trajectory(npz_path: str, mjm: mujoco.MjModel, mjd: mujoco.MjData) -> n
   ctrl = data["ctrl"]
   times = data["times"]
 
+  if ctrl.ndim != 2 or len(ctrl) == 0:
+    raise ValueError(f"ctrl must have shape (nstep, nu) with nstep > 0, got {ctrl.shape}")
   if ctrl.shape[1] != mjm.nu:
     raise ValueError(f"ctrl shape {ctrl.shape} does not match model nu={mjm.nu}")
+  if times.ndim != 1 or len(times) not in (len(ctrl), len(ctrl) + 1):
+    raise ValueError(f"times shape {times.shape} must contain {len(ctrl)} or {len(ctrl) + 1} timestamps")
+  if not np.all(np.isfinite(times)):
+    raise ValueError("times must be finite")
+
+  intervals = np.diff(times)
+  if np.any(intervals <= 0):
+    raise ValueError("times must be strictly increasing")
 
   # set initial state from first frame if available
   if "qpos" in data and data["qpos"].shape[1] == mjm.nq:
@@ -4059,12 +4073,14 @@ def load_trajectory(npz_path: str, mjm: mujoco.MjModel, mjd: mujoco.MjData) -> n
   if "qvel" in data and data["qvel"].shape[1] == mjm.nv:
     mjd.qvel[:] = data["qvel"][0]
 
-  # determine decimation from timing
-  ctrl_dt = (times[1] - times[0]) if len(times) > 1 else mjm.opt.timestep
-  decimation = max(1, round(ctrl_dt / mjm.opt.timestep))
+  if len(times) == len(ctrl):
+    final_dt = intervals[-1] if len(intervals) else mjm.opt.timestep
+    times = np.append(times, times[-1] + final_dt)
 
-  # expand: each ctrl held constant for decimation physics steps
-  return np.repeat(ctrl, decimation, axis=0)
+  n_steps = int(np.round((times[-1] - times[0]) / mjm.opt.timestep))
+  sample_times = times[0] + (np.arange(n_steps) + 1e-7) * mjm.opt.timestep
+  ctrl_indices = np.searchsorted(times, sample_times, side="right") - 1
+  return ctrl[ctrl_indices]
 
 
 @wp.kernel
