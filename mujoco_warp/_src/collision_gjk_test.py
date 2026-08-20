@@ -695,6 +695,21 @@ class GJKTest(parameterized.TestCase):
     dist, _, _, _ = _geom_dist(m, d, 0, 1, pos2=pos, mat2=rot)
     self.assertAlmostEqual(dist, -0.0016624178339902445)
 
+  def test_cylinder_capsule(self):
+    """Test cylinder and a capsule with CCD fallback."""
+    _, _, m, d = test_data.fixture(
+      xml="""
+      <mujoco>
+        <worldbody>
+          <geom type="cylinder" size="2 4" pos="0 0 0"/>
+          <geom type="capsule" size="1 1" pos="0 0 5"/>
+        </worldbody>
+      </mujoco>
+      """
+    )
+    dist, _, _, _ = _geom_dist(m, d, 0, 1)
+    self.assertAlmostEqual(-1.0, dist, places=6)
+
   def test_box_box_float(self):
     """Test box-box under float32."""
     _, _, m, d = test_data.fixture(

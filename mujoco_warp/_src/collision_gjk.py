@@ -2351,6 +2351,10 @@ def gjk_phase(
   x_2: wp.vec3,
 ) -> Tuple[bool, float, int, wp.vec3, wp.vec3, GJKResult, Geom, Geom]:
   """Run GJK phase of CCD."""
+  orig_margin1 = geom1.margin
+  orig_margin2 = geom2.margin
+  orig_size1 = geom1.size
+  orig_size2 = geom2.size
   full_margin1 = 0.0
   full_margin2 = 0.0
   size1 = 0.0
@@ -2387,10 +2391,10 @@ def gjk_phase(
       return False, dist, 1, x1, x2, empty, geom1, geom2
 
     # deep penetration: reset initial conditions and rerun GJK + EPA
-    geom1.margin = full_margin1 - size1
-    geom1.size = wp.vec3(size1, geom1.size[1], geom1.size[2])
-    geom2.margin = full_margin2 - size2
-    geom2.size = wp.vec3(size2, geom2.size[1], geom2.size[2])
+    geom1.margin = orig_margin1
+    geom1.size = orig_size1
+    geom2.margin = orig_margin2
+    geom2.size = orig_size2
     cutoff -= full_margin1 + full_margin2
 
   result = gjk(tolerance, gjk_iterations, geom1, geom2, x_1, x_2, geomtype1, geomtype2, cutoff, is_discrete)
