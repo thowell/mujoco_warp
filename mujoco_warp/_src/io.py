@@ -1610,6 +1610,7 @@ def _allocate_island_arrays(
   njmax_size = njmax if enabled else 0
 
   d.nisland = wp.array(np.full(nworld, mjd.nisland), dtype=int)
+  d.nidof = wp.array(np.full(nworld, mjd.nidof), dtype=int)
   d.tree_island = wp.array(np.tile(mjd.tree_island, (nworld, 1 if enabled else 0)), dtype=int)
   d.dof_island = wp.array(np.tile(mjd.dof_island, (nworld, 1 if enabled else 0)), dtype=int)
 
@@ -1620,7 +1621,6 @@ def _allocate_island_arrays(
   d.island_ne = wp.empty((nworld, ntree_size), dtype=int)
   d.island_nf = wp.empty((nworld, ntree_size), dtype=int)
   d.island_iefcadr = wp.empty((nworld, ntree_size), dtype=int)
-  d.nidof = wp.empty((nworld if enabled else 0,), dtype=int)
   d.map_dof2idof = wp.empty((nworld, nv_size), dtype=int)
   d.map_idof2dof = wp.empty((nworld, nv_size), dtype=int)
   d.map_efc2iefc = wp.empty((nworld, njmax_size), dtype=int)
@@ -2235,6 +2235,16 @@ def get_data_into(
     # TODO(team): if sparse, set nJ based on sparse efc_J
     mujoco._functions._realloc_con_efc(result, ncon=ncon, nefc=nefc, nJ=nefc * mjm.nv)
 
+  # Check island compatibility between MjModel and Data
+  nisland = int(d.nisland.numpy()[world_id])
+  nidof = int(d.nidof.numpy()[world_id]) if nisland > 0 else 0
+  if nisland > 0:
+    needs_realloc = (
+      result.island_idofadr.shape[0] < nisland or result.ifrc_smooth.shape[0] < nidof or result.map_efc2iefc.shape[0] < nefc
+    )
+    if needs_realloc:
+      mujoco._functions._realloc_island(result, nisland=nisland, nidof=nidof)
+
   ne = d.ne.numpy()[world_id]
   nf = d.nf.numpy()[world_id]
   nl = d.nl.numpy()[world_id]
@@ -2406,7 +2416,6 @@ def get_data_into(
   result.efc_frictionloss[:] = d.efc.frictionloss.numpy()[world_id, efc_idx]
   result.efc_state[:] = d.efc.state.numpy()[world_id, efc_idx]
   result.efc_force[:] = d.efc.force.numpy()[world_id, efc_idx]
-  result.efc_island[:] = d.efc.island.numpy()[world_id, efc_idx]
 
   # rne_postconstraint
   result.cacc[:] = d.cacc.numpy()[world_id]
@@ -2431,9 +2440,9 @@ def get_data_into(
   result.body_awake[:] = d.body_awake.numpy()[world_id]
 
   # islands
-  nisland = d.nisland.numpy()[world_id]
   result.nisland = nisland
-  if d.tree_island.shape[1] > 0 and nisland:
+  result.nidof = nidof
+  if nisland > 0:
     result.tree_island[:] = d.tree_island.numpy()[world_id]
     result.dof_island[:] = d.dof_island.numpy()[world_id]
     result.island_idofadr[:nisland] = d.island_idofadr.numpy()[world_id, :nisland]
@@ -2446,6 +2455,7 @@ def get_data_into(
     nv = mjm.nv
     result.map_dof2idof[:nv] = d.map_dof2idof.numpy()[world_id, :nv]
     result.map_idof2dof[:nv] = d.map_idof2dof.numpy()[world_id, :nv]
+    result.efc_island[:] = d.efc.island.numpy()[world_id, efc_idx]
     result.map_efc2iefc[:nefc] = d.map_efc2iefc.numpy()[world_id, :nefc]
     result.map_iefc2efc[:nefc] = d.map_iefc2efc.numpy()[world_id, :nefc]
 

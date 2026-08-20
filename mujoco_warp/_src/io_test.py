@@ -798,6 +798,110 @@ class IOTest(parameterized.TestCase):
         field,
       )
 
+  def test_get_data_into_realloc_island(self):
+    """Verifies initial copy, arena reallocation after reset, and dynamic expansion of islands."""
+    mjm, mjd, m, d = test_data.fixture(
+      xml="""
+      <mujoco>
+        <option>
+          <flag sleep="enable"/>
+        </option>
+        <size memory="100M"/>
+        <worldbody>
+          <body name="b1">
+            <joint type="free"/>
+            <geom size=".1"/>
+          </body>
+          <body name="b2" pos="1 0 0">
+            <joint type="free"/>
+            <geom size=".1"/>
+          </body>
+          <body name="b3" pos="10 0 0">
+            <joint type="free"/>
+            <geom size=".1"/>
+          </body>
+          <body name="b4" pos="11 0 0">
+            <joint type="free"/>
+            <geom size=".1"/>
+          </body>
+        </worldbody>
+        <equality>
+          <weld name="w1" body1="b1" body2="b2"/>
+          <weld name="w2" body1="b3" body2="b4" active="false"/>
+        </equality>
+      </mujoco>
+    """,
+      nworld=1,
+    )
+    mjwarp.forward(m, d)
+    expected_nisland = int(d.nisland.numpy()[0])
+    expected_nidof = int(d.nidof.numpy()[0])
+    self.assertEqual(expected_nisland, 1)
+    self.assertGreater(expected_nidof, 0)
+
+    mjwarp.get_data_into(mjd, mjm, d, world_id=0)
+    self.assertEqual(mjd.nisland, expected_nisland)
+    self.assertEqual(mjd.nidof, expected_nidof)
+    self.assertEqual(mjd.island_idofadr.shape[0], expected_nisland)
+    self.assertEqual(mjd.ifrc_smooth.shape[0], expected_nidof)
+
+    np.testing.assert_array_equal(mjd.tree_island, d.tree_island.numpy()[0])
+    np.testing.assert_array_equal(mjd.dof_island, d.dof_island.numpy()[0])
+    np.testing.assert_array_equal(mjd.island_idofadr[:expected_nisland], d.island_idofadr.numpy()[0, :expected_nisland])
+    np.testing.assert_array_equal(mjd.island_dofadr[:expected_nisland], d.island_dofadr.numpy()[0, :expected_nisland])
+    np.testing.assert_array_equal(mjd.island_nv[:expected_nisland], d.island_nv.numpy()[0, :expected_nisland])
+    np.testing.assert_array_equal(mjd.island_nefc[:expected_nisland], d.island_nefc.numpy()[0, :expected_nisland])
+    np.testing.assert_array_equal(mjd.island_ne[:expected_nisland], d.island_ne.numpy()[0, :expected_nisland])
+    np.testing.assert_array_equal(mjd.island_nf[:expected_nisland], d.island_nf.numpy()[0, :expected_nisland])
+    np.testing.assert_array_equal(mjd.island_iefcadr[:expected_nisland], d.island_iefcadr.numpy()[0, :expected_nisland])
+    np.testing.assert_array_equal(mjd.map_dof2idof[: mjm.nv], d.map_dof2idof.numpy()[0, : mjm.nv])
+    np.testing.assert_array_equal(mjd.map_idof2dof[: mjm.nv], d.map_idof2dof.numpy()[0, : mjm.nv])
+    nefc = int(d.nefc.numpy()[0])
+    np.testing.assert_array_equal(mjd.map_efc2iefc[:nefc], d.map_efc2iefc.numpy()[0, :nefc])
+    np.testing.assert_array_equal(mjd.map_iefc2efc[:nefc], d.map_iefc2efc.numpy()[0, :nefc])
+    np.testing.assert_array_equal(mjd.efc_island[:nefc], d.efc.island.numpy()[0, :nefc])
+
+    mujoco.mj_resetData(mjm, mjd)
+    self.assertEqual(mjd.nisland, 0)
+    mjwarp.get_data_into(mjd, mjm, d, world_id=0)
+    self.assertEqual(mjd.nisland, expected_nisland)
+    self.assertEqual(mjd.nidof, expected_nidof)
+    self.assertEqual(mjd.island_idofadr.shape[0], expected_nisland)
+    d.eq_active.fill_(True)
+    mjwarp.forward(m, d)
+    expected_nisland2 = int(d.nisland.numpy()[0])
+    expected_nidof2 = int(d.nidof.numpy()[0])
+    self.assertEqual(expected_nisland2, 2)
+    self.assertGreater(expected_nidof2, expected_nidof)
+
+    mjwarp.get_data_into(mjd, mjm, d, world_id=0)
+    self.assertEqual(mjd.nisland, expected_nisland2)
+    self.assertEqual(mjd.nidof, expected_nidof2)
+    self.assertEqual(mjd.island_idofadr.shape[0], expected_nisland2)
+    self.assertEqual(mjd.ifrc_smooth.shape[0], expected_nidof2)
+
+  def test_get_data_into_islands_disabled(self):
+    mjm, mjd, m, d = test_data.fixture(
+      xml="""
+      <mujoco>
+        <option>
+          <flag island="disable"/>
+        </option>
+        <worldbody>
+          <body name="b">
+            <joint type="free"/>
+            <geom size=".1"/>
+          </body>
+        </worldbody>
+      </mujoco>
+    """,
+      nworld=1,
+    )
+    mjwarp.forward(m, d)
+    mjwarp.get_data_into(mjd, mjm, d)
+    self.assertEqual(mjd.nisland, 0)
+    self.assertEqual(mjd.nidof, 0)
+
   @parameterized.product(
     xml=_IO_TEST_MODELS,
     cone=list(ConeType),
