@@ -4336,7 +4336,7 @@ def _efc_contact_update(cone_type: types.ConeType, flg_adhesion: bool):
         efc_D = efc_D_out[worldid, efcid]
         if efc_D > 0.0:
           adhesion = adhesion_in[conid]
-          if not wp.static(IS_ELLIPTIC) and dimid > 0:
+          if not wp.static(IS_ELLIPTIC) and condim > 1:
             adhesion = adhesion / float(2 * (condim - 1))
           efc_aref_out[worldid, efcid] += (1.0 / efc_D) * adhesion
 
@@ -4767,7 +4767,7 @@ def _efc_contact_update_flex(cone_type: types.ConeType, flg_adhesion: bool = Fal
         efc_D = efc_D_out[worldid, efcid]
         if efc_D > 0.0:
           adhesion = adhesion_in[conid]
-          if not wp.static(IS_ELLIPTIC):
+          if not wp.static(IS_ELLIPTIC) and condim > 1:
             adhesion = adhesion / float(2 * (condim - 1))
           efc_aref_out[worldid, efcid] += (1.0 / efc_D) * adhesion
 

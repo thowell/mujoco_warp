@@ -1333,6 +1333,43 @@ class CollisionTest(parameterized.TestCase):
     mjw.collision(m, d)
     self.assertEqual(d.nacon.numpy()[0], 0)
 
+  @parameterized.parameters(
+    ("box", "box", 0.18, -0.02),
+    ("box", "box", 0.205, 0.005),
+    ("cylinder", "cylinder", 0.18, -0.02),
+    ("cylinder", "cylinder", 0.205, 0.005),
+  )
+  def test_convex_contact_frame_parity(self, type1, type2, z2, expected_dist):
+    """Test CCD contact frame normal and dist parity against MuJoCo C."""
+    _, mjd, m, d = test_data.fixture(
+      xml=f"""
+      <mujoco>
+        <worldbody>
+          <body pos="0 0 0">
+            <geom type="{type1}" size="0.1 0.1 0.1" gap="0.01"/>
+          </body>
+          <body pos="0 0 {z2}">
+            <freejoint/>
+            <geom type="{type2}" size="0.1 0.1 0.1" gap="0.01"/>
+          </body>
+        </worldbody>
+      </mujoco>
+      """
+    )
+    d.nacon.fill_(-1)
+    d.contact.frame.fill_(wp.inf)
+    d.contact.dist.fill_(wp.inf)
+    mjw.forward(m, d)
+
+    self.assertGreater(mjd.ncon, 0)
+    self.assertGreater(int(d.nacon.numpy()[0]), 0)
+
+    c_norm = mjd.contact.frame[0].reshape((3, 3))[0]
+    w_norm = d.contact.frame.numpy()[0][0]
+    dot = float(np.dot(c_norm, w_norm))
+    self.assertAlmostEqual(dot, 1.0, places=4, msg=f"Frame normal misaligned for {type1}-{type2} at z={z2}")
+    self.assertAlmostEqual(float(d.contact.dist.numpy()[0]), expected_dist, places=4)
+
 
 if __name__ == "__main__":
   absltest.main()

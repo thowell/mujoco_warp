@@ -930,10 +930,10 @@ def ccd_kernel_builder(
       worldid,
     )
 
-    frame = make_frame(witness1[0] - witness2[0])
-    if is_collision_sensor:
-      frame *= -1.0
-      geoms = wp.vec2i(geoms[1], geoms[0])
+    if needs_epa:
+      frame = make_frame(witness1[0] - witness2[0])
+    else:
+      frame = make_frame(witness2[0] - witness1[0])
 
     for i in range(ncollision):
       write_contact(
