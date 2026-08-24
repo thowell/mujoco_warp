@@ -2390,11 +2390,6 @@ def gjk_phase(
   # determine if the geoms being tested are discrete
   is_discrete = _discrete_geoms(geomtype1, geomtype2) and (geom1.margin == 0.0 and geom2.margin == 0.0)
 
-  orig_margin1 = geom1.margin
-  orig_margin2 = geom2.margin
-  orig_size1 = geom1.size
-  orig_size2 = geom2.size
-
   # special handling for sphere and capsule (shrink to point and line respectively)
   if geomtype1 == GeomType.SPHERE or geomtype1 == GeomType.CAPSULE:
     size1 = geom1.size[0]
