@@ -1085,40 +1085,42 @@ class IOTest(parameterized.TestCase):
     with self.assertRaises(ValueError, msg="naccdmax.*naconmax"):
       mjwarp.put_data(mjm, mjd, nconmax=16, naconmax=16, naccdmax=17)
 
-  def test_put_data_island(self):
+  @parameterized.parameters(1, 2)
+  def test_put_data_island(self, nworld):
     """Test that all island fields are correctly initialized from MjData by put_data."""
-    xml = """
-    <mujoco>
-      <worldbody>
-        <body name="a1">
-          <joint type="free"/>
-          <geom size=".1"/>
-        </body>
-        <body name="a2" pos="1 0 0">
-          <joint type="free"/>
-          <geom size=".1"/>
-        </body>
-        <body name="b1" pos="5 0 0">
-          <joint type="free"/>
-          <geom size=".1"/>
-        </body>
-        <body name="b2" pos="6 0 0">
-          <joint type="free"/>
-          <geom size=".1"/>
-        </body>
-        <body name="c_unconstrained" pos="10 0 0">
-          <joint type="free"/>
-          <geom size=".1"/>
-        </body>
-      </worldbody>
-      <equality>
-        <weld body1="a1" body2="a2"/>
-        <weld body1="b1" body2="b2"/>
-      </equality>
-    </mujoco>
-    """
-    nworld = 2
-    mjm, mjd, _, d = test_data.fixture(xml=xml, nworld=nworld)
+    mjm, mjd, _, d = test_data.fixture(
+      xml="""
+      <mujoco>
+        <worldbody>
+          <body name="a1">
+            <joint type="free"/>
+            <geom size=".1"/>
+          </body>
+          <body name="a2" pos="1 0 0">
+            <joint type="free"/>
+            <geom size=".1"/>
+          </body>
+          <body name="b1" pos="5 0 0">
+            <joint type="free"/>
+            <geom size=".1"/>
+          </body>
+          <body name="b2" pos="6 0 0">
+            <joint type="free"/>
+            <geom size=".1"/>
+          </body>
+          <body name="c_unconstrained" pos="10 0 0">
+            <joint type="free"/>
+            <geom size=".1"/>
+          </body>
+        </worldbody>
+        <equality>
+          <weld body1="a1" body2="a2"/>
+          <weld body1="b1" body2="b2"/>
+        </equality>
+      </mujoco>
+      """,
+      nworld=nworld,
+    )
 
     self.assertGreater(mjd.nisland, 0)
     self.assertGreater(mjd.nidof, 0)
@@ -1167,20 +1169,22 @@ class IOTest(parameterized.TestCase):
           mjd.efc_island[:nefc],
         )
 
-  def test_put_data_island_unconstrained(self):
+  @parameterized.parameters(1, 2)
+  def test_put_data_island_unconstrained(self, nworld):
     """Test put_data island initialization for unconstrained model (nisland=0)."""
-    xml = """
-    <mujoco>
-      <worldbody>
-        <body name="free_body">
-          <joint type="free"/>
-          <geom size=".1"/>
-        </body>
-      </worldbody>
-    </mujoco>
-    """
-    nworld = 2
-    mjm, mjd, _, d = test_data.fixture(xml=xml, nworld=nworld)
+    mjm, mjd, _, d = test_data.fixture(
+      xml="""
+      <mujoco>
+        <worldbody>
+          <body name="free_body">
+            <joint type="free"/>
+            <geom size=".1"/>
+          </body>
+        </worldbody>
+      </mujoco>
+      """,
+      nworld=nworld,
+    )
 
     self.assertEqual(mjd.nisland, 0)
     self.assertEqual(mjd.nefc, 0)
