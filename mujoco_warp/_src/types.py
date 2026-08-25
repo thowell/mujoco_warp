@@ -2464,7 +2464,9 @@ class RenderContext:
     upper: upper bounds
     group: groups
     group_root: group roots
-    ray: rays
+    ray: per-pixel rays direction
+    ray_offset: per-pixel ray offset from camera center (for orthographic
+      camera projections only)
     rgb_data: RGB data
     rgb_adr: RGB addresses
     depth_data: depth data
@@ -2499,6 +2501,9 @@ class RenderContext:
     has_spot_lights: True iff any light in the model has `type == SPOT`.
       When False, the kernel skips the spot-cone branch (cos cutoff +
       pow exponent) per non-directional light per pixel via `wp.static`.
+    has_orthographic_camera: True iff any actively rendering camera uses
+      orthographic projection. When False, the kernel skips the ray origin
+      offset since it is always zero for perspective-only scenes.
     enable_specular: when True, evaluate the Phong specular highlight per
       light per pixel (uses `mat_specular` / `mat_shininess`). When False,
       the entire specular branch is removed at compile time. Useful for
@@ -2570,6 +2575,7 @@ class RenderContext:
   group: array("*", int)
   group_root: array("*", int)
   ray: array("*", wp.vec3)
+  ray_offset: array("*", wp.vec3)
   rgb_data: array("*", wp.uint32)
   rgb_adr: array("ncam", int)
   depth_data: array("*", wp.float32)
@@ -2587,6 +2593,7 @@ class RenderContext:
   enable_per_light_ambient: bool
   light_attenuation_is_default: bool
   has_spot_lights: bool
+  has_orthographic_camera: bool
   splat_position: array("*", wp.vec3)
   splat_rotation: array("*", wp.quat)
   splat_scale: array("*", wp.vec3)
