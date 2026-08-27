@@ -165,6 +165,7 @@ class OverflowType(enum.IntFlag):
     EPA_HORIZON: EPA horizon buffer overflow
     ITERATIONS: solver iteration limit reached
     LS_ITERATIONS: linesearch iteration limit reached
+    TACTILE: tactile sensor collision pair overflow
     ALL: all overflows
   """
 
@@ -180,6 +181,7 @@ class OverflowType(enum.IntFlag):
   EPA_HORIZON = 1 << 8
   ITERATIONS = 1 << 9
   LS_ITERATIONS = 1 << 10
+  TACTILE = 1 << 11
   ALL = (
     NEFC
     | NJMAX_NNZ
@@ -192,6 +194,7 @@ class OverflowType(enum.IntFlag):
     | EPA_HORIZON
     | ITERATIONS
     | LS_ITERATIONS
+    | TACTILE
   )
 
 
@@ -1490,6 +1493,7 @@ class Model:
     sensor_adr_to_contact_adr: map sensor adr to contact adr (nsensor,)
     sensor_rne_postconstraint: evaluate rne_postconstraint
     sensor_rangefinder_bodyid: bodyid for rangefinder        (nrangefinder,)
+    body_has_tactile: body has tactile sensor                (nbody,)
     taxel_vertadr: tactile sensor vertex address             (nsensortaxel,)
     taxel_sensorid: address for tactile sensors
     M_tiles: scalar and tiled block-factorization groups
@@ -1974,6 +1978,7 @@ class Model:
   sensor_adr_to_contact_adr: array("nsensor", int)
   sensor_rne_postconstraint: bool
   sensor_rangefinder_bodyid: array("nrangefinder", int)
+  body_has_tactile: array("nbody", bool)
   taxel_vertadr: array("nsensortaxel", int)
   taxel_sensorid: array("nsensortaxel", int)
   M_tiles: tuple[TileSet, ...]
