@@ -1426,6 +1426,8 @@ class Model:
     has_flex_selfcollide: whether any flex has self-collision enabled
     has_ellipsoid_geom: whether the model contains ellipsoid geoms
     has_plane_geom: whether the model contains plane geoms
+    has_1d_flex: whether the model contains 1D flexes
+    has_2d_flex: whether the model contains 2D flexes
     has_3d_flex: whether the model contains 3D flexes
     max_flex_dim: maximum flex dimension in the model
     block_dim: block dim options
@@ -1921,6 +1923,8 @@ class Model:
   has_flex_selfcollide: bool
   has_ellipsoid_geom: bool
   has_plane_geom: bool
+  has_1d_flex: bool
+  has_2d_flex: bool
   has_3d_flex: bool
   max_flex_dim: int
   block_dim: BlockDim

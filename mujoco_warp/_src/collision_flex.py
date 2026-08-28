@@ -59,6 +59,177 @@ def _flex_element_aabb_filter(
   return False
 
 
+@wp.func
+def _axis_separated(
+  # In:
+  p0: wp.vec3,
+  p1: wp.vec3,
+  p2: wp.vec3,
+  q0: wp.vec3,
+  q1: wp.vec3,
+  q2: wp.vec3,
+  ax: wp.vec3,
+  cutoff_sq: float,
+) -> bool:
+  min1 = wp.min(wp.dot(p0, ax), wp.min(wp.dot(p1, ax), wp.dot(p2, ax)))
+  max1 = wp.max(wp.dot(p0, ax), wp.max(wp.dot(p1, ax), wp.dot(p2, ax)))
+  min2 = wp.min(wp.dot(q0, ax), wp.min(wp.dot(q1, ax), wp.dot(q2, ax)))
+  max2 = wp.max(wp.dot(q0, ax), wp.max(wp.dot(q1, ax), wp.dot(q2, ax)))
+  diff = wp.max(min1 - max2, min2 - max1)
+  if diff > 0.0:
+    lax_sq = wp.length_sq(ax)
+    if lax_sq > 1e-12 and diff * diff > cutoff_sq * lax_sq:
+      return True
+  return False
+
+
+@wp.func
+def _point_segment_axis(p: wp.vec3, a: wp.vec3, b: wp.vec3) -> wp.vec3:
+  ab = b - a
+  ab_len_sq = wp.length_sq(ab)
+  if ab_len_sq > 1e-12:
+    ap = p - a
+    t = wp.clamp(wp.dot(ap, ab) / ab_len_sq, 0.0, 1.0)
+    return ap - t * ab
+  return p - a
+
+
+@wp.func
+def _triangle_sat_separated(
+  # In:
+  p0: wp.vec3,
+  p1: wp.vec3,
+  p2: wp.vec3,
+  q0: wp.vec3,
+  q1: wp.vec3,
+  q2: wp.vec3,
+  cutoff_sq: float,
+) -> bool:
+  """Returns True if two triangles inflated by cutoff are separated (no contact possible)."""
+  e1_0 = p1 - p0
+  e1_1 = p2 - p1
+  e1_2 = p0 - p2
+
+  # Face normal of triangle 1
+  n1 = wp.cross(e1_0, e1_1)
+  p_proj = wp.dot(p0, n1)
+  q0_d = wp.dot(q0, n1)
+  q1_d = wp.dot(q1, n1)
+  q2_d = wp.dot(q2, n1)
+  diff1 = wp.max(p_proj - wp.max(q0_d, wp.max(q1_d, q2_d)), wp.min(q0_d, wp.min(q1_d, q2_d)) - p_proj)
+  if diff1 > 0.0:
+    ln1_sq = wp.length_sq(n1)
+    if ln1_sq > 1e-12 and diff1 * diff1 > cutoff_sq * ln1_sq:
+      return True
+
+  # Face normal of triangle 2
+  e2_0 = q1 - q0
+  e2_1 = q2 - q1
+  e2_2 = q0 - q2
+  n2 = wp.cross(e2_0, e2_1)
+  q_proj = wp.dot(q0, n2)
+  p0_d = wp.dot(p0, n2)
+  p1_d = wp.dot(p1, n2)
+  p2_d = wp.dot(p2, n2)
+  diff2 = wp.max(wp.min(p0_d, wp.min(p1_d, p2_d)) - q_proj, q_proj - wp.max(p0_d, wp.max(p1_d, p2_d)))
+  if diff2 > 0.0:
+    ln2_sq = wp.length_sq(n2)
+    if ln2_sq > 1e-12 and diff2 * diff2 > cutoff_sq * ln2_sq:
+      return True
+
+  # Edge-edge cross products (3x3 = 9 axes)
+  for i in range(3):
+    e1 = e1_0
+    if i == 1:
+      e1 = e1_1
+    elif i == 2:
+      e1 = e1_2
+    for j in range(3):
+      e2 = e2_0
+      if j == 1:
+        e2 = e2_1
+      elif j == 2:
+        e2 = e2_2
+      if _axis_separated(p0, p1, p2, q0, q1, q2, wp.cross(e1, e2), cutoff_sq):
+        return True
+
+  # In-plane edge normals for triangle 1 (3 axes)
+  for i in range(3):
+    e = e1_0
+    if i == 1:
+      e = e1_1
+    elif i == 2:
+      e = e1_2
+    if _axis_separated(p0, p1, p2, q0, q1, q2, wp.cross(e, n1), cutoff_sq):
+      return True
+
+  # In-plane edge normals for triangle 2 (3 axes)
+  for i in range(3):
+    e = e2_0
+    if i == 1:
+      e = e2_1
+    elif i == 2:
+      e = e2_2
+    if _axis_separated(p0, p1, p2, q0, q1, q2, wp.cross(e, n2), cutoff_sq):
+      return True
+
+  # Vertex-to-vertex axes (3x3 = 9 axes)
+  for i in range(3):
+    p = p0
+    if i == 1:
+      p = p1
+    elif i == 2:
+      p = p2
+    for j in range(3):
+      q = q0
+      if j == 1:
+        q = q1
+      elif j == 2:
+        q = q2
+      if _axis_separated(p0, p1, p2, q0, q1, q2, p - q, cutoff_sq):
+        return True
+
+  # Vertex-to-edge axes: vertices of T1 to edges of T2 (9 axes)
+  for i in range(3):
+    p = p0
+    if i == 1:
+      p = p1
+    elif i == 2:
+      p = p2
+    for j in range(3):
+      qa = q0
+      qb = q1
+      if j == 1:
+        qa = q1
+        qb = q2
+      elif j == 2:
+        qa = q2
+        qb = q0
+      if _axis_separated(p0, p1, p2, q0, q1, q2, _point_segment_axis(p, qa, qb), cutoff_sq):
+        return True
+
+  # Vertex-to-edge axes: vertices of T2 to edges of T1 (9 axes)
+  for i in range(3):
+    q = q0
+    if i == 1:
+      q = q1
+    elif i == 2:
+      q = q2
+    for j in range(3):
+      pa = p0
+      pb = p1
+      if j == 1:
+        pa = p1
+        pb = p2
+      elif j == 2:
+        pa = p2
+        pb = p0
+      if _axis_separated(p0, p1, p2, q0, q1, q2, _point_segment_axis(q, pa, pb), cutoff_sq):
+        return True
+
+  return False
+
+
 @wp.kernel
 def _flex_broadphase_bounds(
   # Model:
@@ -1200,6 +1371,8 @@ def _flex_sap_sweep(is_self: bool, warn_overflow: int):
     # Model:
     flex_contype: wp.array[int],
     flex_conaffinity: wp.array[int],
+    flex_margin: wp.array[float],
+    flex_gap: wp.array[float],
     flex_selfcollide: wp.array[int],
     flex_dim: wp.array[int],
     flex_vertadr: wp.array[int],
@@ -1207,8 +1380,10 @@ def _flex_sap_sweep(is_self: bool, warn_overflow: int):
     flex_elemdataadr: wp.array[int],
     flex_vertbodyid: wp.array[int],
     flex_elem: wp.array[int],
+    flex_radius: wp.array[float],
     flex_elemflexid: wp.array[int],
     # Data in:
+    flexvert_xpos_in: wp.array2d[wp.vec3],
     flex_aabb_min_in: wp.array2d[wp.vec3],
     flex_aabb_max_in: wp.array2d[wp.vec3],
     # In:
@@ -1287,11 +1462,7 @@ def _flex_sap_sweep(is_self: bool, warn_overflow: int):
       lower2 = aabb_lower_in[worldid, elem2]
       upper2 = aabb_upper_in[worldid, elem2]
 
-      if lower1[0] > upper2[0] or lower2[0] > upper1[0]:
-        continue
-      if lower1[1] > upper2[1] or lower2[1] > upper1[1]:
-        continue
-      if lower1[2] > upper2[2] or lower2[2] > upper1[2]:
+      if _flex_element_aabb_filter(lower1, upper1, lower2, upper2):
         continue
 
       dim1 = flex_dim[flexid1]
@@ -1333,6 +1504,26 @@ def _flex_sap_sweep(is_self: bool, warn_overflow: int):
         if shared_body:
           continue
 
+      if dim1 == 2:
+        dim2 = dim1 if wp.static(is_self) else flex_dim[flexid2]
+        if dim2 == 2:
+          r1 = flex_radius[flexid1]
+          cutoff = float(2.0) * r1
+          if not wp.static(is_self):
+            cutoff = (
+              r1 + flex_radius[flexid2] + flex_margin[flexid1] + flex_margin[flexid2] + flex_gap[flexid1] + flex_gap[flexid2]
+            )
+          cutoff_sq = cutoff * cutoff
+          p0 = flexvert_xpos_in[worldid, vert_adr1 + v1_indices[0]]
+          p1 = flexvert_xpos_in[worldid, vert_adr1 + v1_indices[1]]
+          p2 = flexvert_xpos_in[worldid, vert_adr1 + v1_indices[2]]
+          vadr2 = vert_adr1 if wp.static(is_self) else flex_vertadr[flexid2]
+          q0 = flexvert_xpos_in[worldid, vadr2 + v2_indices[0]]
+          q1 = flexvert_xpos_in[worldid, vadr2 + v2_indices[1]]
+          q2 = flexvert_xpos_in[worldid, vadr2 + v2_indices[2]]
+          if _triangle_sat_separated(p0, p1, p2, q0, q1, q2, cutoff_sq):
+            continue
+
       idx = wp.atomic_add(ncollision_out, 0, 1)
       if idx >= max_pairs:
         if wp.static(bool(warn_overflow & OverflowType.BROADPHASE)):
@@ -1372,8 +1563,6 @@ def _flex_narrowphase(warn_overflow: int):
     naccdmax_in: int,
     ncollision_in: wp.array[int],
     # In:
-    elem_aabb_lower_in: wp.array2d[wp.vec3],
-    elem_aabb_upper_in: wp.array2d[wp.vec3],
     max_candidates: int,
     gjk_iterations: int,
     epa_iterations: int,
@@ -1410,15 +1599,6 @@ def _flex_narrowphase(warn_overflow: int):
     elem1_global = pair[0]
     elem2_global = pair[1]
     worldid = collision_worldid_in[pairid]
-
-    # Precomputed AABB rejection filter
-    box1_min = elem_aabb_lower_in[worldid, elem1_global]
-    box1_max = elem_aabb_upper_in[worldid, elem1_global]
-    box2_min = elem_aabb_lower_in[worldid, elem2_global]
-    box2_max = elem_aabb_upper_in[worldid, elem2_global]
-
-    if _flex_element_aabb_filter(box1_min, box1_max, box2_min, box2_max):
-      return
 
     flexid1 = flex_elemflexid[elem1_global]
     flexid2 = flex_elemflexid[elem2_global]
@@ -2895,7 +3075,7 @@ def _detect_1d_geom_candidates(
   ws: FlexWorkspace,
 ):
   """Detect candidates between 1D flex rope vertices and geoms."""
-  if m.nflexvert == 0:
+  if m.nflexvert == 0 or not m.has_1d_flex:
     return
 
   epa_iterations = m.opt.ccd_iterations
@@ -2970,7 +3150,7 @@ def _detect_elem_geom_candidates(
   ws: FlexWorkspace,
 ):
   """Detect candidates between 2D/3D flex elements and geoms."""
-  if m.nflexelem == 0:
+  if m.nflexelem == 0 or not (m.has_2d_flex or m.has_3d_flex):
     return
 
   epa_iterations = m.opt.ccd_iterations
@@ -3132,8 +3312,6 @@ def _run_flex_narrowphase(
   d: Data,
   ctx,
   ws: FlexWorkspace,
-  elem_aabb_lower: wp.array,
-  elem_aabb_upper: wp.array,
 ):
   """Executes narrowphase collision detection for element pairs."""
   epa_iterations = m.opt.ccd_iterations
@@ -3157,8 +3335,6 @@ def _run_flex_narrowphase(
       d.flexvert_xpos,
       d.naccdmax,
       d.ncollision,
-      elem_aabb_lower,
-      elem_aabb_upper,
       d.naconmax,
       m.opt.ccd_iterations,
       epa_iterations,
@@ -3243,6 +3419,8 @@ def _flex_sap_collision(
     inputs=[
       m.flex_contype,
       m.flex_conaffinity,
+      m.flex_margin,
+      m.flex_gap,
       m.flex_selfcollide,
       m.flex_dim,
       m.flex_vertadr,
@@ -3250,7 +3428,9 @@ def _flex_sap_collision(
       m.flex_elemdataadr,
       m.flex_vertbodyid,
       m.flex_elem,
+      m.flex_radius,
       m.flex_elemflexid,
+      d.flexvert_xpos,
       d.flex_aabb_min,
       d.flex_aabb_max,
       m.nflexelem,
@@ -3274,8 +3454,6 @@ def _flex_sap_collision(
     d,
     ctx,
     ws,
-    elem_aabb_lower,
-    elem_aabb_upper,
   )
 
   _filter_and_write_contacts(m, d, ws, enable_fps=True)
