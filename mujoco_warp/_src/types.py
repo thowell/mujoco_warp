@@ -153,6 +153,7 @@ class OverflowType(enum.IntFlag):
   """Bitmask for physics and collision overflows.
 
   Attributes:
+    NONE: no overflow
     NEFC: nefc > njmax
     NJMAX_NNZ: njmax_nnz overflow
     BROADPHASE: broadphase overflow / flex broadphase overflow
@@ -164,8 +165,10 @@ class OverflowType(enum.IntFlag):
     EPA_HORIZON: EPA horizon buffer overflow
     ITERATIONS: solver iteration limit reached
     LS_ITERATIONS: linesearch iteration limit reached
+    ALL: all overflows
   """
 
+  NONE = 0
   NEFC = 1 << 0
   NJMAX_NNZ = 1 << 1
   BROADPHASE = 1 << 2
@@ -177,6 +180,19 @@ class OverflowType(enum.IntFlag):
   EPA_HORIZON = 1 << 8
   ITERATIONS = 1 << 9
   LS_ITERATIONS = 1 << 10
+  ALL = (
+    NEFC
+    | NJMAX_NNZ
+    | BROADPHASE
+    | NARROWPHASE
+    | CCD
+    | HFIELD
+    | CONTACT_MATCH
+    | NVMAX
+    | EPA_HORIZON
+    | ITERATIONS
+    | LS_ITERATIONS
+  )
 
 
 class CamLightType(enum.IntEnum):
@@ -890,7 +906,7 @@ class Option:
       zeros out the contacts at each step)
     contact_sensor_maxmatch: max number of contacts considered by contact sensor matching criteria
                              contacts matched after this value is exceded will be ignored
-    warn_overflow: warn if overflow is encountered
+    warn_overflow: overflow warning bitmask (OverflowType)
   """
 
   timestep: array("*", float)
@@ -920,7 +936,17 @@ class Option:
   graph_conditional: bool
   run_collision_detection: bool
   contact_sensor_maxmatch: int
-  warn_overflow: bool
+  warn_overflow: int
+
+  @property
+  def warn_overflow(self) -> int:
+    return self._warn_overflow
+
+  @warn_overflow.setter
+  def warn_overflow(self, value: bool | int):
+    if isinstance(value, bool):
+      value = int(OverflowType.ALL) if value else 0
+    self._warn_overflow = value
 
   # TODO(team): remove in future version
   @property

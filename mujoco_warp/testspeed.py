@@ -169,7 +169,7 @@ def _main(argv: Sequence[str]):
   mjm = cli.load_model(path)
   free_mem_at_init = wp.get_device(device).free_memory
   m, d, rc, ctrls = cli.init_structs(_FUNCS[_FUNCTION.value], mjm)
-  m.opt.warn_overflow = _OVERFLOW_BEHAVIOR.value == "continue"
+  m.opt.warn_overflow = int(OverflowType.ALL) if _OVERFLOW_BEHAVIOR.value == "continue" else 0
   timestep = m.opt.timestep.numpy()[0]
 
   if _FORMAT.value == "human":
