@@ -1417,7 +1417,11 @@ def _epa(
     pt.nhorizon = _add_edge(pt, face[2], face[0])
     if pt.nhorizon == -1:
       if warn_overflow:
-        wp.printf("Warning: EPA horizon = %d isn't large enough.\n", pt.horizon.shape[0])
+        wp.printf(
+          "Warning: EPA horizon = %d isn't large enough.\n"
+          "To disable the print warning: m.opt.warn_overflow &= ~mjw.OverflowType.EPA_HORIZON (or = 0 for all)\n",
+          pt.horizon.shape[0],
+        )
       wp.atomic_or(overflow_out, worldid, OverflowType.EPA_HORIZON)
       idx = -1
       break
@@ -1436,7 +1440,11 @@ def _epa(
         pt.nhorizon = _add_edge(pt, face[2], face[0])
         if pt.nhorizon == -1:
           if warn_overflow:
-            wp.printf("Warning: EPA horizon = %d isn't large enough.\n", pt.horizon.shape[0])
+            wp.printf(
+              "Warning: EPA horizon = %d isn't large enough.\n"
+              "To disable the print warning: m.opt.warn_overflow &= ~mjw.OverflowType.EPA_HORIZON (or = 0 for all)\n",
+              pt.horizon.shape[0],
+            )
           wp.atomic_or(overflow_out, worldid, OverflowType.EPA_HORIZON)
           idx = -1
           break

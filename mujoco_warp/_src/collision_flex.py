@@ -217,8 +217,9 @@ def _write_candidate(
   if candid >= max_candidates:
     if warn_overflow:
       wp.printf(
-        "flex candidate overflow - please increase naconmax to %u\n",
-        candid + 1,
+        "flex candidate overflow - please increase naconmax beyond %u\n"
+        "To disable the print warning: m.opt.warn_overflow &= ~mjw.OverflowType.NARROWPHASE (or = 0 for all)\n",
+        max_candidates,
       )
     wp.atomic_or(overflow_out, worldid, wp.static(OverflowType.NARROWPHASE))
     return
@@ -561,7 +562,7 @@ def _collide_mesh_convex(
 
 
 @cache_kernel
-def _flex_plane_narrowphase(warn_overflow: bool):
+def _flex_plane_narrowphase(warn_overflow: int):
   @wp.kernel(module="unique", enable_backward=False)
   def kernel(
     # Model:
@@ -654,7 +655,7 @@ def _flex_plane_narrowphase(warn_overflow: bool):
           -1,
           local_vertid,
           worldid,
-          wp.static(warn_overflow),
+          wp.static(bool(warn_overflow & OverflowType.NARROWPHASE)),
           overflow_out,
           cand_dist_out,
           cand_pos_out,
@@ -671,7 +672,7 @@ def _flex_plane_narrowphase(warn_overflow: bool):
 
 
 @cache_kernel
-def _flex_geom_vertex_narrowphase_detect(warn_overflow: bool):
+def _flex_geom_vertex_narrowphase_detect(warn_overflow: int):
   @wp.kernel(module="unique", enable_backward=False)
   def kernel(
     # Model:
@@ -811,8 +812,12 @@ def _flex_geom_vertex_narrowphase_detect(warn_overflow: bool):
       if gtype == int(GeomType.MESH):
         ccdid = wp.atomic_add(nccd, 0, 1)
         if ccdid >= naccdmax_in:
-          if wp.static(warn_overflow):
-            wp.printf("CCD overflow in flex narrowphase - please increase naccdmax to %u\n", ccdid + 1)
+          if wp.static(bool(warn_overflow & OverflowType.CCD)):
+            wp.printf(
+              "CCD overflow in flex narrowphase - please increase naccdmax beyond %u\n"
+              "To disable the print warning: m.opt.warn_overflow &= ~mjw.OverflowType.CCD (or = 0 for all)\n",
+              naccdmax_in,
+            )
           wp.atomic_or(overflow_out, worldid, wp.static(OverflowType.CCD))
           continue
 
@@ -863,7 +868,7 @@ def _flex_geom_vertex_narrowphase_detect(warn_overflow: bool):
           epa_horizon[ccdid],
           tolerance,
           ccd_iterations,
-          wp.static(warn_overflow),
+          wp.static(bool(warn_overflow & OverflowType.EPA_HORIZON)),
           overflow_out,
           cand_dist_out,
           cand_pos_out,
@@ -878,8 +883,12 @@ def _flex_geom_vertex_narrowphase_detect(warn_overflow: bool):
       elif gtype == int(GeomType.ELLIPSOID):
         ccdid = wp.atomic_add(nccd, 0, 1)
         if ccdid >= naccdmax_in:
-          if wp.static(warn_overflow):
-            wp.printf("CCD overflow in flex narrowphase - please increase naccdmax to %u\n", ccdid + 1)
+          if wp.static(bool(warn_overflow & OverflowType.CCD)):
+            wp.printf(
+              "CCD overflow in flex narrowphase - please increase naccdmax beyond %u\n"
+              "To disable the print warning: m.opt.warn_overflow &= ~mjw.OverflowType.CCD (or = 0 for all)\n",
+              naccdmax_in,
+            )
           wp.atomic_or(overflow_out, worldid, wp.static(OverflowType.CCD))
           continue
 
@@ -918,7 +927,7 @@ def _flex_geom_vertex_narrowphase_detect(warn_overflow: bool):
             epa_pr[ccdid],
             epa_norm2[ccdid],
             epa_horizon[ccdid],
-            wp.static(warn_overflow),
+            wp.static(bool(warn_overflow & OverflowType.EPA_HORIZON)),
             worldid,
             overflow_out,
           )
@@ -942,7 +951,7 @@ def _flex_geom_vertex_narrowphase_detect(warn_overflow: bool):
               -1,
               local_vertid,
               worldid,
-              wp.static(warn_overflow),
+              wp.static(bool(warn_overflow & OverflowType.NARROWPHASE)),
               overflow_out,
               cand_dist_out,
               cand_pos_out,
@@ -991,7 +1000,7 @@ def _flex_geom_vertex_narrowphase_detect(warn_overflow: bool):
             -1,
             local_vertid,
             worldid,
-            wp.static(warn_overflow),
+            wp.static(bool(warn_overflow & OverflowType.NARROWPHASE)),
             overflow_out,
             cand_dist_out,
             cand_pos_out,
@@ -1185,7 +1194,7 @@ def _flex_sap_project(
 
 
 @cache_kernel
-def _flex_sap_sweep(is_self: bool, warn_overflow: bool):
+def _flex_sap_sweep(is_self: bool, warn_overflow: int):
   @wp.kernel(module="unique", enable_backward=False)
   def kernel(
     # Model:
@@ -1326,8 +1335,12 @@ def _flex_sap_sweep(is_self: bool, warn_overflow: bool):
 
       idx = wp.atomic_add(ncollision_out, 0, 1)
       if idx >= max_pairs:
-        if wp.static(warn_overflow):
-          wp.printf("Flex SAP buffer overflow - please increase naconmax to %u\n", idx + 1)
+        if wp.static(bool(warn_overflow & OverflowType.BROADPHASE)):
+          wp.printf(
+            "Flex SAP buffer overflow - please increase naconmax beyond %u\n"
+            "To disable the print warning: m.opt.warn_overflow &= ~mjw.OverflowType.BROADPHASE (or = 0 for all)\n",
+            max_pairs,
+          )
         wp.atomic_or(overflow_out, worldid, wp.static(OverflowType.BROADPHASE))
         return
 
@@ -1338,7 +1351,7 @@ def _flex_sap_sweep(is_self: bool, warn_overflow: bool):
 
 
 @cache_kernel
-def _flex_narrowphase(warn_overflow: bool):
+def _flex_narrowphase(warn_overflow: int):
   @wp.kernel(module="unique", enable_backward=False)
   def kernel(
     # Model:
@@ -1473,7 +1486,7 @@ def _flex_narrowphase(warn_overflow: bool):
             e1,
             e2,
             worldid,
-            wp.static(warn_overflow),
+            wp.static(bool(warn_overflow & OverflowType.NARROWPHASE)),
             overflow_out,
             cand_dist_out,
             cand_pos_out,
@@ -1487,8 +1500,12 @@ def _flex_narrowphase(warn_overflow: bool):
           )
     else:
       if pairid >= naccdmax_in:
-        if wp.static(warn_overflow):
-          wp.printf("CCD overflow in flex narrowphase - please increase naccdmax to %u\n", pairid + 1)
+        if wp.static(bool(warn_overflow & OverflowType.CCD)):
+          wp.printf(
+            "CCD overflow in flex narrowphase - please increase naccdmax beyond %u\n"
+            "To disable the print warning: m.opt.warn_overflow &= ~mjw.OverflowType.CCD (or = 0 for all)\n",
+            naccdmax_in,
+          )
         wp.atomic_or(overflow_out, worldid, wp.static(OverflowType.CCD))
         return
 
@@ -1548,7 +1565,7 @@ def _flex_narrowphase(warn_overflow: bool):
         epa_pr_out[pairid],
         epa_norm2_out[pairid],
         epa_horizon_out[pairid],
-        wp.static(warn_overflow),
+        wp.static(bool(warn_overflow & OverflowType.EPA_HORIZON)),
         worldid,
         overflow_out,
       )
@@ -1568,7 +1585,7 @@ def _flex_narrowphase(warn_overflow: bool):
           e1,
           e2,
           worldid,
-          wp.static(warn_overflow),
+          wp.static(bool(warn_overflow & OverflowType.NARROWPHASE)),
           overflow_out,
           cand_dist_out,
           cand_pos_out,
@@ -1585,7 +1602,7 @@ def _flex_narrowphase(warn_overflow: bool):
 
 
 @cache_kernel
-def _flex_narrowphase_elem_detect(warn_overflow: bool):
+def _flex_narrowphase_elem_detect(warn_overflow: int):
   @wp.kernel(module="unique", enable_backward=False, grid_stride=False)
   def kernel(
     # Model:
@@ -1821,8 +1838,12 @@ def _flex_narrowphase_elem_detect(warn_overflow: bool):
       if gtype == int(GeomType.MESH):
         ccdid = wp.atomic_add(nccd, 0, 1)
         if ccdid >= naccdmax_in:
-          if wp.static(warn_overflow):
-            wp.printf("CCD overflow in flex narrowphase - please increase naccdmax to %u\n", ccdid + 1)
+          if wp.static(bool(warn_overflow & OverflowType.CCD)):
+            wp.printf(
+              "CCD overflow in flex narrowphase - please increase naccdmax beyond %u\n"
+              "To disable the print warning: m.opt.warn_overflow &= ~mjw.OverflowType.CCD (or = 0 for all)\n",
+              naccdmax_in,
+            )
           wp.atomic_or(overflow_out, worldid, wp.static(OverflowType.CCD))
           continue
 
@@ -1867,7 +1888,7 @@ def _flex_narrowphase_elem_detect(warn_overflow: bool):
           epa_horizon[ccdid],
           tolerance,
           ccd_iterations,
-          wp.static(warn_overflow),
+          wp.static(bool(warn_overflow & OverflowType.EPA_HORIZON)),
           overflow_out,
           cand_dist_out,
           cand_pos_out,
@@ -1902,7 +1923,7 @@ def _flex_narrowphase_elem_detect(warn_overflow: bool):
           elemid,
           -1,
           worldid,
-          wp.static(warn_overflow),
+          wp.static(bool(warn_overflow & OverflowType.NARROWPHASE)),
           overflow_out,
           cand_dist_out,
           cand_pos_out,
@@ -1918,8 +1939,12 @@ def _flex_narrowphase_elem_detect(warn_overflow: bool):
       else:
         ccdid = wp.atomic_add(nccd, 0, 1)
         if ccdid >= naccdmax_in:
-          if wp.static(warn_overflow):
-            wp.printf("CCD overflow in flex narrowphase - please increase naccdmax to %u\n", ccdid + 1)
+          if wp.static(bool(warn_overflow & OverflowType.CCD)):
+            wp.printf(
+              "CCD overflow in flex narrowphase - please increase naccdmax beyond %u\n"
+              "To disable the print warning: m.opt.warn_overflow &= ~mjw.OverflowType.CCD (or = 0 for all)\n",
+              naccdmax_in,
+            )
           wp.atomic_or(overflow_out, worldid, wp.static(OverflowType.CCD))
           continue
 
@@ -1952,7 +1977,7 @@ def _flex_narrowphase_elem_detect(warn_overflow: bool):
             epa_pr[ccdid],
             epa_norm2[ccdid],
             epa_horizon[ccdid],
-            wp.static(warn_overflow),
+            wp.static(bool(warn_overflow & OverflowType.EPA_HORIZON)),
             worldid,
             overflow_out,
           )
@@ -1979,7 +2004,7 @@ def _flex_narrowphase_elem_detect(warn_overflow: bool):
               elemid,
               -1,
               worldid,
-              wp.static(warn_overflow),
+              wp.static(bool(warn_overflow & OverflowType.NARROWPHASE)),
               overflow_out,
               cand_dist_out,
               cand_pos_out,
@@ -2164,7 +2189,7 @@ def _filter_flex_candidates_sorted(
 
 
 @cache_kernel
-def _write_filtered_contacts(warn_overflow: bool):
+def _write_filtered_contacts(warn_overflow: int):
   @wp.kernel(module="unique", enable_backward=False)
   def kernel(
     # Model:
@@ -2298,10 +2323,11 @@ def _write_filtered_contacts(warn_overflow: bool):
 
     id_ = wp.atomic_add(nacon_out, 0, 1)
     if id_ >= naconmax_in:
-      if wp.static(warn_overflow):
+      if wp.static(bool(warn_overflow & OverflowType.NARROWPHASE)):
         wp.printf(
-          "flex contact overflow - please increase naconmax to %u\n",
-          id_ + 1,
+          "flex contact overflow - please increase naconmax beyond %u\n"
+          "To disable the print warning: m.opt.warn_overflow &= ~mjw.OverflowType.NARROWPHASE (or = 0 for all)\n",
+          naconmax_in,
         )
       wp.atomic_or(overflow_out, worldid, wp.static(OverflowType.NARROWPHASE))
       return
@@ -2374,7 +2400,7 @@ def _find_group_starts(
 
 
 @cache_kernel
-def _populate_group_starts(warn_overflow: bool):
+def _populate_group_starts(warn_overflow: int):
   @wp.kernel(module="unique", enable_backward=False)
   def kernel(
     # In:
@@ -2397,10 +2423,11 @@ def _populate_group_starts(warn_overflow: bool):
     if flex_group_temp_in[si] == 1:
       g = flex_group_ids_in[si] - 1
       if g >= flex_group_start_indices_out.shape[0]:
-        if wp.static(warn_overflow):
+        if wp.static(bool(warn_overflow & OverflowType.NARROWPHASE)):
           wp.printf(
-            "flex candidate group overflow - please increase naconmax to %u\n",
-            g + 1,
+            "flex candidate group overflow - please increase naconmax beyond %u\n"
+            "To disable the print warning: m.opt.warn_overflow &= ~mjw.OverflowType.NARROWPHASE (or = 0 for all)\n",
+            flex_group_start_indices_out.shape[0],
           )
         worldid = cand_worldid[filter_val_in[si]]
         wp.atomic_or(overflow_out, worldid, wp.static(OverflowType.NARROWPHASE))
@@ -2723,7 +2750,7 @@ def _filter_and_write_contacts(
     nmax_groups = d.nworld * world_stride
 
     wp.launch(
-      _populate_group_starts(bool(m.opt.warn_overflow)),
+      _populate_group_starts(int(m.opt.warn_overflow)),
       dim=d.naconmax,
       inputs=[
         ws.flex_group_temp,
@@ -2760,7 +2787,7 @@ def _filter_and_write_contacts(
     )
 
   wp.launch(
-    _write_filtered_contacts(bool(m.opt.warn_overflow)),
+    _write_filtered_contacts(int(m.opt.warn_overflow)),
     dim=d.naconmax,
     inputs=[
       m.geom_type,
@@ -2826,7 +2853,7 @@ def _detect_plane_flex_candidates(
     return
 
   wp.launch(
-    _flex_plane_narrowphase(bool(m.opt.warn_overflow)),
+    _flex_plane_narrowphase(int(m.opt.warn_overflow)),
     dim=(d.nworld, m.nflexvert),
     inputs=[
       m.ngeom,
@@ -2873,7 +2900,7 @@ def _detect_1d_geom_candidates(
 
   epa_iterations = m.opt.ccd_iterations
   wp.launch(
-    _flex_geom_vertex_narrowphase_detect(bool(m.opt.warn_overflow)),
+    _flex_geom_vertex_narrowphase_detect(int(m.opt.warn_overflow)),
     dim=(d.nworld, m.nflexvert),
     inputs=[
       m.ngeom,
@@ -2948,7 +2975,7 @@ def _detect_elem_geom_candidates(
 
   epa_iterations = m.opt.ccd_iterations
   wp.launch(
-    _flex_narrowphase_elem_detect(bool(m.opt.warn_overflow)),
+    _flex_narrowphase_elem_detect(int(m.opt.warn_overflow)),
     dim=(d.nworld, m.nflexelem),
     inputs=[
       m.ngeom,
@@ -3112,7 +3139,7 @@ def _run_flex_narrowphase(
   epa_iterations = m.opt.ccd_iterations
   workspace_verts = wp.empty(d.naconmax * 8, dtype=wp.vec3)
   wp.launch(
-    _flex_narrowphase(bool(m.opt.warn_overflow)),
+    _flex_narrowphase(int(m.opt.warn_overflow)),
     dim=d.naconmax,
     inputs=[
       m.opt.ccd_tolerance,
@@ -3211,7 +3238,7 @@ def _flex_sap_collision(
   d.ncollision.zero_()
 
   wp.launch(
-    _flex_sap_sweep(is_self, bool(m.opt.warn_overflow)),
+    _flex_sap_sweep(is_self, int(m.opt.warn_overflow)),
     dim=nsweep,
     inputs=[
       m.flex_contype,

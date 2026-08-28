@@ -20,6 +20,7 @@ from mujoco_warp._src.types import ConstraintType
 from mujoco_warp._src.types import EqType
 from mujoco_warp._src.types import ObjType
 from mujoco_warp._src.types import OverflowType
+from mujoco_warp._src.warp_util import cache_kernel
 from mujoco_warp._src.warp_util import event_scope
 
 wp.set_module_options({"default_grid_stride": False})
@@ -877,48 +878,51 @@ def _reset_compact_maps(
     cdof_dof_out[worldid, idx] = -1
 
 
-@wp.kernel
-def _compact_dofs(
-  # Model:
-  ntree: int,
-  tree_dofadr: wp.array[int],
-  tree_dofnum: wp.array[int],
-  # Data in:
-  tree_awake_in: wp.array2d[int],
-  nvmax_in: int,
-  # In:
-  warn_overflow: bool,
-  # Data out:
-  ncdof_out: wp.array[int],
-  dof_cdof_out: wp.array2d[int],
-  cdof_dof_out: wp.array2d[int],
-  overflow_out: wp.array[int],
-):
-  worldid = wp.tid()
-  count = int(0)
-  for t in range(ntree):
-    if tree_awake_in[worldid, t] == 1:
-      adr = tree_dofadr[t]
-      num = tree_dofnum[t]
-      for j in range(num):
-        dof = adr + j
-        if count < nvmax_in:
-          dof_cdof_out[worldid, dof] = count
-          cdof_dof_out[worldid, count] = dof
-        count += 1
+@cache_kernel
+def _compact_dofs_builder(warn_overflow: int):
+  @wp.kernel(module="unique", enable_backward=False)
+  def _compact_dofs(
+    # Model:
+    ntree: int,
+    tree_dofadr: wp.array[int],
+    tree_dofnum: wp.array[int],
+    # Data in:
+    tree_awake_in: wp.array2d[int],
+    nvmax_in: int,
+    # Data out:
+    ncdof_out: wp.array[int],
+    dof_cdof_out: wp.array2d[int],
+    cdof_dof_out: wp.array2d[int],
+    overflow_out: wp.array[int],
+  ):
+    worldid = wp.tid()
+    count = int(0)
+    for t in range(ntree):
+      if tree_awake_in[worldid, t] == 1:
+        adr = tree_dofadr[t]
+        num = tree_dofnum[t]
+        for j in range(num):
+          dof = adr + j
+          if count < nvmax_in:
+            dof_cdof_out[worldid, dof] = count
+            cdof_dof_out[worldid, count] = dof
+          count += 1
 
-  if count > nvmax_in:
-    if warn_overflow:
-      wp.printf(
-        "nvmax overflow: world %d needs %d active DOFs but nvmax = %d (behavior undefined)\n",
-        worldid,
-        count,
-        nvmax_in,
-      )
-    overflow_out[worldid] = overflow_out[worldid] | OverflowType.NVMAX
-    ncdof_out[worldid] = nvmax_in
-  else:
-    ncdof_out[worldid] = count
+    if count > nvmax_in:
+      if wp.static(bool(warn_overflow & OverflowType.NVMAX)):
+        wp.printf(
+          "nvmax overflow: world %d needs %d active DOFs but nvmax = %d (behavior undefined)\n"
+          "To disable the print warning: m.opt.warn_overflow &= ~mjw.OverflowType.NVMAX (or = 0 for all)\n",
+          worldid,
+          count,
+          nvmax_in,
+        )
+      overflow_out[worldid] = overflow_out[worldid] | OverflowType.NVMAX
+      ncdof_out[worldid] = nvmax_in
+    else:
+      ncdof_out[worldid] = count
+
+  return _compact_dofs
 
 
 @event_scope
@@ -931,8 +935,8 @@ def update_active_dofs(m: types.Model, d: types.Data):
     outputs=[d.dof_cdof, d.cdof_dof],
   )
   wp.launch(
-    _compact_dofs,
+    _compact_dofs_builder(int(m.opt.warn_overflow)),
     dim=(d.nworld,),
-    inputs=[m.ntree, m.tree_dofadr, m.tree_dofnum, d.tree_awake, d.nvmax, m.opt.warn_overflow],
+    inputs=[m.ntree, m.tree_dofadr, m.tree_dofnum, d.tree_awake, d.nvmax],
     outputs=[d.ncdof, d.dof_cdof, d.cdof_dof, d.overflow],
   )

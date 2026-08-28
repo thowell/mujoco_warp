@@ -219,7 +219,7 @@ def _next_activation(
 
 
 @cache_kernel
-def _next_time_builder(warn_overflow: bool):
+def _next_time_builder(warn_overflow: int):
   @wp.kernel(module="unique", enable_backward=False)
   def _next_time(
     # Model:
@@ -245,29 +245,45 @@ def _next_time_builder(warn_overflow: bool):
     nefc = nefc_in[worldid]
 
     if nefc > njmax_in:
-      if wp.static(warn_overflow):
-        wp.printf("nefc overflow - please increase njmax to %u\n", nefc)
+      if wp.static(bool(warn_overflow & OverflowType.NEFC)):
+        wp.printf(
+          "nefc overflow - please increase njmax beyond %u\n"
+          "To disable the print warning: m.opt.warn_overflow &= ~mjw.OverflowType.NEFC (or = 0 for all)\n",
+          njmax_in,
+        )
       overflow_out[worldid] = overflow_out[worldid] | OverflowType.NEFC
     elif nefc > 0 and is_sparse:
       efcid = wp.min(nefc, njmax_in) - 1
       efc_nnz = efc_J_rowadr_in[worldid, efcid] + efc_J_rownnz_in[worldid, efcid]
       if efc_nnz > njmax_nnz_in:
-        if wp.static(warn_overflow):
-          wp.printf("njmax_nnz overflow - please increase njmax_nnz to %u\n", efc_nnz)
+        if wp.static(bool(warn_overflow & OverflowType.NJMAX_NNZ)):
+          wp.printf(
+            "njmax_nnz overflow - please increase njmax_nnz beyond %u\n"
+            "To disable the print warning: m.opt.warn_overflow &= ~mjw.OverflowType.NJMAX_NNZ (or = 0 for all)\n",
+            njmax_nnz_in,
+          )
         overflow_out[worldid] = overflow_out[worldid] | OverflowType.NJMAX_NNZ
 
     ncollision = ncollision_in[0]
     if ncollision > naconmax_in:
-      if worldid == 0 and wp.static(warn_overflow):
-        nconmax = int(wp.ceil(float(ncollision) / float(nworld_in)))
-        wp.printf("broadphase overflow - please increase nconmax to %u or naconmax to %u\n", nconmax, ncollision)
+      if worldid == 0 and wp.static(bool(warn_overflow & OverflowType.BROADPHASE)):
+        wp.printf(
+          "broadphase overflow - please increase nconmax beyond %u or naconmax beyond %u\n"
+          "To disable the print warning: m.opt.warn_overflow &= ~mjw.OverflowType.BROADPHASE (or = 0 for all)\n",
+          naconmax_in // nworld_in,
+          naconmax_in,
+        )
       overflow_out[worldid] = overflow_out[worldid] | OverflowType.BROADPHASE
 
     nacon = nacon_in[0]
     if nacon > naconmax_in:
-      if worldid == 0 and wp.static(warn_overflow):
-        nconmax = int(wp.ceil(float(nacon) / float(nworld_in)))
-        wp.printf("narrowphase overflow - please increase nconmax to %u or naconmax to %u\n", nconmax, nacon)
+      if worldid == 0 and wp.static(bool(warn_overflow & OverflowType.NARROWPHASE)):
+        wp.printf(
+          "narrowphase overflow - please increase nconmax beyond %u or naconmax beyond %u\n"
+          "To disable the print warning: m.opt.warn_overflow &= ~mjw.OverflowType.NARROWPHASE (or = 0 for all)\n",
+          naconmax_in // nworld_in,
+          naconmax_in,
+        )
       overflow_out[worldid] = overflow_out[worldid] | OverflowType.NARROWPHASE
 
   return _next_time
@@ -321,7 +337,7 @@ def _advance(m: Model, d: Data, qacc: wp.array, qvel: Optional[wp.array] = None)
   history.insert_ctrl_history(m, d)
 
   wp.launch(
-    _next_time_builder(bool(m.opt.warn_overflow)),
+    _next_time_builder(int(m.opt.warn_overflow)),
     dim=d.nworld,
     inputs=[
       m.opt.timestep,
