@@ -2,7 +2,7 @@ BENCHMARKS = [
   {
     "name": "cloth",
     "mjcf": "scene.xml",
-    "nworld": 32,
+    "nworld": 256,
     "nconmax": 3500,
     "nccdmax": 3400,
     "njmax": 3600,
