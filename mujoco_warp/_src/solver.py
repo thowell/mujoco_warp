@@ -1022,9 +1022,30 @@ def _linesearch_iterative_kernel(
     scale = meaninertia * wp.float(nv)
     gtol = wp.max(tolerance * ls_tolerance * snorm * scale, 1e-6)
 
-    # p0 via parallel reduction
+    # quad_gauss = [0, search.T @ Ma - search.T @ qfrc_smooth, 0.5 * search.T @ mv] + equality
+    local_gauss = wp.vec2(0.0)
+    for dofid in range(tid, nv, wp.block_dim()):
+      search = ctx_search_in[worldid, dofid]
+      local_gauss += wp.vec2(
+        search * (efc_Ma_out[worldid, dofid] - qfrc_smooth_in[worldid, dofid]),
+        0.5 * search * ctx_mv_in[worldid, dofid],
+      )
+
+    for efcid in range(tid, ne, wp.block_dim()):
+      jvD = ctx_jv_in[worldid, efcid] * efc_D_in[worldid, efcid]
+      local_gauss += wp.vec2(
+        jvD * ctx_Jaref_in[worldid, efcid],
+        0.5 * ctx_jv_in[worldid, efcid] * jvD,
+      )
+
+    gauss_tile = wp.tile(local_gauss, preserve_type=True)
+    gauss_sum = wp.tile_reduce(wp.add, gauss_tile)
+    gauss_reduced = gauss_sum[0]
+    ctx_quad_gauss = wp.vec3(0.0, gauss_reduced[0], gauss_reduced[1])
+
+    # p0 via parallel reduction over non-equality constraints
     local_p0 = wp.vec3(0.0)
-    for efcid in range(tid, nefc, wp.block_dim()):
+    for efcid in range(ne + tid, nefc, wp.block_dim()):
       if wp.static(IS_ELLIPTIC):
         efc_type = efc_type_in[worldid, efcid]
         efc_id = 0
@@ -1078,20 +1099,6 @@ def _linesearch_iterative_kernel(
     p0_tile = wp.tile(local_p0, preserve_type=True)
     p0_sum = wp.tile_reduce(wp.add, p0_tile)
 
-    # quad_gauss = [0, search.T @ Ma - search.T @ qfrc_smooth, 0.5 * search.T @ mv]
-    local_gauss = wp.vec2(0.0)
-    for dofid in range(tid, nv, wp.block_dim()):
-      search = ctx_search_in[worldid, dofid]
-      local_gauss += wp.vec2(
-        search * (efc_Ma_out[worldid, dofid] - qfrc_smooth_in[worldid, dofid]),
-        0.5 * search * ctx_mv_in[worldid, dofid],
-      )
-
-    gauss_tile = wp.tile(local_gauss, preserve_type=True)
-    gauss_sum = wp.tile_reduce(wp.add, gauss_tile)
-    gauss_reduced = gauss_sum[0]
-    ctx_quad_gauss = wp.vec3(0.0, gauss_reduced[0], gauss_reduced[1])
-
     # add quad_gauss contribution to p0
     p0 = wp.vec3(ctx_quad_gauss[0], ctx_quad_gauss[1], 2.0 * ctx_quad_gauss[2]) + p0_sum[0]
     p0_delta = wp.vec3(0.0, p0[1], p0[2])
@@ -1114,7 +1121,7 @@ def _linesearch_iterative_kernel(
     lo_alpha_in = -math.safe_div(p0[1], p0[2])
 
     local_lo_in = wp.vec3(0.0)
-    for efcid in range(tid, nefc, wp.block_dim()):
+    for efcid in range(ne + tid, nefc, wp.block_dim()):
       if wp.static(IS_ELLIPTIC):
         efc_type = efc_type_in[worldid, efcid]
         efc_id = 0
@@ -1193,7 +1200,7 @@ def _linesearch_iterative_kernel(
         local_hi = wp.vec3(0.0)
         local_mid = wp.vec3(0.0)
 
-        for efcid in range(tid, nefc, wp.block_dim()):
+        for efcid in range(ne + tid, nefc, wp.block_dim()):
           if wp.static(IS_ELLIPTIC):
             efc_type = efc_type_in[worldid, efcid]
             efc_id = 0
