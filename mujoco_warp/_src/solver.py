@@ -3456,6 +3456,82 @@ def _solve_cg_finalize(warn_overflow: int):
 
 
 @cache_kernel
+def _solve_beta_finalize_tiled(warn_overflow: int):
+  WARN_OVERFLOW = warn_overflow
+
+  @wp.kernel(module="unique", enable_backward=False)
+  def kernel(
+    # Model:
+    nv: int,
+    opt_tolerance: wp.array[float],
+    opt_iterations: int,
+    stat_meaninertia: wp.array[float],
+    # In:
+    ctx_grad_in: wp.array2d[float],
+    ctx_Mgrad_in: wp.array2d[float],
+    ctx_prev_grad_in: wp.array2d[float],
+    ctx_prev_Mgrad_in: wp.array2d[float],
+    ctx_improvement_in: wp.array[float],
+    ctx_grad_dot_in: wp.array[float],
+    ctx_done_in: wp.array[bool],
+    # Data out:
+    solver_niter_out: wp.array[int],
+    overflow_out: wp.array[int],
+    # Out:
+    ctx_beta_out: wp.array[float],
+    nsolving_out: wp.array[int],
+    ctx_done_out: wp.array[bool],
+  ):
+    worldid, tid = wp.tid()
+
+    if ctx_done_in[worldid]:
+      return
+
+    local_num = float(0.0)
+    local_den = float(0.0)
+    BLOCK_DIM = wp.block_dim()
+
+    for dofid in range(tid, nv, BLOCK_DIM):
+      prev_Mgrad = ctx_prev_Mgrad_in[worldid, dofid]
+      num = ctx_grad_in[worldid, dofid] * (ctx_Mgrad_in[worldid, dofid] - prev_Mgrad)
+      den = ctx_prev_grad_in[worldid, dofid] * prev_Mgrad
+      local_num += num
+      local_den += den
+
+    num_tile = wp.tile(local_num, preserve_type=True)
+    num_sum = wp.tile_reduce(wp.add, num_tile)
+
+    den_tile = wp.tile(local_den, preserve_type=True)
+    den_sum = wp.tile_reduce(wp.add, den_tile)
+
+    if tid == 0:
+      ctx_beta_out[worldid] = wp.max(0.0, num_sum[0] / wp.max(types.MJ_MINVAL, den_sum[0]))
+
+      solver_niter_out[worldid] += 1
+      tolerance = opt_tolerance[worldid % opt_tolerance.shape[0]]
+      meaninertia = stat_meaninertia[worldid % stat_meaninertia.shape[0]]
+
+      grad_dot = ctx_grad_dot_in[worldid]
+
+      improvement = _rescale(nv, meaninertia, ctx_improvement_in[worldid])
+      gradient = _rescale(nv, meaninertia, wp.sqrt(grad_dot))
+      done = (improvement < tolerance) or (gradient < tolerance)
+      if done or solver_niter_out[worldid] == opt_iterations:
+        if not done and solver_niter_out[worldid] == opt_iterations:
+          if wp.static(bool(WARN_OVERFLOW & OverflowType.ITERATIONS)):
+            wp.printf(
+              "solver iterations limit reached - please increase iterations beyond %u\n"
+              "To disable the print warning: m.opt.warn_overflow &= ~mjw.OverflowType.ITERATIONS (or = 0 for all)\n",
+              opt_iterations,
+            )
+          overflow_out[worldid] = overflow_out[worldid] | OverflowType.ITERATIONS
+        ctx_done_out[worldid] = True
+        wp.atomic_add(nsolving_out, 0, -1)
+
+  return kernel
+
+
+@cache_kernel
 def _solve_done(warn_overflow: int):
   @wp.kernel(module="unique", enable_backward=False)
   def kernel(
@@ -3568,31 +3644,21 @@ def _solver_iteration(
 
   # polak-ribiere
   if m.opt.solver == types.SolverType.CG:
-    wp.launch(
-      _solve_beta_zero,
-      dim=d.nworld,
-      outputs=[ctx.beta, ctx.beta_den],
-    )
     wp.launch_tiled(
-      _solve_beta_accumulate_tiled,
-      dim=d.nworld,
-      inputs=[m.nv, ctx.grad, ctx.Mgrad, ctx.prev_grad, ctx.prev_Mgrad, ctx.done],
-      outputs=[ctx.beta, ctx.beta_den],
-      block_dim=m.block_dim.solve_beta_accumulate,
-    )
-    wp.launch(
-      _solve_cg_finalize(int(m.opt.warn_overflow)),
+      _solve_beta_finalize_tiled(int(m.opt.warn_overflow)),
       dim=d.nworld,
       inputs=[
         m.nv,
         m.opt.tolerance,
         m.opt.iterations,
         m.stat.meaninertia,
-        ctx.beta,
-        ctx.beta_den,
+        ctx.grad,
+        ctx.Mgrad,
+        ctx.prev_grad,
+        ctx.prev_Mgrad,
         ctx.improvement,
-        ctx.done,
         ctx.grad_dot,
+        ctx.done,
       ],
       outputs=[
         d.solver_niter,
@@ -3601,6 +3667,7 @@ def _solver_iteration(
         nsolving,
         ctx.done,
       ],
+      block_dim=m.block_dim.solve_beta_accumulate,
     )
     wp.launch_tiled(
       _solve_search_update_cg_tiled,
