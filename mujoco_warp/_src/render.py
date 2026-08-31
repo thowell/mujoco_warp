@@ -20,6 +20,8 @@ import warp as wp
 
 from mujoco_warp._src import math
 from mujoco_warp._src.bvh import SPLAT_MIN_RESPONSE
+from mujoco_warp._src.ray import RAY_TOL_ABS
+from mujoco_warp._src.ray import RAY_TOL_REL
 from mujoco_warp._src.ray import ray_box
 from mujoco_warp._src.ray import ray_capsule
 from mujoco_warp._src.ray import ray_cylinder
@@ -291,6 +293,14 @@ def sample_skybox(
   return wp.vec3(color[0], color[1], color[2])
 
 
+@wp.func
+def vertex_normal(n: wp.vec3, face: wp.vec3) -> wp.vec3:
+  # Matches mjr_uploadMesh: a vertex normal more than ~37 degrees off the face is unusable.
+  if wp.dot(n, face) < 0.8:
+    return face
+  return n
+
+
 def _make_cast_ray(geom_ray_types: Tuple[int], first_hit: bool = False) -> wp.Function:
   """Build a ray-cast func specialized to the geom types present in the scene.
 
@@ -348,9 +358,12 @@ def _make_cast_ray(geom_ray_types: Tuple[int], first_hit: bool = False) -> wp.Fu
     bounds_nr = int(0)
     ngeom = bvh_ngeom + flex_bvh_ngeom
 
-    while wp.bvh_query_next(query, bounds_nr, dist):
+    # max_t is exclusive: widen so coincident hits reach the tie-break below.
+    while wp.bvh_query_next(query, bounds_nr, dist * (1.0 + RAY_TOL_REL) + RAY_TOL_ABS):
       gi_global = bounds_nr
       local_id = gi_global - (worldid * ngeom)
+
+      query_dist = dist * (1.0 + RAY_TOL_REL) + RAY_TOL_ABS
 
       d = float(-1.0)
       hit_mesh_id = int(-1)
@@ -387,7 +400,7 @@ def _make_cast_ray(geom_ray_types: Tuple[int], first_hit: bool = False) -> wp.Fu
             geom_xmat_in[worldid, gi],
             ray_origin_world,
             ray_dir_world,
-            dist,
+            query_dist,
             cull_backfaces,
           )
       if wp.static(int(GeomType.SPHERE) in geom_ray_types):
@@ -455,7 +468,7 @@ def _make_cast_ray(geom_ray_types: Tuple[int], first_hit: bool = False) -> wp.Fu
               geom_xmat_in[worldid, gi],
               ray_origin_world,
               ray_dir_world,
-              dist,
+              query_dist,
               cull_backfaces,
             )
       if wp.static(int(GeomType.FLEX) in geom_ray_types):
@@ -492,7 +505,7 @@ def _make_cast_ray(geom_ray_types: Tuple[int], first_hit: bool = False) -> wp.Fu
               d = 0.0 if hit else -1.0
             else:
               flex_gr = flex_group_root[worldid, flexid]
-              d, n, u, v, f = ray_flex_with_bvh(flex_bvh_id, flexid, flex_gr, ray_origin_world, ray_dir_world, dist)
+              d, n, u, v, f = ray_flex_with_bvh(flex_bvh_id, flexid, flex_gr, ray_origin_world, ray_dir_world, query_dist)
               if d >= 0.0:
                 hit_mesh_id = flexid
 
@@ -507,7 +520,10 @@ def _make_cast_ray(geom_ray_types: Tuple[int], first_hit: bool = False) -> wp.Fu
         if d >= 0.0 and d < dist:
           return hit_geom_id, d, n, u, v, f, hit_mesh_id
       else:
-        if d >= 0.0 and d < dist:
+        # Ties go to the higher geom index, like MuJoCo's GL depth test.
+        tol = RAY_TOL_REL * wp.max(dist, 1.0)
+        closer = (d < dist - tol) or (wp.abs(d - dist) <= tol and (geom_id < 0 or hit_geom_id > geom_id))
+        if d >= 0.0 and closer:
           dist = d
           normal = n
           geom_id = hit_geom_id
@@ -567,6 +583,7 @@ def _make_compute_lighting(cast_ray_first_hit: wp.Function) -> wp.Function:
     mat_spec: float,
     mat_shin_exp: float,
     cull_backfaces: bool,
+    shadow_light_fraction: float,
     enable_specular: bool,
     default_attenuation: bool,
     has_spot: bool,
@@ -643,7 +660,7 @@ def _make_compute_lighting(cast_ray_first_hit: wp.Function) -> wp.Function:
       )
 
       if shadow_geom_id != -1:
-        visible = NO_LIGHT_AMBIENT_FALLBACK
+        visible = shadow_light_fraction
 
     weight = attenuation * visible
     diff_rgb = lightdiff * (ndotl * weight)
@@ -658,18 +675,8 @@ def _make_compute_lighting(cast_ray_first_hit: wp.Function) -> wp.Function:
   return compute_lighting
 
 
-@event_scope
-def render(m: Model, d: Data, rc: RenderContext):
-  """Render the current frame.
-
-  Outputs are stored in buffers within the render context.
-
-  Args:
-    m: The model on device.
-    d: The data on device.
-    rc: The render context on device.
-  """
-  rc.seg_data.fill_(wp.vec2i(-1, -1))
+def _build_megakernel(m: Model, rc: RenderContext):
+  """Construct the specialised megakernel for this context."""
   has_splats = rc.splat_count > 0
 
   # Specialize the ray-cast helpers to the geom types present in the scene so the
@@ -709,6 +716,8 @@ def render(m: Model, d: Data, rc: RenderContext):
     flex_edge: wp.array[wp.vec2i],
     flex_radius: wp.array[float],
     mesh_faceadr: wp.array[int],
+    mesh_normaladr: wp.array[int],
+    mesh_normal: wp.array[wp.vec3],
     mat_texid: wp.array3d[int],
     mat_texrepeat: wp.array2d[wp.vec2],
     mat_emission: wp.array2d[float],
@@ -745,6 +754,7 @@ def render(m: Model, d: Data, rc: RenderContext):
     enabled_geom_ids: wp.array[int],
     mesh_bvh_id: wp.array[wp.uint64],
     mesh_facetexcoord: wp.array[wp.vec3i],
+    mesh_facenormal: wp.array[wp.vec3i],
     mesh_texcoord: wp.array[wp.vec2],
     mesh_texcoord_offsets: wp.array[int],
     hfield_bvh_id: wp.array[wp.uint64],
@@ -840,6 +850,29 @@ def render(m: Model, d: Data, rc: RenderContext):
       float(MJ_MAXVAL),
       wp.static(rc_static["enable_backface_culling"]),
     )
+
+    if (
+      wp.static(rc_static["enable_vertex_normals"])
+      and geom_id >= 0
+      and mesh_id >= 0
+      and f >= 0
+      and geom_type[geom_id] == int(GeomType.MESH.value)
+    ):
+      mat = geom_xmat_in[worldid, geom_id]
+      face = wp.transpose(mat) @ normal
+      tri = mesh_facenormal[mesh_faceadr[mesh_id] + f]
+      adr = mesh_normaladr[mesh_id]
+      vec = (
+        vertex_normal(mesh_normal[adr + tri[0]], face) * u
+        + vertex_normal(mesh_normal[adr + tri[1]], face) * v
+        + vertex_normal(mesh_normal[adr + tri[2]], face) * (1.0 - u - v)
+      )
+      normal = wp.normalize(mat @ vec)
+
+    if wp.static(not rc_static["enable_backface_culling"]):
+      # Two-sided shading: light a back-facing hit as if it faced the viewer.
+      if geom_id >= 0 and wp.dot(normal, ray_dir_world) > 0.0:
+        normal = -normal
 
     splat_color = wp.vec3(0.0)
     splat_transmittance = float(1.0)
@@ -1034,6 +1067,7 @@ def render(m: Model, d: Data, rc: RenderContext):
         mat_spec,
         mat_shin_exp,
         wp.static(rc_static["enable_backface_culling"]),
+        wp.static(rc_static["shadow_light_fraction"]),
         wp.static(rc_static["enable_specular"]),
         wp.static(rc_static["light_attenuation_is_default"]),
         wp.static(rc_static["has_spot_lights"]),
@@ -1083,6 +1117,7 @@ def render(m: Model, d: Data, rc: RenderContext):
         mat_spec,
         mat_shin_exp,
         wp.static(rc_static["enable_backface_culling"]),
+        wp.static(rc_static["shadow_light_fraction"]),
         wp.static(rc_static["enable_specular"]),
         True,
         False,
@@ -1100,6 +1135,27 @@ def render(m: Model, d: Data, rc: RenderContext):
       hit_color[2] * 255.0,
       255.0,
     )
+
+  return _render_megakernel
+
+
+@event_scope
+def render(m: Model, d: Data, rc: RenderContext):
+  """Render the current frame.
+
+  Outputs are stored in buffers within the render context.
+
+  Args:
+    m: The model on device.
+    d: The data on device.
+    rc: The render context on device.
+  """
+  rc.seg_data.fill_(wp.vec2i(-1, -1))
+  # Specialising the megakernel costs more than launching it, so keep it on the
+  # context: the static configuration it closes over is fixed at creation.
+  if rc._megakernel is None:
+    rc._megakernel = _build_megakernel(m, rc)
+  _render_megakernel = rc._megakernel
 
   wp.launch(
     kernel=_render_megakernel,
@@ -1127,6 +1183,8 @@ def render(m: Model, d: Data, rc: RenderContext):
       m.flex_edge,
       m.flex_radius,
       m.mesh_faceadr,
+      m.mesh_normaladr,
+      m.mesh_normal,
       m.mat_texid,
       m.mat_texrepeat,
       m.mat_emission,
@@ -1161,6 +1219,7 @@ def render(m: Model, d: Data, rc: RenderContext):
       rc.enabled_geom_ids,
       rc.mesh_bvh_id,
       rc.mesh_facetexcoord,
+      rc.mesh_facenormal,
       rc.mesh_texcoord,
       rc.mesh_texcoord_offsets,
       rc.hfield_bvh_id,

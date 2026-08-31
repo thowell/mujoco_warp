@@ -2499,6 +2499,7 @@ class RenderContext:
     mesh_texcoord: mesh texture coordinates
     mesh_texcoord_offsets: mesh texture coordinate offsets
     mesh_facetexcoord: mesh face texture coordinates
+    mesh_facenormal: per-face indices into Model.mesh_normal
     textures: textures
     textures_registry: texture registry
     hfield_registry: hfield BVH id to warp mesh mapping
@@ -2543,6 +2544,8 @@ class RenderContext:
     headlight_ambient: RGB ambient color of the headlight (from vis.headlight).
     headlight_diffuse: RGB diffuse color of the headlight.
     headlight_specular: RGB specular color of the headlight.
+    shadow_light_fraction: fraction of a light's direct contribution reaching an
+      occluded point; 0 is a true shadow
     enable_backface_culling: drop primitive ray hits whose normal faces away
       from the ray (i.e. the ray origin is inside the geom). Matches MuJoCo's
       mesh-ray rule. When False, the renderer reports inner-surface hits, which
@@ -2559,6 +2562,8 @@ class RenderContext:
     has_orthographic_camera: True iff any actively rendering camera uses
       orthographic projection. When False, the kernel skips the ray origin
       offset since it is always zero for perspective-only scenes.
+    enable_vertex_normals: when True, shade meshes from their authored vertex
+      normals, matching mjr_uploadMesh; when False, use the face normal.
     enable_specular: when True, evaluate the Phong specular highlight per
       light per pixel (uses `mat_specular` / `mat_shininess`). When False,
       the entire specular branch is removed at compile time. Useful for
@@ -2609,6 +2614,7 @@ class RenderContext:
   mesh_texcoord: array("*", wp.vec2)
   mesh_texcoord_offsets: array("nmesh", int)
   mesh_facetexcoord: array("nmeshface", wp.vec3i)
+  mesh_facenormal: array("nmeshface", wp.vec3i)
   textures: array("*", wp.Texture2D)
   textures_registry: list[wp.Texture2D]
   hfield_registry: dict
@@ -2643,6 +2649,8 @@ class RenderContext:
   znear: float
   total_rays: int
   enable_backface_culling: bool
+  shadow_light_fraction: float
+  enable_vertex_normals: bool
   enable_specular: bool
   enable_emission: bool
   enable_per_light_ambient: bool
@@ -2660,3 +2668,4 @@ class RenderContext:
   splat_group_root: array("nworld", int)
   splat_count: int
   geom_ray_types: tuple = ()
+  _megakernel: Optional[wp.Kernel] = None
