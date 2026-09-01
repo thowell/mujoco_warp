@@ -131,6 +131,11 @@ class TypesTest(parameterized.TestCase):
     override_model(m, {"opt.warn_overflow": "CCD"})
     self.assertEqual(m.opt.warn_overflow, int(OverflowType.CCD))
 
+    m = put_model(mjm)
+    override_model(m, ["opt.warn_overflow=~ITERATIONS|~LS_ITERATIONS"])
+    expected = int(OverflowType.ALL) & ~OverflowType.ITERATIONS & ~OverflowType.LS_ITERATIONS
+    self.assertEqual(m.opt.warn_overflow, expected)
+
 
 if __name__ == "__main__":
   wp.init()
