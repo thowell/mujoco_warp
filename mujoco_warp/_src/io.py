@@ -2914,12 +2914,18 @@ def override_model(model: types.Model | mujoco.MjModel, overrides: dict[str, Any
       elif key in enum_fields and isinstance(val, str):
         # special case: enum value
         enum_members = val.split("|")
-        val = 0
+        enum_cls = enum_fields[key]
+        val = int(getattr(obj, attr)) if any(m.strip().startswith("~") for m in enum_members) else 0
         for enum_member in enum_members:
           enum_member = enum_member.strip().upper()
-          if enum_member not in enum_fields[key].__members__:
-            raise ValueError(f"Unrecognized enum value for {enum_fields[key].__name__}: {enum_member}")
-          val |= int(enum_fields[key][enum_member])
+          is_negated = enum_member.startswith("~")
+          name = enum_member[1:].strip() if is_negated else enum_member
+          if name not in enum_cls.__members__:
+            raise ValueError(f"Unrecognized enum value for {enum_cls.__name__}: {enum_member}")
+          if is_negated:
+            val &= ~int(enum_cls[name])
+          else:
+            val |= int(enum_cls[name])
       elif typ is bool and isinstance(val, str):
         # special case: "true", "TRUE", "false", "FALSE" etc.
         if val.upper() not in ("TRUE", "FALSE"):

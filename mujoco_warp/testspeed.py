@@ -169,7 +169,8 @@ def _main(argv: Sequence[str]):
   mjm = cli.load_model(path)
   free_mem_at_init = wp.get_device(device).free_memory
   m, d, rc, ctrls = cli.init_structs(_FUNCS[_FUNCTION.value], mjm)
-  m.opt.warn_overflow = int(OverflowType.ALL) if _OVERFLOW_BEHAVIOR.value == "continue" else 0
+  warn_overflow = m.opt.warn_overflow
+  m.opt.warn_overflow = warn_overflow if _OVERFLOW_BEHAVIOR.value == "continue" else 0
   timestep = m.opt.timestep.numpy()[0]
 
   if _FORMAT.value == "human":
@@ -264,7 +265,7 @@ def _main(argv: Sequence[str]):
     trace = _sum_trace(trace, step_trace)
 
     if _OVERFLOW_BEHAVIOR.value == "error":
-      overflows = d.overflow.numpy()
+      overflows = d.overflow.numpy() & warn_overflow
       if np.any(overflows != 0):
         world_ids = np.where(overflows != 0)[0]
         n_worlds = len(world_ids)
