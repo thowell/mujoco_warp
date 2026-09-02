@@ -1074,10 +1074,6 @@ class SensorTest(parameterized.TestCase):
     np.testing.assert_allclose(d.sensordata.numpy(), 0.0, atol=1e-6)
 
   @parameterized.parameters(1, 2)
-  @absltest.skipIf(
-    not util_pkg.check_version("mujoco>=3.12.1"),
-    "Requires mujoco>=3.12.1",
-  )
   def test_tactile_sensor_dynamic_parity(self, nworld):
     """Test tactile sensor 3-axis output against MuJoCo C with non-zero velocities."""
     # Note: refquat aligns the wedge's principal axes so mesh_quat is identity.
@@ -1130,10 +1126,52 @@ class SensorTest(parameterized.TestCase):
       _assert_eq(sensordata[w], mjd.sensordata, f"tactile_dynamic_world_{w}")
 
   @parameterized.parameters(1, 2)
-  @absltest.skipIf(
-    not util_pkg.check_version("mujoco>=3.12.1"),
-    "Requires mujoco>=3.12.1",
-  )
+  def test_tactile_sensor_dynamic_discriminating(self, nworld):
+    """Test tactile sensor with non-identity mesh_quat and contacting-body angular velocity."""
+    mjm, mjd, m, d = test_data.fixture(
+      xml="""
+      <mujoco>
+        <option>
+          <flag multiccd="enable" nativeccd="disable"/>
+        </option>
+        <asset>
+          <mesh name="sensor_mesh" builtin="wedge" params="3 3 45 45 0" scale=".2 .2 .2"/>
+        </asset>
+        <worldbody>
+          <body>
+            <geom type="box" size=".25 .25 .25"/>
+            <geom name="sensor_geom" type="mesh" mesh="sensor_mesh"
+                  mass="0" contype="0" conaffinity="0"/>
+          </body>
+          <body name="rotator">
+            <joint type="hinge" axis="0 1 0"/>
+            <geom type="box" size=".3 .3 .3"/>
+          </body>
+        </worldbody>
+        <sensor>
+          <tactile geom="sensor_geom" mesh="sensor_mesh"/>
+        </sensor>
+        <keyframe>
+          <key qvel="2.0"/>
+        </keyframe>
+      </mujoco>
+      """,
+      keyframe=0,
+      nworld=nworld,
+    )
+
+    d.sensordata.fill_(wp.inf)
+    mjw.forward(m, d)
+
+    sensordata = d.sensordata.numpy()
+    ntaxel = mjm.mesh_vertnum[0]
+    for w in range(nworld):
+      self.assertTrue(sensordata[w, 0 * ntaxel : 1 * ntaxel].any(), f"Depth channel empty for world {w}")
+      self.assertTrue(sensordata[w, 1 * ntaxel : 2 * ntaxel].any(), f"Slip U channel empty for world {w}")
+      if util_pkg.check_version("mujoco>=3.12.1.dev972096410"):
+        _assert_eq(sensordata[w], mjd.sensordata, f"tactile_discriminating_world_{w}")
+
+  @parameterized.parameters(1, 2)
   def test_tactile_sensor_duplicate_pressure_retention(self, nworld):
     """Test distinct geoms are retained without overflow under duplicate contact pressure."""
     mjm, mjd, m, d = test_data.fixture(
@@ -1213,10 +1251,6 @@ class SensorTest(parameterized.TestCase):
       _assert_eq(sensordata[w], mjd.sensordata, f"tactile_dedup_pressure_world_{w}")
 
   @parameterized.parameters(1, 2)
-  @absltest.skipIf(
-    not util_pkg.check_version("mujoco>=3.12.1"),
-    "Requires mujoco>=3.12.1",
-  )
   def test_tactile_sensor_dense_weld_indexing(self, nworld):
     """Test tactile sensor weld buffers use dense indexing (ntactileweld << nbody)."""
     # Verify model with no tactile sensors initializes ntactileweld=0 and weld_tactile_id=-1

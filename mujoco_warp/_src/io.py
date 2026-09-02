@@ -878,9 +878,6 @@ def put_model(mjm: mujoco.MjModel, batch_sizes: dict[str, int] | None = None) ->
   ]
   tactile_geomid = mjm.sensor_refid[mjm.sensor_type == mujoco.mjtSensor.mjSENS_TACTILE]
   tactile_weldid = mjm.body_weldid[mjm.geom_bodyid[tactile_geomid]]
-  # Note: body_has_tactile is indexed by weld root body ID (body_weldid)
-  m.body_has_tactile = np.zeros(mjm.nbody, dtype=bool)
-  m.body_has_tactile[tactile_weldid] = True
   unique_tactile_welds = np.unique(tactile_weldid)
   m.ntactileweld = int(len(unique_tactile_welds))
   weld_tactile_id = np.full(mjm.nbody, -1, dtype=np.int32)
