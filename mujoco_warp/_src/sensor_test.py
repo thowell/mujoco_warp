@@ -971,7 +971,8 @@ class SensorTest(parameterized.TestCase):
       nworld=nworld,
     )
 
-    # TODO(team): mujoco xml tactile doesn't support cutoff even though the implementation does
+    # Cutoff is applied by MuJoCo C engine (engine_sensor.c), but omitted in mjcf.schema;
+    # set on mjModel.
     mjm.sensor_cutoff[0] = cutoff_val
     m.sensor_cutoff.fill_(cutoff_val)
     mujoco.mj_sensorAcc(mjm, mjd)
@@ -1070,6 +1071,57 @@ class SensorTest(parameterized.TestCase):
     d.sensordata.fill_(wp.inf)
     mjw.forward(m, d)
     np.testing.assert_allclose(d.sensordata.numpy(), 0.0, atol=1e-6)
+
+  @parameterized.parameters(1, 2)
+  def test_tactile_sensor_dynamic_parity(self, nworld):
+    """Test tactile sensor 3-axis output against MuJoCo C with non-zero velocities."""
+    # Note: refquat aligns the wedge's principal axes so mesh_quat is identity.
+    # Combined with identity geom frame, this allows exact parity validation against
+    # MuJoCo C 3.12.1 (which predates commit 94cc2b147 where relative velocity projection
+    # into the geom frame was corrected).
+    mjm, mjd, m, d = test_data.fixture(
+      xml="""
+      <mujoco>
+        <option>
+          <flag multiccd="enable" nativeccd="disable"/>
+        </option>
+        <asset>
+          <mesh name="sensor_mesh" builtin="wedge" params="3 3 45 45 0" scale=".2 .2 .2"
+                refquat="0.5 0.5 0.5 -0.5"/>
+        </asset>
+        <worldbody>
+          <body>
+            <geom type="box" size=".25 .25 .25"/>
+            <geom name="sensor_geom" type="mesh" mesh="sensor_mesh"
+                  mass="0" contype="0" conaffinity="0"/>
+          </body>
+          <body name="slider">
+            <joint type="slide" axis="1 0 0"/>
+            <geom type="box" size=".3 .3 .3"/>
+          </body>
+        </worldbody>
+        <sensor>
+          <tactile geom="sensor_geom" mesh="sensor_mesh"/>
+        </sensor>
+        <keyframe>
+          <key qvel="2.0"/>
+        </keyframe>
+      </mujoco>
+      """,
+      keyframe=0,
+      nworld=nworld,
+    )
+
+    d.sensordata.fill_(wp.inf)
+    mjw.forward(m, d)
+
+    sensordata = d.sensordata.numpy()
+    ntaxel = mjm.mesh_vertnum[0]
+    for w in range(nworld):
+      self.assertTrue(sensordata[w, 0 * ntaxel : 1 * ntaxel].any(), f"Depth channel empty for world {w}")
+      self.assertTrue(sensordata[w, 1 * ntaxel : 2 * ntaxel].any(), f"Slip U channel empty for world {w}")
+      self.assertTrue(sensordata[w, 2 * ntaxel : 3 * ntaxel].any(), f"Slip V channel empty for world {w}")
+      _assert_eq(sensordata[w], mjd.sensordata, f"tactile_dynamic_world_{w}")
 
 
 if __name__ == "__main__":

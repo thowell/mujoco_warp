@@ -2145,7 +2145,7 @@ def _transform_spatial(vec: wp.spatial_vector, dif: wp.vec3) -> wp.vec3:
 
 
 @cache_kernel
-def _preprocess_tactile_contacts_kernel(warn_overflow: bool):
+def _preprocess_tactile_contacts_kernel(warn_overflow: int):
   @wp.kernel(module="unique", enable_backward=False, grid_stride=True)
   def _preprocess_tactile_contacts(
     # Model:
@@ -2191,6 +2191,9 @@ def _preprocess_tactile_contacts_kernel(warn_overflow: bool):
       cur_count = weld_geom_count_out[worldid, weld]
       already_present = int(0)
       limit = wp.min(cur_count, MJ_MAXCONPAIR)
+      # Best-effort capacity deduplication to avoid premature buffer overflow under dense contacts.
+      # Concurrent threads may occasionally insert duplicates; downstream _sensor_tactile
+      # guarantees exactness.
       for k in range(limit):
         if weld_geom_list_out[worldid, weld, k] == geom:
           already_present = int(1)
@@ -2201,10 +2204,11 @@ def _preprocess_tactile_contacts_kernel(warn_overflow: bool):
         if idx < MJ_MAXCONPAIR:
           weld_geom_list_out[worldid, weld, idx] = geom
         else:
-          if wp.static(warn_overflow):
+          if wp.static(bool(warn_overflow & OverflowType.TACTILE)):
             if idx == MJ_MAXCONPAIR:
               wp.printf(
-                "tactile sensor collision pair overflow: number of contacting geoms >= %u\n",
+                "tactile sensor collision pair overflow: number of contacting geoms >= %u\n"
+                "To disable the print warning: m.opt.warn_overflow &= ~mjw.OverflowType.TACTILE (or = 0 for all)\n",
                 MJ_MAXCONPAIR,
               )
           wp.atomic_or(overflow_out, worldid, int(OverflowType.TACTILE))
@@ -2282,15 +2286,9 @@ def _sensor_tactile(
   xpos = sensor_mat @ pos + geom_xpos_in[worldid, geom_id]
 
   has_frame = (mesh_normalnum[mesh_id] == 3 * ncon) and (nchannel >= 3)
-  tang1 = wp.vec3(0.0, 0.0, 0.0)
-  tang2 = wp.vec3(0.0, 0.0, 0.0)
+  offset = int(0)
   if has_frame:
     offset = mesh_normaladr[mesh_id] + 3 * vertid
-    quat = mesh_quat[mesh_id]
-    tang1_geom = math.rot_vec_quat(mesh_normal[offset + 1], quat)
-    tang2_geom = math.rot_vec_quat(mesh_normal[offset + 2], quat)
-    tang1 = sensor_mat @ tang1_geom
-    tang2 = sensor_mat @ tang2_geom
 
   vel_sensor = _transform_spatial(
     cvel_in[worldid, parent_weld],
@@ -2304,9 +2302,14 @@ def _sensor_tactile(
   max_geoms = wp.min(geom_count, MJ_MAXCONPAIR)
   for g in range(max_geoms):
     geom = weld_geom_list_in[worldid, parent_weld, g]
+    # Unlike MuJoCo C which excludes self-geom during preprocessing, weld_geom_list is shared
+    # across all sensors on the same weld body. Skipping geom == geom_id here ensures each
+    # sensor on the weld body filters its own geom without affecting others.
     if geom < 0 or geom == geom_id:
       continue
 
+    # Load-bearing deduplication check: ensures geoms are processed at most once even if
+    # concurrent preprocessing inserted duplicates into weld_geom_list.
     is_dup = int(0)
     for j in range(g):
       if weld_geom_list_in[worldid, parent_weld, j] == geom:
@@ -2355,17 +2358,18 @@ def _sensor_tactile(
     if has_frame:
       vel_other = _transform_spatial(
         cvel_in[worldid, body],
-        geom_xpos_in[worldid, geom] - subtree_com_in[worldid, body_rootid[body]],
+        xpos - subtree_com_in[worldid, body_rootid[body]],
       )
       vel_rel = vel_sensor - vel_other
-      tang1_acc += wp.abs(wp.dot(vel_rel, tang1))
-      tang2_acc += wp.abs(wp.dot(vel_rel, tang2))
+      vel_rel_geom = wp.transpose(sensor_mat) @ vel_rel
+      tang1_acc += wp.abs(wp.dot(vel_rel_geom, mesh_normal[offset + 1]))
+      tang2_acc += wp.abs(wp.dot(vel_rel_geom, mesh_normal[offset + 2]))
 
   cutoff = sensor_cutoff[sensor_id]
   if cutoff > 0.0:
-    max_depth = wp.min(max_depth, cutoff)
-    tang1_acc = wp.min(tang1_acc, cutoff)
-    tang2_acc = wp.min(tang2_acc, cutoff)
+    max_depth = wp.clamp(max_depth, -cutoff, cutoff)
+    tang1_acc = wp.clamp(tang1_acc, -cutoff, cutoff)
+    tang2_acc = wp.clamp(tang2_acc, -cutoff, cutoff)
 
   sensordata_out[worldid, sensor_adr[sensor_id] + 0 * ncon + vertid] = max_depth
   if has_frame:
@@ -2619,7 +2623,7 @@ def sensor_acc(m: Model, d: Data):
     weld_geom_count = wp.zeros((d.nworld, m.nbody), dtype=int)
     weld_geom_list = wp.full((d.nworld, m.nbody, MJ_MAXCONPAIR), -1, dtype=int)
     wp.launch(
-      _preprocess_tactile_contacts_kernel(bool(m.opt.warn_overflow)),
+      _preprocess_tactile_contacts_kernel(int(m.opt.warn_overflow)),
       dim=d.naconmax,
       inputs=[
         m.body_weldid,
