@@ -25,6 +25,7 @@ import mujoco_warp as mjw
 from mujoco_warp import DisableBit
 from mujoco_warp import GeomType
 from mujoco_warp import test_data
+from mujoco_warp._src import util_pkg
 from mujoco_warp._src.collision_core import create_collision_context
 from mujoco_warp._src.collision_driver import MJ_COLLISION_TABLE
 from mujoco_warp._src.types import CollisionType
@@ -1073,12 +1074,17 @@ class SensorTest(parameterized.TestCase):
     np.testing.assert_allclose(d.sensordata.numpy(), 0.0, atol=1e-6)
 
   @parameterized.parameters(1, 2)
+  @absltest.skipIf(
+    not util_pkg.check_version("mujoco>=3.12.1"),
+    "Requires mujoco>=3.12.1",
+  )
   def test_tactile_sensor_dynamic_parity(self, nworld):
     """Test tactile sensor 3-axis output against MuJoCo C with non-zero velocities."""
     # Note: refquat aligns the wedge's principal axes so mesh_quat is identity.
-    # Combined with identity geom frame, this allows exact parity validation against
-    # MuJoCo C 3.12.1 (which predates commit 94cc2b147 where relative velocity projection
-    # into the geom frame was corrected).
+    # Combined with identity geom frame and pure translation, this exercises pipeline
+    # execution and channel layout on a reference scene compatible with MuJoCo C 3.12.0.
+    # Coverage for non-degenerate tangent rotation and contact-point velocity is gated
+    # on the reference implementation.
     mjm, mjd, m, d = test_data.fixture(
       xml="""
       <mujoco>
@@ -1124,6 +1130,10 @@ class SensorTest(parameterized.TestCase):
       _assert_eq(sensordata[w], mjd.sensordata, f"tactile_dynamic_world_{w}")
 
   @parameterized.parameters(1, 2)
+  @absltest.skipIf(
+    not util_pkg.check_version("mujoco>=3.12.1"),
+    "Requires mujoco>=3.12.1",
+  )
   def test_tactile_sensor_duplicate_pressure_retention(self, nworld):
     """Test distinct geoms are retained without overflow under duplicate contact pressure."""
     mjm, mjd, m, d = test_data.fixture(
@@ -1201,6 +1211,88 @@ class SensorTest(parameterized.TestCase):
       self.assertGreater(sensordata[w, 4], 0.0, f"Geom A taxel 4 empty for world {w}")
       self.assertGreater(sensordata[w, 5], 0.0, f"Geom B taxel 5 empty for world {w}")
       _assert_eq(sensordata[w], mjd.sensordata, f"tactile_dedup_pressure_world_{w}")
+
+  @parameterized.parameters(1, 2)
+  @absltest.skipIf(
+    not util_pkg.check_version("mujoco>=3.12.1"),
+    "Requires mujoco>=3.12.1",
+  )
+  def test_tactile_sensor_dense_weld_indexing(self, nworld):
+    """Test tactile sensor weld buffers use dense indexing (ntactileweld << nbody)."""
+    # Verify model with no tactile sensors initializes ntactileweld=0 and weld_tactile_id=-1
+    mjm_no_tactile = mujoco.MjModel.from_xml_string("""
+    <mujoco>
+      <worldbody>
+        <body name="b1"><geom type="sphere" size="0.1"/></body>
+      </worldbody>
+    </mujoco>
+    """)
+    m_no_tactile = mjw.put_model(mjm_no_tactile)
+    self.assertEqual(m_no_tactile.ntactileweld, 0)
+    self.assertTrue((m_no_tactile.weld_tactile_id.numpy() == -1).all())
+
+    # Multi-body model where only a subset of bodies have tactile sensors
+    mjm, mjd, m, d = test_data.fixture(
+      xml="""
+      <mujoco>
+        <option>
+          <flag multiccd="enable" nativeccd="disable"/>
+        </option>
+        <asset>
+          <mesh name="sensor_mesh" builtin="wedge" params="3 3 45 45 0" scale=".2 .2 .2"
+                refquat="0.5 0.5 0.5 -0.5"/>
+        </asset>
+        <worldbody>
+          <body name="body_with_sensor_1">
+            <joint name="jnt1" type="hinge" axis="0 0 1"/>
+            <geom type="box" size=".25 .25 .25"/>
+            <geom name="sensor_geom_1" type="mesh" mesh="sensor_mesh"
+                  mass="0" contype="0" conaffinity="0"/>
+          </body>
+          <body name="inert_body_no_sensor" pos="5 0 0">
+            <joint name="jnt2" type="hinge" axis="0 0 1"/>
+            <geom type="sphere" size=".1"/>
+          </body>
+          <body name="body_with_sensor_2" pos="0 5 0">
+            <joint name="jnt3" type="hinge" axis="0 0 1"/>
+            <geom type="box" size=".25 .25 .25"/>
+            <geom name="sensor_geom_2" type="mesh" mesh="sensor_mesh"
+                  mass="0" contype="0" conaffinity="0"/>
+          </body>
+          <body name="slider">
+            <joint name="jnt4" type="slide" axis="1 0 0"/>
+            <geom type="box" size=".3 .3 .3"/>
+          </body>
+        </worldbody>
+        <sensor>
+          <tactile geom="sensor_geom_1" mesh="sensor_mesh"/>
+          <tactile geom="sensor_geom_2" mesh="sensor_mesh"/>
+        </sensor>
+        <keyframe>
+          <key qvel="0 0 0 2.0"/>
+        </keyframe>
+      </mujoco>
+      """,
+      keyframe=0,
+      nworld=nworld,
+    )
+    # Bodies: world(0), body_with_sensor_1(1), inert_body(2), body_with_sensor_2(3), slider(4)
+    # Only bodies 1 and 3 have tactile sensors, so ntactileweld == 2 while nbody == 5
+    self.assertEqual(m.ntactileweld, 2)
+    self.assertEqual(mjm.nbody, 5)
+    weld_tactile_id = m.weld_tactile_id.numpy()
+    self.assertEqual(weld_tactile_id[0], -1)
+    self.assertEqual(weld_tactile_id[1], 0)
+    self.assertEqual(weld_tactile_id[2], -1)
+    self.assertEqual(weld_tactile_id[3], 1)
+    self.assertEqual(weld_tactile_id[4], -1)
+
+    d.sensordata.fill_(wp.inf)
+    mjw.forward(m, d)
+
+    sensordata = d.sensordata.numpy()
+    for w in range(nworld):
+      _assert_eq(sensordata[w], mjd.sensordata, f"tactile_dense_world_{w}")
 
 
 if __name__ == "__main__":

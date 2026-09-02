@@ -1409,6 +1409,7 @@ class Model:
     nsensorcollision: number of unique collisions for
                       geom distance sensors
     nsensortaxel: number of taxels in all tactile sensors
+    ntactileweld: number of unique weld bodies with tactile sensors
     nsensorcontact: number of contact sensors
     nrangefinder: number of rangefinder sensors
     nmaxcondim: maximum condim across geoms, pairs, and flexes
@@ -1494,6 +1495,7 @@ class Model:
     sensor_rne_postconstraint: evaluate rne_postconstraint
     sensor_rangefinder_bodyid: bodyid for rangefinder        (nrangefinder,)
     body_has_tactile: weld body has tactile sensor           (nbody,)
+    weld_tactile_id: weld body to tactile weld index         (nbody,)
     taxel_vertadr: tactile sensor vertex address             (nsensortaxel,)
     taxel_sensorid: address for tactile sensors
     M_tiles: scalar and tiled block-factorization groups
@@ -1904,6 +1906,7 @@ class Model:
   nacttrnbody: int
   nsensorcollision: int
   nsensortaxel: int
+  ntactileweld: int
   nsensorcontact: int
   nrangefinder: int
   nmaxcondim: int
@@ -1979,6 +1982,7 @@ class Model:
   sensor_rne_postconstraint: bool
   sensor_rangefinder_bodyid: array("nrangefinder", int)
   body_has_tactile: array("nbody", bool)
+  weld_tactile_id: array("nbody", int)
   taxel_vertadr: array("nsensortaxel", int)
   taxel_sensorid: array("nsensortaxel", int)
   M_tiles: tuple[TileSet, ...]

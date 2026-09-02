@@ -2151,7 +2151,7 @@ def _preprocess_tactile_contacts_kernel(warn_overflow: int):
     # Model:
     body_weldid: wp.array[int],
     geom_bodyid: wp.array[int],
-    body_has_tactile: wp.array[bool],
+    weld_tactile_id: wp.array[int],
     # Data in:
     contact_geom_in: wp.array[wp.vec2i],
     contact_worldid_in: wp.array[int],
@@ -2186,18 +2186,19 @@ def _preprocess_tactile_contacts_kernel(warn_overflow: int):
       geom = geom2 if side == 0 else geom1
 
       # Skip bodies without tactile sensors
-      if not body_has_tactile[weld]:
+      tactile_idx = weld_tactile_id[weld]
+      if tactile_idx < 0:
         continue
 
       # Exact atomic bitset test-and-set guarantees one slot reservation per distinct geom.
       # Duplicate contacts for the same geom cannot consume buffer slots or displace distinct geoms.
       word_idx = geom // 32
       bit_mask = wp.uint32(1) << wp.uint32(geom % 32)
-      old_seen = wp.atomic_or(weld_geom_seen_out[worldid, weld], word_idx, bit_mask)
+      old_seen = wp.atomic_or(weld_geom_seen_out[worldid, tactile_idx], word_idx, bit_mask)
       if (old_seen & bit_mask) == wp.uint32(0):
-        idx = wp.atomic_add(weld_geom_count_out[worldid], weld, 1)
+        idx = wp.atomic_add(weld_geom_count_out[worldid], tactile_idx, 1)
         if idx < MJ_MAXCONPAIR:
-          weld_geom_list_out[worldid, weld, idx] = geom
+          weld_geom_list_out[worldid, tactile_idx, idx] = geom
         else:
           if wp.static(bool(warn_overflow & OverflowType.TACTILE)):
             if idx == MJ_MAXCONPAIR:
@@ -2240,6 +2241,7 @@ def _sensor_tactile(
   plugin: wp.array[int],
   plugin_attr: wp.array[vec_pluginattr],
   geom_plugin_index: wp.array[int],
+  weld_tactile_id: wp.array[int],
   taxel_vertadr: wp.array[int],
   taxel_sensorid: wp.array[int],
   # Data in:
@@ -2260,6 +2262,7 @@ def _sensor_tactile(
   geom_id = sensor_refid[sensor_id]
   parent_body = geom_bodyid[geom_id]
   parent_weld = body_weldid[parent_body]
+  tactile_idx = weld_tactile_id[parent_weld]
 
   ncon = mesh_vertnum[mesh_id]
   nchannel = sensor_dim[sensor_id] // ncon
@@ -2269,7 +2272,10 @@ def _sensor_tactile(
   for c in range(nchannel):
     sensordata_out[worldid, sensor_adr[sensor_id] + c * ncon + vertid] = 0.0
 
-  geom_count = weld_geom_count_in[worldid, parent_weld]
+  if tactile_idx < 0:
+    return
+
+  geom_count = weld_geom_count_in[worldid, tactile_idx]
   if geom_count == 0:
     return
 
@@ -2296,21 +2302,11 @@ def _sensor_tactile(
 
   max_geoms = wp.min(geom_count, MJ_MAXCONPAIR)
   for g in range(max_geoms):
-    geom = weld_geom_list_in[worldid, parent_weld, g]
+    geom = weld_geom_list_in[worldid, tactile_idx, g]
     # Unlike MuJoCo C which excludes self-geom during preprocessing, weld_geom_list is shared
     # across all sensors on the same weld body. Skipping geom == geom_id here ensures each
     # sensor on the weld body filters its own geom without affecting others.
     if geom < 0 or geom == geom_id:
-      continue
-
-    # Load-bearing deduplication check: ensures geoms are processed at most once even if
-    # concurrent preprocessing inserted duplicates into weld_geom_list.
-    is_dup = int(0)
-    for j in range(g):
-      if weld_geom_list_in[worldid, parent_weld, j] == geom:
-        is_dup = int(1)
-        break
-    if is_dup == int(1):
       continue
 
     contact_type = geom_type[geom]
@@ -2615,17 +2611,17 @@ def sensor_acc(m: Model, d: Data):
   )
 
   if m.nsensortaxel:
-    weld_geom_count = wp.zeros((d.nworld, m.nbody), dtype=int)
-    weld_geom_list = wp.full((d.nworld, m.nbody, MJ_MAXCONPAIR), -1, dtype=int)
+    weld_geom_count = wp.zeros((d.nworld, m.ntactileweld), dtype=int)
+    weld_geom_list = wp.full((d.nworld, m.ntactileweld, MJ_MAXCONPAIR), -1, dtype=int)
     nwords = (m.ngeom + 31) // 32
-    weld_geom_seen = wp.zeros((d.nworld, m.nbody, nwords), dtype=wp.uint32)
+    weld_geom_seen = wp.zeros((d.nworld, m.ntactileweld, nwords), dtype=wp.uint32)
     wp.launch(
       _preprocess_tactile_contacts_kernel(int(m.opt.warn_overflow)),
       dim=d.naconmax,
       inputs=[
         m.body_weldid,
         m.geom_bodyid,
-        m.body_has_tactile,
+        m.weld_tactile_id,
         d.contact.geom,
         d.contact.worldid,
         d.nacon,
@@ -2668,6 +2664,7 @@ def sensor_acc(m: Model, d: Data):
         m.plugin,
         m.plugin_attr,
         m.geom_plugin_index,
+        m.weld_tactile_id,
         m.taxel_vertadr,
         m.taxel_sensorid,
         d.geom_xpos,
