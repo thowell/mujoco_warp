@@ -2159,6 +2159,7 @@ def _preprocess_tactile_contacts_kernel(warn_overflow: int):
     # Data out:
     overflow_out: wp.array[int],
     # Out:
+    weld_geom_seen_out: wp.array3d[wp.uint32],
     weld_geom_count_out: wp.array2d[int],
     weld_geom_list_out: wp.array3d[int],
   ):
@@ -2188,18 +2189,12 @@ def _preprocess_tactile_contacts_kernel(warn_overflow: int):
       if not body_has_tactile[weld]:
         continue
 
-      cur_count = weld_geom_count_out[worldid, weld]
-      already_present = int(0)
-      limit = wp.min(cur_count, MJ_MAXCONPAIR)
-      # Best-effort capacity deduplication to avoid premature buffer overflow under dense contacts.
-      # Concurrent threads may occasionally insert duplicates; downstream _sensor_tactile
-      # guarantees exactness.
-      for k in range(limit):
-        if weld_geom_list_out[worldid, weld, k] == geom:
-          already_present = int(1)
-          break
-
-      if already_present == int(0):
+      # Exact atomic bitset test-and-set guarantees one slot reservation per distinct geom.
+      # Duplicate contacts for the same geom cannot consume buffer slots or displace distinct geoms.
+      word_idx = geom // 32
+      bit_mask = wp.uint32(1) << wp.uint32(geom % 32)
+      old_seen = wp.atomic_or(weld_geom_seen_out[worldid, weld], word_idx, bit_mask)
+      if (old_seen & bit_mask) == wp.uint32(0):
         idx = wp.atomic_add(weld_geom_count_out[worldid], weld, 1)
         if idx < MJ_MAXCONPAIR:
           weld_geom_list_out[worldid, weld, idx] = geom
@@ -2622,6 +2617,8 @@ def sensor_acc(m: Model, d: Data):
   if m.nsensortaxel:
     weld_geom_count = wp.zeros((d.nworld, m.nbody), dtype=int)
     weld_geom_list = wp.full((d.nworld, m.nbody, MJ_MAXCONPAIR), -1, dtype=int)
+    nwords = (m.ngeom + 31) // 32
+    weld_geom_seen = wp.zeros((d.nworld, m.nbody, nwords), dtype=wp.uint32)
     wp.launch(
       _preprocess_tactile_contacts_kernel(int(m.opt.warn_overflow)),
       dim=d.naconmax,
@@ -2635,6 +2632,7 @@ def sensor_acc(m: Model, d: Data):
       ],
       outputs=[
         d.overflow,
+        weld_geom_seen,
         weld_geom_count,
         weld_geom_list,
       ],

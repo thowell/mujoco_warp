@@ -1123,6 +1123,85 @@ class SensorTest(parameterized.TestCase):
       self.assertTrue(sensordata[w, 2 * ntaxel : 3 * ntaxel].any(), f"Slip V channel empty for world {w}")
       _assert_eq(sensordata[w], mjd.sensordata, f"tactile_dynamic_world_{w}")
 
+  @parameterized.parameters(1, 2)
+  def test_tactile_sensor_duplicate_pressure_retention(self, nworld):
+    """Test distinct geoms are retained without overflow under duplicate contact pressure."""
+    mjm, mjd, m, d = test_data.fixture(
+      xml="""
+      <mujoco>
+        <asset>
+          <mesh name="sensor_mesh" builtin="sphere" params="0"/>
+        </asset>
+        <worldbody>
+          <body name="sensor_body" pos="0 0 1">
+            <freejoint/>
+            <geom name="sensor_geom" type="mesh" mesh="sensor_mesh"/>
+          </body>
+          <body name="body_a" pos="0 -0.525 1.85">
+            <geom name="geom_a" type="sphere" size="0.2"/>
+          </body>
+          <body name="body_b" pos="0 0.525 1.85">
+            <geom name="geom_b" type="sphere" size="0.2"/>
+          </body>
+        </worldbody>
+        <sensor>
+          <tactile geom="sensor_geom" mesh="sensor_mesh"/>
+        </sensor>
+      </mujoco>
+      """,
+      nworld=nworld,
+      nconmax=200,
+    )
+
+    geom_sensor_id = mujoco.mj_name2id(mjm, mujoco.mjtObj.mjOBJ_GEOM, "sensor_geom")
+    geom_a_id = mujoco.mj_name2id(mjm, mujoco.mjtObj.mjOBJ_GEOM, "geom_a")
+    geom_b_id = mujoco.mj_name2id(mjm, mujoco.mjtObj.mjOBJ_GEOM, "geom_b")
+
+    con_a = mujoco.MjContact()
+    con_a.geom1 = geom_sensor_id
+    con_a.geom2 = geom_a_id
+    con_b = mujoco.MjContact()
+    con_b.geom1 = geom_sensor_id
+    con_b.geom2 = geom_b_id
+
+    # Add 60 duplicate contacts for geom_a and 1 contact for geom_b
+    for _ in range(60):
+      mujoco.mj_addContact(mjm, mjd, con_a)
+    mujoco.mj_addContact(mjm, mjd, con_b)
+
+    ncon_per_world = mjd.ncon
+    total_ncon = nworld * ncon_per_world
+
+    contact_geom_np = np.zeros((d.naconmax, 2), dtype=np.int32)
+    contact_worldid_np = np.zeros(d.naconmax, dtype=np.int32)
+    for w in range(nworld):
+      start = w * ncon_per_world
+      end = start + ncon_per_world
+      contact_geom_np[start:end, 0] = mjd.contact.geom1[:ncon_per_world]
+      contact_geom_np[start:end, 1] = mjd.contact.geom2[:ncon_per_world]
+      contact_worldid_np[start:end] = w
+
+    d.contact.geom.assign(contact_geom_np)
+    d.contact.worldid.assign(contact_worldid_np)
+    d.nacon.fill_(total_ncon)
+
+    d.overflow.fill_(0)
+    d.sensordata.fill_(wp.inf)
+    mjw.sensor_acc(m, d)
+
+    # Overflow should NOT be set because there are only 2 distinct contacting geoms
+    overflow_vals = d.overflow.numpy()
+    for w in range(nworld):
+      self.assertFalse(bool(overflow_vals[w] & OverflowType.TACTILE), f"Overflow set for world {w}")
+
+    mujoco.mj_sensorAcc(mjm, mjd)
+    sensordata = d.sensordata.numpy()
+    for w in range(nworld):
+      # Vertex 4 corresponds to geom_a, vertex 5 corresponds to geom_b
+      self.assertGreater(sensordata[w, 4], 0.0, f"Geom A taxel 4 empty for world {w}")
+      self.assertGreater(sensordata[w, 5], 0.0, f"Geom B taxel 5 empty for world {w}")
+      _assert_eq(sensordata[w], mjd.sensordata, f"tactile_dedup_pressure_world_{w}")
+
 
 if __name__ == "__main__":
   wp.init()
