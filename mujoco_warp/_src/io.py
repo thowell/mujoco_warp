@@ -876,6 +876,14 @@ def put_model(mjm: mujoco.MjModel, batch_sizes: dict[str, int] | None = None) ->
     if mjm.sensor_type[i] == mujoco.mjtSensor.mjSENS_TACTILE
     for j in range(mjm.mesh_vertnum[mjm.sensor_objid[i]])
   ]
+  tactile_geomid = mjm.sensor_refid[mjm.sensor_type == mujoco.mjtSensor.mjSENS_TACTILE]
+  tactile_weldid = mjm.body_weldid[mjm.geom_bodyid[tactile_geomid]]
+  unique_tactile_welds = np.unique(tactile_weldid)
+  m.ntactileweld = int(len(unique_tactile_welds))
+  weld_tactile_id = np.full(mjm.nbody, -1, dtype=np.int32)
+  for idx, weld in enumerate(unique_tactile_welds):
+    weld_tactile_id[weld] = idx
+  m.weld_tactile_id = weld_tactile_id
 
   # Per-block scalar/tile/sparse layout (see m_block_layout).
   _lay = m_block_layout(mjm)

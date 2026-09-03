@@ -165,6 +165,7 @@ class OverflowType(enum.IntFlag):
     EPA_HORIZON: EPA horizon buffer overflow
     ITERATIONS: solver iteration limit reached
     LS_ITERATIONS: linesearch iteration limit reached
+    TACTILE: tactile sensor collision pair overflow
     ALL: all overflows
   """
 
@@ -180,6 +181,7 @@ class OverflowType(enum.IntFlag):
   EPA_HORIZON = 1 << 8
   ITERATIONS = 1 << 9
   LS_ITERATIONS = 1 << 10
+  TACTILE = 1 << 11
   ALL = (
     NEFC
     | NJMAX_NNZ
@@ -192,6 +194,7 @@ class OverflowType(enum.IntFlag):
     | EPA_HORIZON
     | ITERATIONS
     | LS_ITERATIONS
+    | TACTILE
   )
 
 
@@ -1406,6 +1409,7 @@ class Model:
     nsensorcollision: number of unique collisions for
                       geom distance sensors
     nsensortaxel: number of taxels in all tactile sensors
+    ntactileweld: number of unique weld bodies with tactile sensors
     nsensorcontact: number of contact sensors
     nrangefinder: number of rangefinder sensors
     nmaxcondim: maximum condim across geoms, pairs, and flexes
@@ -1490,6 +1494,7 @@ class Model:
     sensor_adr_to_contact_adr: map sensor adr to contact adr (nsensor,)
     sensor_rne_postconstraint: evaluate rne_postconstraint
     sensor_rangefinder_bodyid: bodyid for rangefinder        (nrangefinder,)
+    weld_tactile_id: weld body to tactile weld index         (nbody,)
     taxel_vertadr: tactile sensor vertex address             (nsensortaxel,)
     taxel_sensorid: address for tactile sensors
     M_tiles: scalar and tiled block-factorization groups
@@ -1900,6 +1905,7 @@ class Model:
   nacttrnbody: int
   nsensorcollision: int
   nsensortaxel: int
+  ntactileweld: int
   nsensorcontact: int
   nrangefinder: int
   nmaxcondim: int
@@ -1974,6 +1980,7 @@ class Model:
   sensor_adr_to_contact_adr: array("nsensor", int)
   sensor_rne_postconstraint: bool
   sensor_rangefinder_bodyid: array("nrangefinder", int)
+  weld_tactile_id: array("nbody", int)
   taxel_vertadr: array("nsensortaxel", int)
   taxel_sensorid: array("nsensortaxel", int)
   M_tiles: tuple[TileSet, ...]
