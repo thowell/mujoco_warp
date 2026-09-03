@@ -1383,7 +1383,6 @@ def _flex_sap_sweep(is_self: bool, warn_overflow: int):
     flex_elem: wp.array[int],
     flex_radius: wp.array[float],
     flex_elemflexid: wp.array[int],
-    flex_selfcollide_mask: wp.array2d[int],
     # Data in:
     flexvert_xpos_in: wp.array2d[wp.vec3],
     flex_aabb_min_in: wp.array2d[wp.vec3],
@@ -1442,11 +1441,6 @@ def _flex_sap_sweep(is_self: bool, warn_overflow: int):
         flexid2 = tmpid
 
       worldelemid += nsweep_in
-
-      if wp.static(is_self):
-        word = flex_selfcollide_mask[elem1, elem2 >> 5]
-        if (word & (1 << (elem2 & 31))) != 0:
-          continue
 
       if not wp.static(is_self):
         if _flex_element_aabb_filter(
@@ -3802,7 +3796,6 @@ def _flex_sap_collision(
       m.flex_elem,
       m.flex_radius,
       m.flex_elemflexid,
-      m.flex_selfcollide_mask,
       d.flexvert_xpos,
       d.flex_aabb_min,
       d.flex_aabb_max,

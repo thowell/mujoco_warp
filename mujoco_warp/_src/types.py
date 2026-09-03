@@ -1532,8 +1532,6 @@ class Model:
     nflexface: number of interpolated flex shell faces
     flex_face_map: mapping of face index to flex and local element face indices
     flex_face: global node indices of each face                             (nflexface, 9)
-    nflexelem_words: number of 32-bit words per element in collision mask
-    flex_selfcollide_mask: bitmask of excluded element pairs (nflexelem, nflexelem_words)
   """
 
   nq: int
@@ -2024,8 +2022,6 @@ class Model:
   nflexface: int
   flex_face_map: array("nflexface", wp.vec2i)
   flex_face: array("nflexface", 9, int)
-  nflexelem_words: int
-  flex_selfcollide_mask: array("nflexelem", "nflexelem_words", int)
 
 
 class ContactType(enum.IntFlag):

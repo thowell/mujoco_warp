@@ -2721,53 +2721,6 @@ class IOTest(parameterized.TestCase):
     with self.assertRaises(NotImplementedError):
       test_data.fixture(xml=xml)
 
-  def test_flex_selfcollide_mask_disabled(self):
-    """When self-collision is disabled, nflexelem_words is 0 and mask has 0 columns."""
-    mjm, _, m, _ = test_data.fixture(
-      xml="""
-      <mujoco>
-        <worldbody>
-          <flexcomp name="cloth" type="grid" count="3 3 1" spacing=".2 .2 .1" pos="0 0 0"
-                    radius=".02" dim="2" mass=".5">
-            <contact selfcollide="none"/>
-          </flexcomp>
-        </worldbody>
-      </mujoco>
-      """
-    )
-    self.assertFalse(m.has_flex_selfcollide)
-    self.assertEqual(m.nflexelem_words, 0)
-    self.assertEqual(m.flex_selfcollide_mask.shape, (mjm.nflexelem, 0))
-
-  def test_flex_selfcollide_mask_precomputation(self):
-    """Adjacent elements sharing vertices have bit 1 set; disjoint elements have bit 0."""
-    _, _, m, _ = test_data.fixture(
-      xml="""
-      <mujoco>
-        <worldbody>
-          <flexcomp name="rope" type="grid" count="4 1 1" spacing=".2 .2 .1" pos="0 0 0"
-                    radius=".02" dim="1" mass=".5">
-            <contact selfcollide="auto"/>
-          </flexcomp>
-        </worldbody>
-      </mujoco>
-      """
-    )
-    self.assertTrue(m.has_flex_selfcollide)
-    self.assertEqual(m.nflexelem_words, 1)
-    mask = m.flex_selfcollide_mask.numpy()
-    self.assertEqual(mask.shape, (3, 1))
-
-    # Element e shares vertices with e-1 and e+1, and self e
-    for e1 in range(3):
-      word = mask[e1, 0]
-      for e2 in range(3):
-        bit = (word >> e2) & 1
-        if abs(e1 - e2) <= 1:
-          self.assertEqual(bit, 1, f"Expected bit 1 for adjacent elements {e1} and {e2}")
-        else:
-          self.assertEqual(bit, 0, f"Expected bit 0 for non-adjacent elements {e1} and {e2}")
-
 
 if __name__ == "__main__":
   wp.init()

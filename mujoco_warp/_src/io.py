@@ -428,7 +428,6 @@ def put_model(mjm: mujoco.MjModel, batch_sizes: dict[str, int] | None = None) ->
   m.is_sparse = is_sparse(mjm)
   m.has_fluid = bool(mjm.opt.wind.any() or mjm.opt.density > 0 or mjm.opt.viscosity > 0)
   m.nflexintcell = _get_nflexintcell(mjm)
-  m.nflexelem_words = (mjm.nflexelem + 31) // 32 if (mjm.nflexelem > 0 and m.has_flex_selfcollide) else 0
 
   # Precompute flex_cell_map
   flex_cell_map = []
@@ -1046,55 +1045,6 @@ def put_model(mjm: mujoco.MjModel, batch_sizes: dict[str, int] | None = None) ->
   m.flex_shellflexid = flex_shellflexid
   m.flex_vertflexid = flex_vertflexid
   m.flex_shelladr = flex_shelladr
-
-  # Precompute flex_selfcollide_mask: topologically adjacent elements sharing vertices/bodies
-  if mjm.nflexelem > 0 and m.has_flex_selfcollide:
-    mask = np.zeros((mjm.nflexelem, m.nflexelem_words), dtype=np.int32)
-    for e in range(mjm.nflexelem):
-      mask[e, e >> 5] |= np.uint32(1 << (e & 31)).view(np.int32)
-
-    flex_dim = mjm.flex_dim
-    flex_elemadr = mjm.flex_elemadr
-    flex_elemdataadr = mjm.flex_elemdataadr
-    flex_vertadr = mjm.flex_vertadr
-    flex_elem = mjm.flex_elem
-    flex_vertbodyid = mjm.flex_vertbodyid
-
-    for fi in range(mjm.nflex):
-      if mjm.flex_selfcollide[fi] == 0 or (mjm.flex_contype[fi] & mjm.flex_conaffinity[fi]) == 0:
-        continue
-      start = flex_elemadr[fi]
-      num = mjm.flex_elemnum[fi]
-      dim = flex_dim[fi]
-      data_start = flex_elemdataadr[fi]
-      vadr = flex_vertadr[fi]
-
-      vert_to_elems: dict[int, list[int]] = {}
-      body_to_elems: dict[int, list[int]] = {}
-
-      for e in range(num):
-        global_e = start + e
-        d_idx = data_start + e * (dim + 1)
-        verts = flex_elem[d_idx : d_idx + dim + 1]
-        for v in verts:
-          vert_to_elems.setdefault(int(v), []).append(global_e)
-          b = int(flex_vertbodyid[vadr + v])
-          if b >= 0:
-            body_to_elems.setdefault(b, []).append(global_e)
-
-      for elems in vert_to_elems.values():
-        for e1 in elems:
-          for e2 in elems:
-            mask[e1, e2 >> 5] |= np.uint32(1 << (e2 & 31)).view(np.int32)
-
-      for elems in body_to_elems.values():
-        for e1 in elems:
-          for e2 in elems:
-            mask[e1, e2 >> 5] |= np.uint32(1 << (e2 & 31)).view(np.int32)
-
-    m.flex_selfcollide_mask = mask
-  else:
-    m.flex_selfcollide_mask = np.zeros((mjm.nflexelem, m.nflexelem_words), dtype=np.int32)
 
   flex_bend_interp_map = []
   flex_face_map = []
