@@ -1524,6 +1524,25 @@ def _allocate_island_arrays(
   d.efc_islandid = wp.array(efc_islandid, dtype=int)
 
 
+_COMPACT_DATA_FIELDS: tuple[str, ...] = (
+  "ctol",
+  "cls_tol",
+  "cdof_tri_row",
+  "cdof_tri_col",
+  "cM",
+  "cqLD",
+  "crhs",
+  "cx",
+  "cJ",
+  "cMa",
+  "cqfrc_smooth",
+  "cqacc_smooth",
+  "cqacc_warmstart",
+  "cqacc",
+  "cqfrc_constraint",
+)
+
+
 def _allocate_compact_arrays(
   mjm: mujoco.MjModel,
   d: types.Data,
@@ -1787,22 +1806,8 @@ def make_data(
     "map_iefc2efc": None,
     "dof_islandid": None,
     "efc_islandid": None,
-    # compact arrays
-    "ctol": None,
-    "cls_tol": None,
-    "cdof_tri_row": None,
-    "cdof_tri_col": None,
-    "cM": None,
-    "cqLD": None,
-    "crhs": None,
-    "cx": None,
-    "cJ": None,
-    "cMa": None,
-    "cqfrc_smooth": None,
-    "cqacc_smooth": None,
-    "cqacc_warmstart": None,
-    "cqacc": None,
-    "cqfrc_constraint": None,
+    # compact arrays (populated by _allocate_compact_arrays; skip eager allocation)
+    **{name: None for name in _COMPACT_DATA_FIELDS},
     "tree_asleep": wp.array(np.full((nworld, mjm.ntree), -(1 + types.MJ_MINAWAKE), dtype=np.int32), dtype=int),
     "tree_awake": wp.array(np.ones((nworld, mjm.ntree), dtype=np.int32), dtype=int),
     "body_awake": wp.array(_initial_body_awake(mjm, nworld, False), dtype=int),
@@ -2071,22 +2076,8 @@ def put_data(
     "map_iefc2efc": None,
     "dof_islandid": None,
     "efc_islandid": None,
-    # compact arrays
-    "ctol": None,
-    "cls_tol": None,
-    "cdof_tri_row": None,
-    "cdof_tri_col": None,
-    "cM": None,
-    "cqLD": None,
-    "crhs": None,
-    "cx": None,
-    "cJ": None,
-    "cMa": None,
-    "cqfrc_smooth": None,
-    "cqacc_smooth": None,
-    "cqacc_warmstart": None,
-    "cqacc": None,
-    "cqfrc_constraint": None,
+    # compact arrays (populated by _allocate_compact_arrays; skip eager allocation)
+    **{name: None for name in _COMPACT_DATA_FIELDS},
     "tree_asleep": wp.array(np.tile(tree_asleep_init, (nworld, 1)), dtype=int),
     "tree_awake": wp.array(np.tile((tree_asleep_init < 0).astype(np.int32), (nworld, 1)), dtype=int),
     "body_awake": wp.array(np.tile(body_awake_init.astype(np.int32), (nworld, 1)), dtype=int),

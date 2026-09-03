@@ -41,6 +41,8 @@ from mujoco_warp._src.warp_util import event_scope
 
 wp.set_module_options({"enable_backward": False, "default_grid_stride": False})
 
+_FPS_BLOCK_SIZE: int = 64
+
 
 @wp.func
 def _flex_element_aabb_filter(
@@ -1366,7 +1368,7 @@ def _flex_sap_project(
 
 
 @cache_kernel
-def _flex_sap_sweep(is_self: bool, warn_overflow: int):
+def _flex_sap_sweep(is_self: bool, warn_overflow: int, enable_sat: bool = True):
   @wp.kernel(module="unique", enable_backward=False)
   def kernel(
     # Model:
@@ -1514,7 +1516,7 @@ def _flex_sap_sweep(is_self: bool, warn_overflow: int):
 
       if dim1 == 2:
         dim2 = dim1 if wp.static(is_self) else flex_dim[flexid2]
-        if dim2 == 2:
+        if dim2 == 2 and wp.static(enable_sat):
           r1 = flex_radius[flexid1]
           cutoff = float(2.0) * r1
           if not wp.static(is_self):
@@ -2254,7 +2256,7 @@ def _compute_filter_key(
   # Clamped monotonic 1D integer mapping with 1 um resolution.
   p = cand_pos[i]
   s = (p[0] + p[1] + p[2]) * wp.static(1.0 / math.sqrt(3.0))
-  spatial_key = wp.clamp(wp.int64((s + 100.0) * 1000000.0), wp.int64(0), wp.int64(2147483647))
+  spatial_key = wp.clamp(wp.int64(s * 1000000.0) + wp.int64(100000000), wp.int64(0), wp.int64(2147483647))
 
   key_out[i] = (group_key << wp.int64(32)) | spatial_key
   val_out[i] = i
@@ -2318,7 +2320,7 @@ def _filter_flex_candidates_sorted(
   my_key = sort_key[si]
   my_group = my_key >> wp.int64(32)
   my_spatial = my_key & wp.int64(0x7FFFFFFF)
-  eps_key = wp.int64(epsilon * 1000000.0) + wp.int64(1)
+  eps_key = wp.int64(wp.ceil(epsilon * 1000000.0)) + wp.int64(1)
   pos_i = cand_pos[i]
   dist_i = cand_dist[i]
   eps2 = epsilon * epsilon
@@ -2658,7 +2660,9 @@ def _tie_break_fps(
 
   if elem1_curr != elem1_sel:
     return elem1_curr < elem1_sel
-  return elem2_curr < elem2_sel
+  if elem2_curr != elem2_sel:
+    return elem2_curr < elem2_sel
+  return curr_idx < sel_idx
 
 
 @wp.kernel
@@ -2702,7 +2706,7 @@ def _parallel_fps_find_seed(
   min_d = float(1e10)
   sel_cidx = int(-1)
 
-  for si in range(g_start + tid, g_end, 64):
+  for si in range(g_start + tid, g_end, wp.static(_FPS_BLOCK_SIZE)):
     if cand_active_sorted[si] == 1:
       local_active += 1
       c_idx = sort_val[si]
@@ -2782,7 +2786,7 @@ def _parallel_fps_resolve_seed(
     return
 
   total_active = int(0)
-  for t in range(64):
+  for t in range(wp.static(_FPS_BLOCK_SIZE)):
     total_active += scratch_count_in[g, t]
 
   if total_active <= MJ_MAXCONPAIR:
@@ -2793,7 +2797,7 @@ def _parallel_fps_resolve_seed(
 
   min_d = float(1e10)
   sel_cidx = int(-1)
-  for t in range(64):
+  for t in range(wp.static(_FPS_BLOCK_SIZE)):
     c_idx = scratch_cidx_in[g, t]
     if c_idx >= 0:
       d_val = scratch_dist_in[g, t]
@@ -2847,7 +2851,7 @@ def _parallel_fps_init_dist_and_find_max(
   max_d = float(-1e10)
   sel_cidx = int(-1)
 
-  for si in range(g_start + tid, g_end, 64):
+  for si in range(g_start + tid, g_end, wp.static(_FPS_BLOCK_SIZE)):
     if cand_active_sorted[si] == 1:
       c_idx = sort_val[si]
       if c_idx == seed_idx:
@@ -2892,7 +2896,7 @@ def _parallel_fps_resolve_max(
 
   max_d = float(-1e10)
   sel_cidx = int(-1)
-  for t in range(64):
+  for t in range(wp.static(_FPS_BLOCK_SIZE)):
     c_idx = scratch_cidx_in[g, t]
     if c_idx >= 0:
       md = scratch_dist_in[g, t]
@@ -2951,7 +2955,7 @@ def _parallel_fps_update_and_find_max(
   max_d = float(-1e10)
   sel_cidx = int(-1)
 
-  for si in range(g_start + tid, g_end, 64):
+  for si in range(g_start + tid, g_end, wp.static(_FPS_BLOCK_SIZE)):
     if cand_active_sorted[si] == 1:
       c_idx = sort_val[si]
       md = fps_min_dist_out[c_idx]
@@ -3055,9 +3059,9 @@ def _allocate_flex_workspace(m: Model, d: Data) -> FlexWorkspace:
     flex_group_start_indices = wp.full(nmax_groups, -1, dtype=int)
     flex_fps_min_dist = wp.empty(d.naconmax, dtype=float)
     flex_num_groups = wp.zeros(1, dtype=int)
-    fps_scratch_dist = wp.empty((nmax_groups, 64), dtype=float)
-    fps_scratch_cidx = wp.empty((nmax_groups, 64), dtype=int)
-    fps_scratch_count = wp.empty((nmax_groups, 64), dtype=int)
+    fps_scratch_dist = wp.empty((nmax_groups, _FPS_BLOCK_SIZE), dtype=float)
+    fps_scratch_cidx = wp.empty((nmax_groups, _FPS_BLOCK_SIZE), dtype=int)
+    fps_scratch_count = wp.empty((nmax_groups, _FPS_BLOCK_SIZE), dtype=int)
     fps_selected_cidx = wp.full(nmax_groups, -1, dtype=int)
     fps_selected_pos = wp.empty(nmax_groups, dtype=wp.vec3)
     fps_groups_active = wp.zeros(1, dtype=int)
@@ -3135,7 +3139,7 @@ def _run_filter_flex_fps(
   )
   wp.launch(
     _parallel_fps_find_seed,
-    dim=(nmax_groups, 64),
+    dim=(nmax_groups, _FPS_BLOCK_SIZE),
     inputs=[
       ws.flex_group_start_indices,
       ws.flex_num_groups,
@@ -3176,7 +3180,7 @@ def _run_filter_flex_fps(
   )
   wp.launch(
     _parallel_fps_init_dist_and_find_max,
-    dim=(nmax_groups, 64),
+    dim=(nmax_groups, _FPS_BLOCK_SIZE),
     inputs=[
       ws.flex_group_start_indices,
       ws.flex_num_groups,
@@ -3215,7 +3219,7 @@ def _run_filter_flex_fps(
     )
     wp.launch(
       _parallel_fps_update_and_find_max,
-      dim=(nmax_groups, 64),
+      dim=(nmax_groups, _FPS_BLOCK_SIZE),
       inputs=[
         ws.flex_group_start_indices,
         ws.flex_num_groups,
@@ -3762,6 +3766,7 @@ def _flex_sap_collision(
   ws: FlexWorkspace,
   is_self: bool,
   sap_data: tuple[wp.array, wp.array, wp.array, wp.array] | None = None,
+  enable_sat: bool = True,
 ):
   """Detect and write flex self or flex-flex collision contacts (broadphase and narrowphase)."""
   if is_self and not m.has_flex_selfcollide:
@@ -3780,7 +3785,7 @@ def _flex_sap_collision(
   d.ncollision.zero_()
 
   wp.launch(
-    _flex_sap_sweep(is_self, int(m.opt.warn_overflow)),
+    _flex_sap_sweep(is_self, int(m.opt.warn_overflow), enable_sat),
     dim=nsweep,
     inputs=[
       m.flex_contype,
@@ -3826,7 +3831,7 @@ def _flex_sap_collision(
 
 
 @event_scope
-def flex_collision(m: Model, d: Data, ctx):
+def flex_collision(m: Model, d: Data, ctx, enable_sat: bool = True):
   """Runs collision detection for all flex collisions."""
   if m.nflex == 0 or m.nflexelem == 0:
     return
@@ -3847,7 +3852,7 @@ def flex_collision(m: Model, d: Data, ctx):
   _flex_geom_collision(m, d, ws)
 
   # 2. Flex Self-Collision (Broadphase and Narrowphase)
-  _flex_sap_collision(m, d, ctx, ws, is_self=True, sap_data=sap_data)
+  _flex_sap_collision(m, d, ctx, ws, is_self=True, sap_data=sap_data, enable_sat=enable_sat)
 
   # 3. Flex-Flex Collision (Broadphase and Narrowphase)
-  _flex_sap_collision(m, d, ctx, ws, is_self=False, sap_data=sap_data)
+  _flex_sap_collision(m, d, ctx, ws, is_self=False, sap_data=sap_data, enable_sat=enable_sat)
