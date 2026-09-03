@@ -1891,10 +1891,10 @@ class FlexCollisionTest(parameterized.TestCase):
 
       selected = [best_seed]
       seed_pos = cand_pos[best_seed]
-      min_dist = {c_idx: np.sum((cand_pos[c_idx] - seed_pos) ** 2) for c_idx in group_cands}
+      min_dist = {c_idx: np.float32(np.linalg.norm(cand_pos[c_idx] - seed_pos)) for c_idx in group_cands}
 
       for _ in range(1, types.MJ_MAXCONPAIR):
-        max_d = -1e10
+        max_d = np.float32(-1e10)
         best_cand = -1
         for c_idx in group_cands:
           if c_idx in selected:
@@ -1910,9 +1910,9 @@ class FlexCollisionTest(parameterized.TestCase):
         selected.append(best_cand)
         new_pos = cand_pos[best_cand]
         for c_idx in group_cands:
-          d2 = np.sum((cand_pos[c_idx] - new_pos) ** 2)
-          if d2 < min_dist[c_idx]:
-            min_dist[c_idx] = d2
+          d_new = np.float32(np.linalg.norm(cand_pos[c_idx] - new_pos))
+          if d_new < min_dist[c_idx]:
+            min_dist[c_idx] = d_new
 
       warp_selected = sorted([c_idx for c_idx in group_cands if cand_active[c_idx] == 1])
       np_selected = sorted(selected)
