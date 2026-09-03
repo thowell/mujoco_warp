@@ -2,7 +2,7 @@
 
 ## Description
 
-Measures MuJoCo Warp throughput for Panda robots in idle and sparse-contact scenes.
+Measures MuJoCo Warp throughput for Panda robots.
 
 ### franka_emika_panda
 
@@ -11,7 +11,7 @@ Measures MuJoCo Warp throughput for Panda robots in idle and sparse-contact scen
 | Bodies | 12 |
 | DoFs | 9 |
 | Actuators | 8 |
-| Geoms | 23 |
+| Geoms | 81 |
 | Timestep | 0.005s |
 | Solver | Newton |
 | Friction | Pyramidal |
@@ -20,25 +20,26 @@ Measures MuJoCo Warp throughput for Panda robots in idle and sparse-contact scen
 
 ![franka_emika_panda](rollout.webp)
 
-### franka_emika_pandas_sparse_contact
+### franka_emika_pandas
 
-Five independent Panda grippers press against fixed boxes. Each constraint row
-touches one 9-DoF chain, giving the 45-DoF system a naturally block-sparse
-constraint topology. The default rollout averages approximately 27 contacts and
-119 constraint rows per world (p95: 35 and 155), which fit the 64-contact and
-192-constraint capacities.
+Five independent Panda arms sequentially pick up colored objects of different sizes
+from a table and lift them back to their home configuration. Each arm begins at the
+Menagerie home keyframe pose, descends to pinch-grip its designated object, and raises
+it back to the home height, holding all five objects aloft.
 
 | Property | Value |
 |----------|-------|
-| Bodies | 56 |
-| DoFs | 45 |
+| Bodies | 61 |
+| DoFs | 75 |
 | Actuators | 40 |
-| Geoms | 116 |
+| Geoms | 407 |
 | Timestep | 0.005s |
 | Solver | Newton |
 | Friction | Pyramidal |
 | Integrator | ImplicitFast |
 | Matrix Format | Sparse |
-| Parallel Worlds | 4096 |
-| Contact Capacity / World | 64 |
+| Parallel Worlds | 8192 |
+| Contact Capacity / World | 48 |
 | Constraint Capacity / World | 192 |
+
+![franka_emika_pandas](rollout_pandas.webp)
