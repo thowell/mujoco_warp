@@ -886,7 +886,6 @@ def collision(
   m: Model,
   d: Data,
   awake_prev: Optional[wp.array] = None,
-  enable_sat: bool = True,
 ):
   """Runs the full collision detection pipeline.
 
@@ -937,7 +936,7 @@ def collision(
   # so the incremental pass has nothing to add (and re-running it would duplicate those contacts).
   # It therefore only runs on the full pass.
   if m.nflex > 0 and not incremental:
-    flex_collision(m, d, ctx, enable_sat=enable_sat)
+    flex_collision(m, d, ctx)
 
   if m.callback.contactfilter:
     m.callback.contactfilter(m, d)

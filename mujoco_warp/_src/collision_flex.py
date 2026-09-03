@@ -42,6 +42,7 @@ from mujoco_warp._src.warp_util import event_scope
 wp.set_module_options({"enable_backward": False, "default_grid_stride": False})
 
 _FPS_BLOCK_SIZE: int = 64
+ENABLE_SAT_PREFILTER: bool = True
 
 
 @wp.func
@@ -3766,13 +3767,16 @@ def _flex_sap_collision(
   ws: FlexWorkspace,
   is_self: bool,
   sap_data: tuple[wp.array, wp.array, wp.array, wp.array] | None = None,
-  enable_sat: bool = True,
+  enable_sat: bool | None = None,
 ):
   """Detect and write flex self or flex-flex collision contacts (broadphase and narrowphase)."""
   if is_self and not m.has_flex_selfcollide:
     return
   if not is_self and m.nflex <= 1:
     return
+
+  if enable_sat is None:
+    enable_sat = ENABLE_SAT_PREFILTER
 
   ws.ncand.zero_()
   if ws.flex_num_groups is not None:
@@ -3831,10 +3835,13 @@ def _flex_sap_collision(
 
 
 @event_scope
-def flex_collision(m: Model, d: Data, ctx, enable_sat: bool = True):
+def flex_collision(m: Model, d: Data, ctx, enable_sat: bool | None = None):
   """Runs collision detection for all flex collisions."""
   if m.nflex == 0 or m.nflexelem == 0:
     return
+
+  if enable_sat is None:
+    enable_sat = ENABLE_SAT_PREFILTER
 
   # Update dynamic flex object bounding boxes
   flex_broadphase_aabb(m, d)

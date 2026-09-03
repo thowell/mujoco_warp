@@ -1789,11 +1789,17 @@ class FlexCollisionTest(parameterized.TestCase):
     d_nosat.nacon.fill_(-1)
     d_nosat.contact.dist.fill_(wp.inf)
 
-    mjw.kinematics(m, d_sat)
-    mjw.collision(m, d_sat, enable_sat=True)
+    orig_sat = collision_flex.ENABLE_SAT_PREFILTER
+    try:
+      collision_flex.ENABLE_SAT_PREFILTER = True
+      mjw.kinematics(m, d_sat)
+      mjw.collision(m, d_sat)
 
-    mjw.kinematics(m, d_nosat)
-    mjw.collision(m, d_nosat, enable_sat=False)
+      collision_flex.ENABLE_SAT_PREFILTER = False
+      mjw.kinematics(m, d_nosat)
+      mjw.collision(m, d_nosat)
+    finally:
+      collision_flex.ENABLE_SAT_PREFILTER = orig_sat
 
     nacon_sat = int(d_sat.nacon.numpy()[0])
     nacon_nosat = int(d_nosat.nacon.numpy()[0])
@@ -1836,6 +1842,7 @@ class FlexCollisionTest(parameterized.TestCase):
         </worldbody>
       </mujoco>
       """,
+      qpos_noise=0.005,
       nworld=1,
       nconmax=1500,
     )
@@ -1906,6 +1913,9 @@ class FlexCollisionTest(parameterized.TestCase):
           elif md == max_d and _tie_break(c_idx, best_cand):
             max_d = md
             best_cand = c_idx
+
+        if best_cand < 0 or max_d <= 0.0:
+          break
 
         selected.append(best_cand)
         new_pos = cand_pos[best_cand]
