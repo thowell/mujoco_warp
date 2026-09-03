@@ -1733,6 +1733,33 @@ class FlexCollisionTest(parameterized.TestCase):
     self.assertEqual(nacon, expected_contacts, f"Expected {expected_contacts} contacts, got {nacon}")
 
   @parameterized.parameters(1, 2)
+  def test_flex_fps_capping(self, nworld):
+    """Test that flex-flex contacts are limited to MJ_MAXCONPAIR (50) via parallel FPS."""
+    _, _, m, d = test_data.fixture(
+      xml="""
+      <mujoco>
+        <worldbody>
+          <flexcomp name="cloth1" type="grid" count="8 8 1" spacing=".05 .05 .05" pos="0 0 0"
+                    radius=".02" dim="2" mass=".5">
+            <contact selfcollide="none" contype="1" conaffinity="1"/>
+          </flexcomp>
+          <flexcomp name="cloth2" type="grid" count="8 8 1" spacing=".05 .05 .05" pos="0 0 0.01"
+                    radius=".02" dim="2" mass=".5">
+            <contact selfcollide="none" contype="1" conaffinity="1"/>
+          </flexcomp>
+        </worldbody>
+      </mujoco>
+      """,
+      nworld=nworld,
+      nconmax=1500,
+    )
+    d.nacon.fill_(-1)
+    mjw.kinematics(m, d)
+    mjw.collision(m, d)
+    nacon = int(d.nacon.numpy()[0])
+    self.assertEqual(nacon, types.MJ_MAXCONPAIR * nworld)
+
+  @parameterized.parameters(1, 2)
   def test_mixed_flex_broadphase_and_narrowphase(self, nworld):
     """Test that broadphase and narrowphase run correctly with mixed 2D and 3D flexes."""
     xml = """
@@ -1859,6 +1886,94 @@ class FlexCollisionTest(parameterized.TestCase):
     """Test that loading a model with unsupported geoms and Flex raises NotImplementedError."""
     with self.assertRaises(NotImplementedError):
       test_data.fixture(xml=xml)
+
+  def test_triangle_sat_separated(self):
+    """Tests 2D separating axis test on coplanar, parallel, and intersecting triangles."""
+
+    @wp.kernel
+    def eval_sat(
+      p0: wp.array[wp.vec3],
+      p1: wp.array[wp.vec3],
+      p2: wp.array[wp.vec3],
+      q0: wp.array[wp.vec3],
+      q1: wp.array[wp.vec3],
+      q2: wp.array[wp.vec3],
+      cutoff_sq: wp.array[float],
+      result: wp.array[bool],
+    ):
+      tid = wp.tid()
+      result[tid] = collision_flex._triangle_sat_separated(
+        p0[tid],
+        p1[tid],
+        p2[tid],
+        q0[tid],
+        q1[tid],
+        q2[tid],
+        cutoff_sq[tid],
+      )
+
+    p0_list = [
+      wp.vec3(0.0, 0.0, 0.0),
+      wp.vec3(0.0, 0.0, 0.0),
+      wp.vec3(0.0, 0.0, 0.0),
+      wp.vec3(0.0, -1.0, 0.0),
+    ]
+    p1_list = [
+      wp.vec3(1.0, 0.0, 0.0),
+      wp.vec3(1.0, 0.0, 0.0),
+      wp.vec3(1.0, 0.0, 0.0),
+      wp.vec3(0.0, 1.0, 0.0),
+    ]
+    p2_list = [
+      wp.vec3(0.0, 1.0, 0.0),
+      wp.vec3(0.0, 1.0, 0.0),
+      wp.vec3(0.0, 1.0, 0.0),
+      wp.vec3(0.0, 0.0, 1.0),
+    ]
+
+    q0_list = [
+      wp.vec3(3.0, 0.0, 0.0),
+      wp.vec3(0.0, 0.0, 0.5),
+      wp.vec3(0.0, 0.0, 0.1),
+      wp.vec3(-0.5, 0.0, 0.5),
+    ]
+    q1_list = [
+      wp.vec3(4.0, 0.0, 0.0),
+      wp.vec3(1.0, 0.0, 0.5),
+      wp.vec3(1.0, 0.0, 0.1),
+      wp.vec3(0.5, 0.0, 0.5),
+    ]
+    q2_list = [
+      wp.vec3(3.0, 1.0, 0.0),
+      wp.vec3(0.0, 1.0, 0.5),
+      wp.vec3(0.0, 1.0, 0.1),
+      wp.vec3(0.0, 0.5, 0.5),
+    ]
+    cutoff_sq_list = [
+      0.01,
+      0.04,
+      0.04,
+      0.0,
+    ]
+    expected = [True, True, False, False]
+
+    n = len(expected)
+    res = wp.zeros(n, dtype=bool)
+    wp.launch(
+      eval_sat,
+      dim=n,
+      inputs=[
+        wp.array(p0_list, dtype=wp.vec3),
+        wp.array(p1_list, dtype=wp.vec3),
+        wp.array(p2_list, dtype=wp.vec3),
+        wp.array(q0_list, dtype=wp.vec3),
+        wp.array(q1_list, dtype=wp.vec3),
+        wp.array(q2_list, dtype=wp.vec3),
+        wp.array(cutoff_sq_list, dtype=float),
+      ],
+      outputs=[res],
+    )
+    np.testing.assert_array_equal(res.numpy(), expected)
 
 
 class FlexDynamicsTest(parameterized.TestCase):

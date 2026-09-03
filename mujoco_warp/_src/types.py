@@ -2482,7 +2482,6 @@ class SolverContext:
   prev_grad: wp.array2d[float]
   prev_Mgrad: wp.array2d[float]
   beta: wp.array[float]
-  beta_den: wp.array[float]
   h: wp.array3d[float]
   hfactor: wp.array3d[float]
   quad_changed_ids: wp.array2d[int]

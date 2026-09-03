@@ -428,7 +428,7 @@ def put_model(mjm: mujoco.MjModel, batch_sizes: dict[str, int] | None = None) ->
   m.is_sparse = is_sparse(mjm)
   m.has_fluid = bool(mjm.opt.wind.any() or mjm.opt.density > 0 or mjm.opt.viscosity > 0)
   m.nflexintcell = _get_nflexintcell(mjm)
-  m.nflexelem_words = (mjm.nflexelem + 31) // 32 if mjm.nflexelem > 0 else 0
+  m.nflexelem_words = (mjm.nflexelem + 31) // 32 if (mjm.nflexelem > 0 and m.has_flex_selfcollide) else 0
 
   # Precompute flex_cell_map
   flex_cell_map = []

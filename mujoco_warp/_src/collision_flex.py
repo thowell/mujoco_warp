@@ -13,9 +13,8 @@
 # limitations under the License.
 """Flex collision detection (geom vs flex triangles)."""
 
-from __future__ import annotations
-
 import dataclasses
+import math
 
 import warp as wp
 
@@ -2260,7 +2259,7 @@ def _compute_filter_key(
   # Spatial projection key: project position onto diagonal vector u = (1, 1, 1) / sqrt(3).
   # Clamped monotonic 1D integer mapping with 1 um resolution.
   p = cand_pos[i]
-  s = (p[0] + p[1] + p[2]) * float(0.57735027)
+  s = (p[0] + p[1] + p[2]) * wp.static(1.0 / math.sqrt(3.0))
   spatial_key = wp.clamp(wp.int64((s + 100.0) * 1000000.0), wp.int64(0), wp.int64(2147483647))
 
   key_out[i] = (group_key << wp.int64(32)) | spatial_key
@@ -2324,8 +2323,9 @@ def _filter_flex_candidates_sorted(
   i = sort_val[si]
   my_key = sort_key[si]
   my_group = my_key >> wp.int64(32)
+  my_spatial = my_key & wp.int64(0x7FFFFFFF)
+  eps_key = wp.int64(epsilon * 1000000.0) + wp.int64(1)
   pos_i = cand_pos[i]
-  s_i = (pos_i[0] + pos_i[1] + pos_i[2]) * float(0.57735027)
   dist_i = cand_dist[i]
   eps2 = epsilon * epsilon
 
@@ -2337,14 +2337,15 @@ def _filter_flex_candidates_sorted(
   # Compare with same-key neighbors (backward)
   j = si - 1
   while j >= 0:
-    if (sort_key[j] >> wp.int64(32)) != my_group:
+    key_j = sort_key[j]
+    if (key_j >> wp.int64(32)) != my_group:
       break
-    oj = sort_val[j]
-    pos_j = cand_pos[oj]
-    s_j = (pos_j[0] + pos_j[1] + pos_j[2]) * float(0.57735027)
-    if s_i - s_j >= epsilon:
+    spatial_j = key_j & wp.int64(0x7FFFFFFF)
+    if my_spatial - spatial_j >= eps_key:
       break
 
+    oj = sort_val[j]
+    pos_j = cand_pos[oj]
     diff = pos_i - pos_j
     if wp.dot(diff, diff) < eps2:
       if _is_candidate_dominated(
@@ -2365,14 +2366,15 @@ def _filter_flex_candidates_sorted(
   if keep == 1:
     j = si + 1
     while j < ncand_limit:
-      if (sort_key[j] >> wp.int64(32)) != my_group:
+      key_j = sort_key[j]
+      if (key_j >> wp.int64(32)) != my_group:
         break
-      oj = sort_val[j]
-      pos_j = cand_pos[oj]
-      s_j = (pos_j[0] + pos_j[1] + pos_j[2]) * float(0.57735027)
-      if s_j - s_i >= epsilon:
+      spatial_j = key_j & wp.int64(0x7FFFFFFF)
+      if spatial_j - my_spatial >= eps_key:
         break
 
+      oj = sort_val[j]
+      pos_j = cand_pos[oj]
       diff = pos_i - pos_j
       if wp.dot(diff, diff) < eps2:
         if _is_candidate_dominated(
@@ -2700,7 +2702,7 @@ def _parallel_fps_find_seed(
 
   g_end = ncand_limit
   if g < flex_num_groups_in[0] - 1:
-    g_end = flex_group_start_indices_in[g + 1]
+    g_end = wp.min(ncand_limit, flex_group_start_indices_in[g + 1])
 
   local_active = int(0)
   min_d = float(1e10)
@@ -2845,7 +2847,7 @@ def _parallel_fps_init_dist_and_find_max(
   ncand_limit = wp.min(ncand[0], cand_active_sorted.shape[0])
   g_end = ncand_limit
   if g < flex_num_groups_in[0] - 1:
-    g_end = flex_group_start_indices_in[g + 1]
+    g_end = wp.min(ncand_limit, flex_group_start_indices_in[g + 1])
 
   seed_p = selected_pos[g]
   max_d = float(-1e10)
@@ -2948,7 +2950,7 @@ def _parallel_fps_update_and_find_max(
   ncand_limit = wp.min(ncand[0], cand_active_sorted.shape[0])
   g_end = ncand_limit
   if g < flex_num_groups_in[0] - 1:
-    g_end = flex_group_start_indices_in[g + 1]
+    g_end = wp.min(ncand_limit, flex_group_start_indices_in[g + 1])
 
   new_p = selected_pos[g]
 
@@ -2964,12 +2966,12 @@ def _parallel_fps_update_and_find_max(
         md = wp.min(md, d_new)
         fps_min_dist_out[c_idx] = md
 
-      if md > max_d:
-        max_d = md
-        sel_cidx = c_idx
-      elif md == max_d:
-        if _tie_break_fps(c_idx, sel_cidx, cand_elem):
+        if md > max_d:
+          max_d = md
           sel_cidx = c_idx
+        elif md == max_d:
+          if _tie_break_fps(c_idx, sel_cidx, cand_elem):
+            sel_cidx = c_idx
 
   scratch_dist_out[g, tid] = max_d
   scratch_cidx_out[g, tid] = sel_cidx

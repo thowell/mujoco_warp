@@ -103,7 +103,6 @@ def _create_solver_context(m: types.Model, d: types.Data) -> SolverContext:
     prev_grad=wp.empty((nworld, nv), dtype=float) if alloc_mgrad else wp.empty((nworld, 0), dtype=float),
     prev_Mgrad=wp.empty((nworld, nv), dtype=float) if alloc_mgrad else wp.empty((nworld, 0), dtype=float),
     beta=wp.empty((nworld,), dtype=float) if alloc_mgrad else wp.empty((0,), dtype=float),
-    beta_den=wp.empty((nworld,), dtype=float) if alloc_mgrad else wp.empty((0,), dtype=float),
     h=wp.empty((nworld, nv_pad, nv_pad), dtype=float) if alloc_h else wp.empty((nworld, 0, 0), dtype=float),
     hfactor=wp.empty((nworld, nv_pad, nv_pad), dtype=float) if alloc_hfactor else wp.empty((nworld, 0, 0), dtype=float),
     quad_changed_ids=wp.empty((nworld, njmax), dtype=int) if alloc_incremental else wp.empty((nworld, 0), dtype=int),
@@ -1032,10 +1031,11 @@ def _linesearch_iterative_kernel(
       )
 
     for efcid in range(tid, ne, wp.block_dim()):
-      jvD = ctx_jv_in[worldid, efcid] * efc_D_in[worldid, efcid]
+      jv = ctx_jv_in[worldid, efcid]
+      jvD = jv * efc_D_in[worldid, efcid]
       local_gauss += wp.vec2(
         jvD * ctx_Jaref_in[worldid, efcid],
-        0.5 * ctx_jv_in[worldid, efcid] * jvD,
+        0.5 * jv * jvD,
       )
 
     gauss_tile = wp.tile(local_gauss, preserve_type=True)
@@ -3289,82 +3289,6 @@ def _update_gradient_incremental(m: types.Model, d: types.Data, ctx: SolverConte
 
 
 @wp.kernel
-def _solve_beta_zero(
-  # Out:
-  ctx_beta_num_out: wp.array[float],
-  ctx_beta_den_out: wp.array[float],
-):
-  worldid = wp.tid()
-  ctx_beta_num_out[worldid] = 0.0
-  ctx_beta_den_out[worldid] = 0.0
-
-
-@wp.kernel
-def _solve_beta_accumulate_tiled(
-  # Model:
-  nv: int,
-  # In:
-  ctx_grad_in: wp.array2d[float],
-  ctx_Mgrad_in: wp.array2d[float],
-  ctx_prev_grad_in: wp.array2d[float],
-  ctx_prev_Mgrad_in: wp.array2d[float],
-  ctx_done_in: wp.array[bool],
-  # Out:
-  ctx_beta_num_out: wp.array[float],
-  ctx_beta_den_out: wp.array[float],
-):
-  worldid, tid = wp.tid()
-
-  if ctx_done_in[worldid]:
-    return
-
-  local_num = float(0.0)
-  local_den = float(0.0)
-  BLOCK_DIM = wp.block_dim()
-
-  for dofid in range(tid, nv, BLOCK_DIM):
-    prev_Mgrad = ctx_prev_Mgrad_in[worldid, dofid]
-    num = ctx_grad_in[worldid, dofid] * (ctx_Mgrad_in[worldid, dofid] - prev_Mgrad)
-    den = ctx_prev_grad_in[worldid, dofid] * prev_Mgrad
-    local_num += num
-    local_den += den
-
-  num_tile = wp.tile(local_num, preserve_type=True)
-  num_sum = wp.tile_reduce(wp.add, num_tile)
-
-  den_tile = wp.tile(local_den, preserve_type=True)
-  den_sum = wp.tile_reduce(wp.add, den_tile)
-
-  if tid == 0:
-    ctx_beta_num_out[worldid] = num_sum[0]
-    ctx_beta_den_out[worldid] = den_sum[0]
-
-
-@wp.kernel
-def _solve_beta_accumulate(
-  # In:
-  ctx_grad_in: wp.array2d[float],
-  ctx_Mgrad_in: wp.array2d[float],
-  ctx_prev_grad_in: wp.array2d[float],
-  ctx_prev_Mgrad_in: wp.array2d[float],
-  ctx_done_in: wp.array[bool],
-  # Out:
-  ctx_beta_num_out: wp.array[float],
-  ctx_beta_den_out: wp.array[float],
-):
-  worldid, dofid = wp.tid()
-
-  if ctx_done_in[worldid]:
-    return
-
-  prev_Mgrad = ctx_prev_Mgrad_in[worldid, dofid]
-  num = ctx_grad_in[worldid, dofid] * (ctx_Mgrad_in[worldid, dofid] - prev_Mgrad)
-  den = ctx_prev_grad_in[worldid, dofid] * prev_Mgrad
-  wp.atomic_add(ctx_beta_num_out, worldid, num)
-  wp.atomic_add(ctx_beta_den_out, worldid, den)
-
-
-@wp.kernel
 def _solve_search_update_cg_tiled(
   # Model:
   nv: int,
@@ -3404,62 +3328,6 @@ def _solve_search_update_cg_tiled(
 
   if tid == 0:
     ctx_search_dot_out[worldid] = search_dot_sum[0]
-
-
-@cache_kernel
-def _solve_cg_finalize(warn_overflow: int):
-  @wp.kernel(module="unique", enable_backward=False)
-  def kernel(
-    # Model:
-    nv: int,
-    opt_tolerance: wp.array[float],
-    opt_iterations: int,
-    stat_meaninertia: wp.array[float],
-    # In:
-    ctx_beta_num_in: wp.array[float],
-    ctx_beta_den_in: wp.array[float],
-    ctx_improvement_in: wp.array[float],
-    ctx_done_in: wp.array[bool],
-    ctx_grad_dot_in: wp.array[float],
-    # Data out:
-    solver_niter_out: wp.array[int],
-    overflow_out: wp.array[int],
-    # Out:
-    ctx_beta_out: wp.array[float],
-    nsolving_out: wp.array[int],
-    ctx_done_out: wp.array[bool],
-  ):
-    worldid = wp.tid()
-
-    if ctx_done_in[worldid]:
-      return
-
-    # 1. solve_beta_finalize
-    ctx_beta_out[worldid] = wp.max(0.0, ctx_beta_num_in[worldid] / wp.max(types.MJ_MINVAL, ctx_beta_den_in[worldid]))
-
-    # 2. solve_done
-    solver_niter_out[worldid] += 1
-    tolerance = opt_tolerance[worldid % opt_tolerance.shape[0]]
-    meaninertia = stat_meaninertia[worldid % stat_meaninertia.shape[0]]
-
-    grad_dot = ctx_grad_dot_in[worldid]
-
-    improvement = _rescale(nv, meaninertia, ctx_improvement_in[worldid])
-    gradient = _rescale(nv, meaninertia, wp.sqrt(grad_dot))
-    done = (improvement < tolerance) or (gradient < tolerance)
-    if done or solver_niter_out[worldid] == opt_iterations:
-      if not done and solver_niter_out[worldid] == opt_iterations:
-        if wp.static(bool(warn_overflow & OverflowType.ITERATIONS)):
-          wp.printf(
-            "solver iterations limit reached - please increase iterations beyond %u\n"
-            "To disable the print warning: m.opt.warn_overflow &= ~mjw.OverflowType.ITERATIONS (or = 0 for all)\n",
-            opt_iterations,
-          )
-        overflow_out[worldid] = overflow_out[worldid] | OverflowType.ITERATIONS
-      ctx_done_out[worldid] = True
-      wp.atomic_add(nsolving_out, 0, -1)
-
-  return kernel
 
 
 @cache_kernel
@@ -3505,14 +3373,12 @@ def _solve_beta_finalize_tiled(warn_overflow: int):
       local_num += num
       local_den += den
 
-    num_tile = wp.tile(local_num, preserve_type=True)
-    num_sum = wp.tile_reduce(wp.add, num_tile)
-
-    den_tile = wp.tile(local_den, preserve_type=True)
-    den_sum = wp.tile_reduce(wp.add, den_tile)
+    beta_tile = wp.tile(wp.vec2(local_num, local_den), preserve_type=True)
+    beta_sum = wp.tile_reduce(wp.add, beta_tile)
+    reduced_beta = beta_sum[0]
 
     if tid == 0:
-      ctx_beta_out[worldid] = wp.max(0.0, num_sum[0] / wp.max(types.MJ_MINVAL, den_sum[0]))
+      ctx_beta_out[worldid] = wp.max(0.0, reduced_beta[0] / wp.max(types.MJ_MINVAL, reduced_beta[1]))
 
       solver_niter_out[worldid] += 1
       tolerance = opt_tolerance[worldid % opt_tolerance.shape[0]]
