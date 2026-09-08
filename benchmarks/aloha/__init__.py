@@ -38,7 +38,7 @@ BENCHMARKS = [
     "nworld": 256,
     "nconmax": 6400,
     "nccdmax": 3400,
-    "njmax": 6400,
+    "njmax": 20000,
     "replay": "lift_cloth.npz",
     "assets": [(ASSETS[0], "aloha")],
   },
