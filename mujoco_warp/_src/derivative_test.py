@@ -1283,12 +1283,12 @@ class DerivativeTest(parameterized.TestCase):
     mj_out = mj_M - mjm.opt.timestep * mj_qDeriv
 
     has_free_body = bool(m.body_is_free.numpy().any())
+    if has_free_body:
+      mj_out = 0.5 * (mj_out + mj_out.T)
     name = f"M - dt * qDeriv (fluid {scenario})"
     if jacobian == mujoco.mjtJacobian.mjJAC_SPARSE:
       mask = m.M_elemid.numpy() >= 0
       _assert_eq(mjw_out[mask], mj_out[mask], name)
-    elif has_free_body:
-      _assert_eq(np.tril(mjw_out), np.tril(mj_out), name)
     else:
       _assert_eq(mjw_out, mj_out, name)
 
