@@ -914,6 +914,10 @@ class IOTest(parameterized.TestCase):
   )
   def test_get_data_into_io_test_models(self, xml, cone, integrator):
     """Tests get_data_into for field coverage across diverse model types."""
+    # TODO(team): Support integrator="discrete" for flex models once implemented in mujoco_warp.
+    if xml == "flex/floppy.xml" and integrator in (IntegratorType.IMPLICIT, IntegratorType.IMPLICITFAST):
+      self.skipTest("TODO(team): Flex elasticity under implicit/implicitfast is rejected by MuJoCo.")
+
     mjm, _, m, d = test_data.fixture(xml, nworld=2, overrides={"opt.cone": cone, "opt.integrator": integrator})
     mjwarp.step(m, d)
 
