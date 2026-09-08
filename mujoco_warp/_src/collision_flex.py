@@ -2263,132 +2263,22 @@ def _compute_filter_key(
   val_out[i] = i
 
 
-@wp.func
-def _is_candidate_dominated(
-  # In:
-  dist_i: float,
-  dist_j: float,
-  elem1_i: int,
-  elem2_i: int,
-  elem1_j: int,
-  elem2_j: int,
-  pos_i: wp.vec3,
-  pos_j: wp.vec3,
-) -> bool:
-  """Returns True if candidate i is dominated by (and should yield to) candidate j."""
-  if dist_j < dist_i:
-    return True
-  if dist_j == dist_i:
-    if elem1_j < elem1_i:
-      return True
-    if elem1_j == elem1_i and elem2_j < elem2_i:
-      return True
-    if elem1_j == elem1_i and elem2_j == elem2_i:
-      if pos_j[0] < pos_i[0]:
-        return True
-      if pos_j[0] == pos_i[0] and pos_j[1] < pos_i[1]:
-        return True
-      if pos_j[0] == pos_i[0] and pos_j[1] == pos_i[1] and pos_j[2] < pos_i[2]:
-        return True
-  return False
-
-
+# Note: Matches MuJoCo C contact filtering semantics. Cross-pair proximity
+# deduplication is omitted; all candidate contacts from narrowphase are passed
+# directly to farthest-point sampling.
 @wp.kernel
-def _filter_flex_candidates_sorted(
+def _init_cand_active(
   # In:
   ncand: wp.array[int],
-  epsilon: float,
-  sort_key: wp.array[wp.int64],
-  sort_val: wp.array[int],
-  cand_dist: wp.array[float],
-  cand_pos: wp.array[wp.vec3],
-  cand_elem: wp.array[wp.vec2i],
   # Out:
   cand_active_out: wp.array[int],
 ):
-  """Filter duplicate candidates using sorted order.
-
-  After sorting by group key, candidates in the same group are contiguous.
-  Each candidate only compares with neighbors sharing the same key, reducing
-  complexity from O(n^2) to O(n * k) where k is the average group size.
-  """
-  si = wp.tid()
+  i = wp.tid()
   ncand_limit = wp.min(ncand[0], cand_active_out.shape[0])
-  if si >= ncand_limit:
-    return
-
-  i = sort_val[si]
-  my_key = sort_key[si]
-  my_group = my_key >> wp.int64(32)
-  my_spatial = my_key & wp.int64(0x7FFFFFFF)
-  eps_key = wp.int64(wp.ceil(epsilon * 1000000.0)) + wp.int64(1)
-  pos_i = cand_pos[i]
-  dist_i = cand_dist[i]
-  eps2 = epsilon * epsilon
-
-  elem1 = cand_elem[i][0]
-  elem2 = cand_elem[i][1]
-
-  keep = int(1)
-
-  # Compare with same-key neighbors (backward)
-  j = si - 1
-  while j >= 0:
-    key_j = sort_key[j]
-    if (key_j >> wp.int64(32)) != my_group:
-      break
-    spatial_j = key_j & wp.int64(0x7FFFFFFF)
-    if my_spatial - spatial_j >= eps_key:
-      break
-
-    oj = sort_val[j]
-    pos_j = cand_pos[oj]
-    diff = pos_i - pos_j
-    if wp.dot(diff, diff) < eps2:
-      if _is_candidate_dominated(
-        dist_i,
-        cand_dist[oj],
-        elem1,
-        elem2,
-        cand_elem[oj][0],
-        cand_elem[oj][1],
-        pos_i,
-        pos_j,
-      ):
-        keep = 0
-        break
-    j -= 1
-
-  # Compare with same-key neighbors (forward)
-  if keep == 1:
-    j = si + 1
-    while j < ncand_limit:
-      key_j = sort_key[j]
-      if (key_j >> wp.int64(32)) != my_group:
-        break
-      spatial_j = key_j & wp.int64(0x7FFFFFFF)
-      if spatial_j - my_spatial >= eps_key:
-        break
-
-      oj = sort_val[j]
-      pos_j = cand_pos[oj]
-      diff = pos_i - pos_j
-      if wp.dot(diff, diff) < eps2:
-        if _is_candidate_dominated(
-          dist_i,
-          cand_dist[oj],
-          elem1,
-          elem2,
-          cand_elem[oj][0],
-          cand_elem[oj][1],
-          pos_i,
-          pos_j,
-        ):
-          keep = 0
-          break
-      j += 1
-
-  cand_active_out[i] = keep
+  if i < ncand_limit:
+    cand_active_out[i] = 1
+  else:
+    cand_active_out[i] = 0
 
 
 @cache_kernel
@@ -3259,43 +3149,35 @@ def _filter_and_write_contacts(
   ws: FlexWorkspace,
   enable_fps: bool = False,
 ):
-  """Deduplicates candidates, optionally applies FPS filtering, and writes contacts to d.contact."""
+  """Optionally applies FPS filtering and writes contacts to d.contact."""
   wp.launch(
-    _compute_filter_key,
+    _init_cand_active,
     dim=d.naconmax,
-    inputs=[
-      m.ngeom,
-      m.nflex,
-      ws.ncand,
-      ws.geom,
-      ws.flex,
-      ws.pos,
-      ws.worldid,
-    ],
-    outputs=[
-      ws.filter_key,
-      ws.filter_val,
-    ],
-  )
-
-  wp.utils.radix_sort_pairs(ws.filter_key, ws.filter_val, d.naconmax)
-
-  wp.launch(
-    _filter_flex_candidates_sorted,
-    dim=d.naconmax,
-    inputs=[
-      ws.ncand,
-      1e-3,
-      ws.filter_key,
-      ws.filter_val,
-      ws.dist,
-      ws.pos,
-      ws.elem,
-    ],
+    inputs=[ws.ncand],
     outputs=[ws.cand_active],
   )
 
   if enable_fps:
+    wp.launch(
+      _compute_filter_key,
+      dim=d.naconmax,
+      inputs=[
+        m.ngeom,
+        m.nflex,
+        ws.ncand,
+        ws.geom,
+        ws.flex,
+        ws.pos,
+        ws.worldid,
+      ],
+      outputs=[
+        ws.filter_key,
+        ws.filter_val,
+      ],
+    )
+
+    wp.utils.radix_sort_pairs(ws.filter_key, ws.filter_val, d.naconmax)
+
     wp.launch(
       _populate_active_sorted,
       dim=d.naconmax,
