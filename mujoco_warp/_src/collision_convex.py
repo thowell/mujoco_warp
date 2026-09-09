@@ -889,8 +889,8 @@ def ccd_kernel_builder(
 
     if wp.static(
       (use_multiccd or (geomtype1 == GeomType.BOX and geomtype2 == GeomType.BOX))
-      and (geomtype1 == GeomType.BOX or geomtype1 == GeomType.MESH)
-      and (geomtype2 == GeomType.BOX or geomtype2 == GeomType.MESH)
+      and (geomtype1 == GeomType.BOX or geomtype1 == GeomType.MESH or geomtype1 == GeomType.CYLINDER)
+      and (geomtype2 == GeomType.BOX or geomtype2 == GeomType.MESH or geomtype2 == GeomType.CYLINDER)
     ):
       if wp.static(geomtype1 == GeomType.MESH):
         # verify that geom1 mesh data is present for multicontact
@@ -1242,6 +1242,9 @@ def convex_narrowphase(m: Model, d: Data, ctx: CollisionContext, collision_table
     nboxbox = 0
   nboxmesh, _ = _pair_count(GeomType.BOX.value, GeomType.MESH.value)
   nmeshmesh, _ = _pair_count(GeomType.MESH.value, GeomType.MESH.value)
+  ncylcyl, _ = _pair_count(GeomType.CYLINDER.value, GeomType.CYLINDER.value)
+  ncylbox, _ = _pair_count(GeomType.CYLINDER.value, GeomType.BOX.value)
+  ncylmesh, _ = _pair_count(GeomType.CYLINDER.value, GeomType.MESH.value)
 
   epa_iterations = 16 if nboxbox == ncollision else m.opt.ccd_iterations
 
@@ -1252,8 +1255,11 @@ def convex_narrowphase(m: Model, d: Data, ctx: CollisionContext, collision_table
   npolygonmax = 4 if nboxbox > 0 else 0
   nmeshdegmax = 3 if nboxbox > 0 else 0
 
-  # need to allocate more memory if there's meshes
-  if use_multiccd and nmeshmesh + nboxmesh > 0:
+  # need to allocate more memory if there are cylinders or meshes
+  if use_multiccd and ncylcyl + ncylbox + ncylmesh > 0:
+    npolygonmax = max(m.npolygonmax, 16)
+    nmeshdegmax = max(m.nmeshdegmax, 3)
+  elif use_multiccd and nmeshmesh + nboxmesh > 0:
     minval = 4 if nboxmesh else npolygonmax
     npolygonmax = max(m.npolygonmax, minval)
     nmeshdegmax = max(m.nmeshdegmax, 3)

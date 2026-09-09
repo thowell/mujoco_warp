@@ -1423,6 +1423,107 @@ class CollisionTest(parameterized.TestCase):
     self.assertAlmostEqual(dot, 1.0, places=4, msg=f"Frame normal misaligned for {type1}-{type2} at z={z2}")
     self.assertAlmostEqual(float(d.contact.dist.numpy()[0]), expected_dist, places=4)
 
+  @parameterized.named_parameters(
+    (
+      "cylinder_box_face_to_face",
+      "box",
+      "1 1 1",
+      "",
+      "cylinder",
+      "0.5 1",
+      1.99,
+      "",
+      4,
+      None,
+    ),
+    (
+      "cylinder_box_horizontal_issue_1555",
+      "box",
+      "1 1 1",
+      "",
+      "cylinder",
+      "0.5 1",
+      1.49,
+      ' euler="90 0 0"',
+      2,
+      (-1.0, 1.0),
+    ),
+    (
+      "cylinder_cylinder_face_to_face",
+      "cylinder",
+      "1 1",
+      "",
+      "cylinder",
+      "1 1",
+      1.99,
+      "",
+      4,
+      None,
+    ),
+    (
+      "cylinder_cylinder_side_to_side",
+      "cylinder",
+      "1 1",
+      ' euler="90 0 0"',
+      "cylinder",
+      "1 1",
+      1.99,
+      ' euler="90 0 0"',
+      1,
+      None,
+    ),
+  )
+  def test_cylinder_multiccd(
+    self,
+    geom1_type: str,
+    geom1_size: str,
+    geom1_euler: str,
+    geom2_type: str,
+    geom2_size: str,
+    z2: float,
+    geom2_euler: str,
+    expected_ncon: int,
+    expected_y_coords: tuple[float, float] | None,
+  ):
+    """Test cylinder MultiCCD contacts and fallback with MultiCCD disabled."""
+    _, _, m, d = test_data.fixture(
+      xml=f"""
+      <mujoco>
+        <worldbody>
+          <geom type="{geom1_type}" size="{geom1_size}" pos="0 0 0"{geom1_euler}/>
+          <body pos="0 0 {z2}">
+            <freejoint/>
+            <geom type="{geom2_type}" size="{geom2_size}"{geom2_euler}/>
+          </body>
+        </worldbody>
+      </mujoco>
+      """
+    )
+    d.nacon.fill_(-1)
+    d.contact.dist.fill_(wp.inf)
+    d.contact.pos.fill_(wp.inf)
+    d.contact.frame.fill_(wp.inf)
+    mjw.collision(m, d)
+    self.assertEqual(int(d.nacon.numpy()[0]), expected_ncon)
+    self.assertTrue(np.all(np.isfinite(d.contact.dist.numpy()[:expected_ncon])))
+
+    if expected_y_coords is not None:
+      pos = d.contact.pos.numpy()[:expected_ncon]
+      # Check that contact points are at the two ends of the horizontal cylinder axis
+      y_coords = sorted([float(p[1]) for p in pos])
+      self.assertAlmostEqual(y_coords[0], expected_y_coords[0], delta=0.05)
+      self.assertAlmostEqual(y_coords[1], expected_y_coords[1], delta=0.05)
+
+    # with MultiCCD disabled, should find 1 contact
+    m.opt.disableflags |= int(types.DisableBit.MULTICCD)
+    d.nacon.fill_(-1)
+    d.contact.dist.fill_(wp.inf)
+    d.contact.pos.fill_(wp.inf)
+    d.contact.frame.fill_(wp.inf)
+    mjw.collision(m, d)
+    self.assertEqual(int(d.nacon.numpy()[0]), 1)
+    self.assertTrue(np.isfinite(float(d.contact.dist.numpy()[0])))
+
 
 if __name__ == "__main__":
   absltest.main()
