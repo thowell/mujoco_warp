@@ -316,6 +316,102 @@ class ForwardTest(parameterized.TestCase):
 
     np.testing.assert_allclose(d.qvel.numpy()[0], mjd.qvel, atol=1e-3, rtol=1e-3, err_msg="qvel")
 
+  @parameterized.parameters(IntegratorType.IMPLICIT, IntegratorType.IMPLICITFAST)
+  def test_standalone_free_body_implicit_fluid(self, integrator):
+    """Verify IMPLICIT and IMPLICITFAST match MuJoCo for standalone free body in fluid."""
+    mjm, mjd, m_warp, d_warp = test_data.fixture(
+      xml="""
+      <mujoco>
+        <option timestep="0.005" density="1.2" viscosity="0.002" wind="1 2 3"/>
+        <worldbody>
+          <body pos="0.1 -0.2 0.5" euler="20 -30 40">
+            <joint type="free"/>
+            <geom type="ellipsoid" size=".1 .2 .3" mass="2" pos=".04 -.02 .03"
+                  fluidshape="ellipsoid"/>
+          </body>
+        </worldbody>
+        <keyframe>
+          <key qpos="0.1 -0.2 0.5 1 0 0 0" qvel="1 -0.5 0.8 5 -3 2"/>
+        </keyframe>
+      </mujoco>
+      """,
+      keyframe=0,
+      overrides={"opt.integrator": integrator},
+    )
+
+    for i in range(10):
+      mjw.step(m_warp, d_warp)
+      mujoco.mj_step(mjm, mjd)
+
+      np.testing.assert_allclose(
+        d_warp.qvel.numpy()[0],
+        mjd.qvel,
+        atol=1e-3,
+        rtol=1e-3,
+        err_msg=f"step {i} qvel mismatch between {integrator} and MuJoCo",
+      )
+
+  @parameterized.parameters(IntegratorType.IMPLICIT, IntegratorType.IMPLICITFAST)
+  def test_free_root_massless_fluid_child(self, integrator):
+    """Verify free root with massless welded child carrying fluid geom matches MuJoCo."""
+    mjm, mjd, m_warp, d_warp = test_data.fixture(
+      xml="""
+      <mujoco>
+        <option timestep="0.005" density="1.2" viscosity="0.002" wind="1 2 3"/>
+        <worldbody>
+          <body name="root" pos="0.1 -0.2 0.5" euler="20 -30 40">
+            <joint type="free"/>
+            <geom type="sphere" size=".1" mass="2"/>
+            <body name="child" pos="0 0 0.2">
+              <geom type="ellipsoid" size=".1 .2 .3" mass="0" fluidshape="ellipsoid"/>
+            </body>
+          </body>
+        </worldbody>
+        <keyframe>
+          <key qpos="0.1 -0.2 0.5 1 0 0 0" qvel="1 -0.5 0.8 5 -3 2"/>
+        </keyframe>
+      </mujoco>
+      """,
+      keyframe=0,
+      overrides={"opt.integrator": integrator},
+    )
+
+    # Free root with massless welded child is admitted as free body in MuJoCo C
+    self.assertTrue(bool(m_warp.body_is_free.numpy().any()))
+
+    inputs = {
+      "qpos",
+      "qvel",
+      "time",
+      "ctrl",
+      "qfrc_applied",
+      "xfrc_applied",
+      "mocap_pos",
+      "mocap_quat",
+      "userdata",
+      "eq_active",
+    }
+    for name, arr in vars(d_warp).items():
+      if name in inputs:
+        continue
+      if isinstance(arr, wp.array):
+        if arr.dtype == float:
+          arr.fill_(wp.inf)
+        elif arr.dtype in (int, wp.int32, wp.uint32):
+          arr.fill_(-1)
+
+    for i in range(10):
+      mjw.step(m_warp, d_warp)
+      mujoco.mj_step(mjm, mjd)
+
+      np.testing.assert_allclose(
+        d_warp.qvel.numpy()[0],
+        mjd.qvel,
+        atol=1e-3,
+        rtol=1e-3,
+        err_msg=f"step {i} qvel mismatch for free root + massless child ({integrator})",
+      )
+
   @parameterized.parameters(mujoco.mjtJacobian.mjJAC_SPARSE, mujoco.mjtJacobian.mjJAC_DENSE)
   def test_implicit_tendon_damping(self, jacobian):
     mjm, mjd, m, d = test_data.fixture(

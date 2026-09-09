@@ -480,11 +480,31 @@ def put_model(mjm: mujoco.MjModel, batch_sizes: dict[str, int] | None = None) ->
   m.mocap_bodyid = np.arange(mjm.nbody)[mjm.body_mocapid >= 0]
   m.mocap_bodyid = m.mocap_bodyid[mjm.body_mocapid[mjm.body_mocapid >= 0].argsort()]
   m.body_fluid_ellipsoid = np.zeros(mjm.nbody, dtype=bool)
-  m.body_fluid_ellipsoid[mjm.geom_bodyid[mjm.geom_fluid.reshape(mjm.ngeom, mujoco.mjNFLUID)[:, 0] > 0]] = True
+  has_fluid = mjm.geom_fluid.reshape(mjm.ngeom, mujoco.mjNFLUID)[:, 0] > 0
+  if np.any(has_fluid):
+    fluid_bodyids = mjm.geom_bodyid[has_fluid]
+    valid_mass = mjm.body_mass[fluid_bodyids] >= types.MJ_MINVAL
+    m.body_fluid_ellipsoid[fluid_bodyids[valid_mass]] = True
   m.body_fluid_ellipsoid_adr = np.nonzero(m.body_fluid_ellipsoid)[0]
+  body_is_free = np.zeros(mjm.nbody, dtype=bool)
+  has_one_jnt = mjm.body_jntnum == 1
+  if np.any(has_one_jnt):
+    b_indices = np.nonzero(has_one_jnt)[0]
+    jnt_adrs = mjm.body_jntadr[b_indices]
+    is_free_jnt = mjm.jnt_type[jnt_adrs] == mujoco.mjtJoint.mjJNT_FREE
+    if np.any(is_free_jnt):
+      b_free = b_indices[is_free_jnt]
+      jnt_free_adrs = jnt_adrs[is_free_jnt]
+      dof_adrs = mjm.jnt_dofadr[jnt_free_adrs]
+      tree_ids = mjm.dof_treeid[dof_adrs]
+      tree_dof6 = mjm.tree_dofnum[tree_ids] == 6
+      mass_match = mjm.body_subtreemass[b_free] == mjm.body_mass[b_free]
+      body_is_free[b_free] = tree_dof6 & mass_match
+  m.body_is_free = body_is_free
+  m.body_freeadr = np.nonzero(m.body_is_free)[0]
   body_fluid_box = np.zeros(mjm.nbody, dtype=bool)
   for b in range(1, mjm.nbody):
-    if not m.body_fluid_ellipsoid[b] and mjm.body_mass[b] > 0.0:
+    if not m.body_fluid_ellipsoid[b] and mjm.body_mass[b] >= types.MJ_MINVAL:
       body_fluid_box[b] = True
   m.body_fluid_box_adr = np.nonzero(body_fluid_box)[0]
   jnt_limited_slide_hinge = mjm.jnt_limited & np.isin(mjm.jnt_type, (mujoco.mjtJoint.mjJNT_SLIDE, mujoco.mjtJoint.mjJNT_HINGE))
@@ -1109,6 +1129,7 @@ def put_model(mjm: mujoco.MjModel, batch_sizes: dict[str, int] | None = None) ->
     {
       "nbody_branches": len(m.body_branches),
       "nbranch_start": len(m.body_branch_start),
+      "nbodyfree": sum(body_is_free),
       "nbody_fluid_ellipsoid": len(m.body_fluid_ellipsoid_adr),
       "nbody_fluid_box": len(m.body_fluid_box_adr),
       "njnt_limited_slide_hinge": len(m.jnt_limited_slide_hinge_adr),
