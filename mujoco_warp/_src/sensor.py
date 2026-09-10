@@ -3007,6 +3007,43 @@ def _energy_pos_passive_tendon(
   wp.atomic_add(energy_out, worldid, energy)
 
 
+@wp.kernel
+def _energy_pos_passive_flex(
+  # Model:
+  nflex: int,
+  flex_dim: wp.array[int],
+  flex_edgeadr: wp.array[int],
+  flex_edgenum: wp.array[int],
+  flexedge_length0: wp.array[float],
+  flex_edgestiffness: wp.array[float],
+  # Data in:
+  flexedge_length_in: wp.array2d[float],
+  # Data out:
+  energy_out: wp.array[wp.vec2],
+):
+  worldid, edgeid = wp.tid()
+
+  for i in range(nflex):
+    eid = edgeid - flex_edgeadr[i]
+    if eid >= 0 and eid < flex_edgenum[i]:
+      f = i
+      break
+
+  if flex_dim[f] > 1:
+    return
+
+  stiffness = flex_edgestiffness[f]
+  if stiffness == 0.0:
+    return
+
+  displacement = flexedge_length0[edgeid] - flexedge_length_in[worldid, edgeid]
+  if displacement == 0.0:
+    return
+
+  energy = wp.vec2(0.5 * stiffness * displacement * displacement, 0.0)
+  wp.atomic_add(energy_out, worldid, energy)
+
+
 def energy_pos(m: Model, d: Data):
   """Position-dependent energy (potential)."""
   wp.launch(_energy_pos_zero, dim=d.nworld, outputs=[d.energy])
@@ -3047,7 +3084,21 @@ def energy_pos(m: Model, d: Data):
         outputs=[d.energy],
       )
 
-    # TODO(team): flex
+    # add 1d flex-level springs
+    wp.launch(
+      _energy_pos_passive_flex,
+      dim=(d.nworld, m.nflexedge),
+      inputs=[
+        m.nflex,
+        m.flex_dim,
+        m.flex_edgeadr,
+        m.flex_edgenum,
+        m.flexedge_length0,
+        m.flex_edgestiffness,
+        d.flexedge_length,
+      ],
+      outputs=[d.energy],
+    )
 
 
 @cache_kernel

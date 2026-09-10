@@ -406,6 +406,8 @@ def put_model(mjm: mujoco.MjModel, batch_sizes: dict[str, int] | None = None) ->
       raise NotImplementedError("Flex-HField collision is not implemented.")
     if (mjm.flex_internal != 0).any():
       raise NotImplementedError("Flex internal collisions are not implemented.")
+    if (mjm.flex_rigid != 0).any():
+      raise NotImplementedError("Rigid flexes are not implemented.")
   m.nmaxcondim = np.concatenate(condim_arrays).max()
   m.nmaxpyramid = np.maximum(1, 2 * (m.nmaxcondim - 1))
   m.has_sdf_geom = (mjm.geom_type == mujoco.mjtGeom.mjGEOM_SDF).any()
