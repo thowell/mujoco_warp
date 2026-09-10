@@ -57,8 +57,8 @@ _FACE_INVALID_BIT = wp.constant(wp.uint32(0x40000000))
 _FACE_INVALID_OR_DELETED_MASK = wp.constant(wp.uint32(0xC0000000))
 
 # Precomputed circle coordinates for 16-gon cylinder face approximation
-_CYLINDER_COS_16 = wp.static(tuple(math.cos(i * math.pi / 8.0) for i in range(16)))
-_CYLINDER_SIN_16 = wp.static(tuple(math.sin(i * math.pi / 8.0) for i in range(16)))
+_CYLINDER_COS_16 = tuple(math.cos(i * math.pi / 8.0) for i in range(16))
+_CYLINDER_SIN_16 = tuple(math.sin(i * math.pi / 8.0) for i in range(16))
 
 
 @wp.struct
@@ -2004,8 +2004,22 @@ def _cylinder_face(
   center = mat[:, 2] * (sgn * size[1]) + pos
   col0 = mat[:, 0] * size[0]
   col1 = mat[:, 1] * (size[0] * sgn)
-  for i in range(wp.static(16)):
-    face_out[i] = col0 * wp.static(_CYLINDER_COS_16[i]) - col1 * wp.static(_CYLINDER_SIN_16[i]) + center
+  face_out[0] = col0 * wp.static(_CYLINDER_COS_16[0]) - col1 * wp.static(_CYLINDER_SIN_16[0]) + center
+  face_out[1] = col0 * wp.static(_CYLINDER_COS_16[1]) - col1 * wp.static(_CYLINDER_SIN_16[1]) + center
+  face_out[2] = col0 * wp.static(_CYLINDER_COS_16[2]) - col1 * wp.static(_CYLINDER_SIN_16[2]) + center
+  face_out[3] = col0 * wp.static(_CYLINDER_COS_16[3]) - col1 * wp.static(_CYLINDER_SIN_16[3]) + center
+  face_out[4] = col0 * wp.static(_CYLINDER_COS_16[4]) - col1 * wp.static(_CYLINDER_SIN_16[4]) + center
+  face_out[5] = col0 * wp.static(_CYLINDER_COS_16[5]) - col1 * wp.static(_CYLINDER_SIN_16[5]) + center
+  face_out[6] = col0 * wp.static(_CYLINDER_COS_16[6]) - col1 * wp.static(_CYLINDER_SIN_16[6]) + center
+  face_out[7] = col0 * wp.static(_CYLINDER_COS_16[7]) - col1 * wp.static(_CYLINDER_SIN_16[7]) + center
+  face_out[8] = col0 * wp.static(_CYLINDER_COS_16[8]) - col1 * wp.static(_CYLINDER_SIN_16[8]) + center
+  face_out[9] = col0 * wp.static(_CYLINDER_COS_16[9]) - col1 * wp.static(_CYLINDER_SIN_16[9]) + center
+  face_out[10] = col0 * wp.static(_CYLINDER_COS_16[10]) - col1 * wp.static(_CYLINDER_SIN_16[10]) + center
+  face_out[11] = col0 * wp.static(_CYLINDER_COS_16[11]) - col1 * wp.static(_CYLINDER_SIN_16[11]) + center
+  face_out[12] = col0 * wp.static(_CYLINDER_COS_16[12]) - col1 * wp.static(_CYLINDER_SIN_16[12]) + center
+  face_out[13] = col0 * wp.static(_CYLINDER_COS_16[13]) - col1 * wp.static(_CYLINDER_SIN_16[13]) + center
+  face_out[14] = col0 * wp.static(_CYLINDER_COS_16[14]) - col1 * wp.static(_CYLINDER_SIN_16[14]) + center
+  face_out[15] = col0 * wp.static(_CYLINDER_COS_16[15]) - col1 * wp.static(_CYLINDER_SIN_16[15]) + center
   return 16
 
 
