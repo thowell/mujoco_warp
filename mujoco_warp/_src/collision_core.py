@@ -480,6 +480,9 @@ class CollisionContext:
     collision_worldid: collision world ids from broadphase      (naconmax,)
     sdf_collision_tid: compacted SDF collision broadphase index (naconmax,)
     nsdf_collision: compacted SDF collision count               (1,)
+    sdf_cand_dist: candidate distance buffer for SDF deduplication (naconmax, sdf_initpoints)
+    sdf_cand_pos: candidate position buffer for SDF deduplication (naconmax, sdf_initpoints)
+    sdf_cand_normal: candidate normal buffer for SDF deduplication (naconmax, sdf_initpoints)
   """
 
   collision_pair: wp.array
@@ -487,6 +490,9 @@ class CollisionContext:
   collision_worldid: wp.array
   sdf_collision_tid: Optional[wp.array] = None
   nsdf_collision: Optional[wp.array] = None
+  sdf_cand_dist: Optional[wp.array] = None
+  sdf_cand_pos: Optional[wp.array] = None
+  sdf_cand_normal: Optional[wp.array] = None
 
 
 @wp.func
@@ -523,12 +529,16 @@ def sap_range(
   range_out[worldid, sortedid] = limit - sortedid
 
 
-def create_collision_context(naconmax: int, has_sdf: bool = False) -> CollisionContext:
+def create_collision_context(naconmax: int, has_sdf: bool = False, sdf_initpoints: int = 40) -> CollisionContext:
   """Create a CollisionContext with allocated arrays."""
+  initpoints = max(1, sdf_initpoints)
   return CollisionContext(
     collision_pair=wp.empty(naconmax, dtype=wp.vec2i),
     collision_pairid=wp.empty(naconmax, dtype=wp.vec2i),
     collision_worldid=wp.empty(naconmax, dtype=int),
     sdf_collision_tid=wp.empty(naconmax, dtype=int) if has_sdf else None,
     nsdf_collision=wp.zeros(1, dtype=int) if has_sdf else None,
+    sdf_cand_dist=wp.empty((naconmax, initpoints), dtype=float) if has_sdf else None,
+    sdf_cand_pos=wp.empty((naconmax, initpoints), dtype=wp.vec3) if has_sdf else None,
+    sdf_cand_normal=wp.empty((naconmax, initpoints), dtype=wp.vec3) if has_sdf else None,
   )

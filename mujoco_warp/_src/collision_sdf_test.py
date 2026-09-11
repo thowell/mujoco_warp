@@ -254,6 +254,225 @@ class CollisionSdfTest(absltest.TestCase):
     # Velocities should remain bounded (no explosions or launching)
     self.assertLess(np.linalg.norm(vel), 5.0, f"Velocity exploded: |v|={np.linalg.norm(vel)}")
 
+  def test_mesh_sdf_deduplication(self):
+    """Tests that Halton candidate contacts are spatially deduplicated."""
+    _, _, m, d = test_data.fixture(
+      xml="""
+      <mujoco>
+        <option sdf_iterations="10" sdf_initpoints="40"/>
+        <asset>
+          <mesh name="cube_mesh"
+           vertex="1 1 1  1 1 -1  1 -1 1  1 -1 -1  -1 1 1  -1 1 -1  -1 -1 1  -1 -1 -1"/>
+          <mesh name="cube_sdf"
+           vertex="1 1 1  1 1 -1  1 -1 1  1 -1 -1  -1 1 1  -1 1 -1  -1 -1 1  -1 -1 -1"/>
+        </asset>
+        <worldbody>
+          <body pos="0 0 0">
+            <geom type="mesh" mesh="cube_mesh"/>
+          </body>
+          <body pos="0 0 1.95">
+            <freejoint/>
+            <geom type="sdf" mesh="cube_sdf"/>
+          </body>
+        </worldbody>
+      </mujoco>
+      """
+    )
+    mjw.collision(m, d)
+    nacon = d.nacon.numpy()[0]
+    # With 40 init points, without deduplication, contacts explode towards 40.
+    # Deduplication ensures we get a bounded set of unique contact points (<= 16).
+    self.assertGreater(nacon, 0, "Expected contacts between colliding cubes")
+    self.assertLessEqual(nacon, 16, f"Contact explosion: got {nacon} contacts, expected <= 16")
+
+    # Verify that all retained contacts are spatially distinct (not near-duplicates)
+    positions = d.contact.pos.numpy()[:nacon]
+    for i in range(nacon):
+      for j in range(i + 1, nacon):
+        dist = np.linalg.norm(positions[i] - positions[j])
+        self.assertGreater(dist, 0.05, f"Near-duplicate contacts found between {i} and {j}: dist={dist}")
+
+  def test_mesh_sdf_batched(self):
+    """Tests batched multi-world SDF collisions across 4 worlds."""
+    nworld = 4
+    _, _, m, d = test_data.fixture(
+      xml="""
+      <mujoco>
+        <option sdf_iterations="10" sdf_initpoints="40"/>
+        <asset>
+          <mesh name="cube_mesh"
+           vertex="1 1 1  1 1 -1  1 -1 1  1 -1 -1  -1 1 1  -1 1 -1  -1 -1 1  -1 -1 -1"/>
+          <mesh name="cube_sdf"
+           vertex="1 1 1  1 1 -1  1 -1 1  1 -1 -1  -1 1 1  -1 1 -1  -1 -1 1  -1 -1 -1"/>
+        </asset>
+        <worldbody>
+          <body pos="0 0 0">
+            <geom type="mesh" mesh="cube_mesh"/>
+          </body>
+          <body pos="0 0 1.95">
+            <freejoint/>
+            <geom type="sdf" mesh="cube_sdf"/>
+          </body>
+        </worldbody>
+      </mujoco>
+      """,
+      nworld=nworld,
+    )
+    mjw.collision(m, d)
+    nacon = d.nacon.numpy()[0]
+    self.assertGreater(nacon, 0, "Expected contacts in batched collision")
+    worldids = d.contact.worldid.numpy()[:nacon]
+    unique_worlds = np.unique(worldids)
+    # Contacts should be detected in each of the 4 worlds
+    self.assertEqual(len(unique_worlds), nworld, f"Expected contacts in all {nworld} worlds, got {unique_worlds}")
+
+  def test_mesh_sdf_small_scale(self):
+    """Tests SDF collision on sub-centimeter scale geometry (10mm cube)."""
+    # Scaled down to 10mm (half-size = 0.005m = 5mm)
+    _, _, m, d = test_data.fixture(
+      xml="""
+      <mujoco>
+        <option sdf_iterations="10" sdf_initpoints="40"/>
+        <asset>
+          <mesh name="small_mesh"
+           scale="0.005 0.005 0.005"
+           vertex="1 1 1  1 1 -1  1 -1 1  1 -1 -1  -1 1 1  -1 1 -1  -1 -1 1  -1 -1 -1"/>
+          <mesh name="small_sdf"
+           scale="0.005 0.005 0.005"
+           vertex="1 1 1  1 1 -1  1 -1 1  1 -1 -1  -1 1 1  -1 1 -1  -1 -1 1  -1 -1 -1"/>
+        </asset>
+        <worldbody>
+          <body pos="0 0 0">
+            <geom type="mesh" mesh="small_mesh"/>
+          </body>
+          <body pos="0 0 0.0095">
+            <freejoint/>
+            <geom type="sdf" mesh="small_sdf"/>
+          </body>
+        </worldbody>
+      </mujoco>
+      """
+    )
+    mjw.collision(m, d)
+    nacon = d.nacon.numpy()[0]
+    self.assertGreater(nacon, 0, "Expected contacts for small-scale geometry")
+    self.assertLessEqual(nacon, 16, f"Contact explosion on small scale: {nacon}")
+    dists = d.contact.dist.numpy()[:nacon]
+    # Penetration exists and distances are negative or flush
+    self.assertLess(np.min(dists), -0.0003, f"Expected penetration distance: {dists}")
+    for dist in dists:
+      self.assertLessEqual(dist, 1e-6, f"Expected non-positive distance: {dist}")
+
+  def test_sdf_sdf_contact_position_midpoint(self):
+    """Tests that SDF-SDF contact position offset has the correct sign along normal."""
+    _, _, m, d = test_data.fixture(
+      xml="""
+      <mujoco>
+        <option sdf_iterations="10" sdf_initpoints="40"/>
+        <asset>
+          <mesh name="cube1"
+           vertex="1 1 1  1 1 -1  1 -1 1  1 -1 -1  -1 1 1  -1 1 -1  -1 -1 1  -1 -1 -1"/>
+          <mesh name="cube2"
+           vertex="1 1 1  1 1 -1  1 -1 1  1 -1 -1  -1 1 1  -1 1 -1  -1 -1 1  -1 -1 -1"/>
+        </asset>
+        <worldbody>
+          <body pos="0 0 0">
+            <geom type="sdf" mesh="cube1"/>
+          </body>
+          <body pos="0 0 1.9">
+            <freejoint/>
+            <geom type="sdf" mesh="cube2"/>
+          </body>
+        </worldbody>
+      </mujoco>
+      """
+    )
+    mjw.collision(m, d)
+
+    nacon = d.nacon.numpy()[0]
+    self.assertGreater(nacon, 0, "Expected contacts between colliding SDF cubes")
+
+    # Penetration along Z: normal points in +Z from geom 1 to geom 2.
+    dists = d.contact.dist.numpy()[:nacon]
+    normals = d.contact.frame.numpy()[:nacon, 0]
+    for dist in dists:
+      self.assertLess(dist, 0.0, f"Expected penetration dist < 0, got {dist}")
+    for n in normals:
+      self.assertGreater(n[2], 0.9, f"Expected normal pointing along +Z, got {n}")
+
+    # Contact position offset must follow: pos + normal * (0.5 * dist).
+    # Since dist < 0 and normal points along +Z, contact position must be offset
+    # in the -Z direction (towards geom 1), so mean Z must be <= 0.95.
+    positions = d.contact.pos.numpy()[:nacon]
+    mean_z = float(np.mean(positions[:, 2]))
+    self.assertLessEqual(mean_z, 0.95, f"Contact pos Z shifted in wrong direction: {mean_z} > 0.95")
+
+  def test_grad_box(self):
+    """Tests that grad_box handles face centers and axes without producing NaNs."""
+
+    @wp.kernel
+    def eval_grad_box(
+      points: wp.array[wp.vec3],
+      size: wp.vec3,
+      out_grad: wp.array[wp.vec3],
+    ):
+      tid = wp.tid()
+      out_grad[tid] = collision_sdf.grad_box(points[tid], size)
+
+    test_pts = [
+      wp.vec3(0.0, 0.0, 0.0),  # origin
+      wp.vec3(1.0, 0.0, 0.0),  # boundary face center (+X)
+      wp.vec3(1.05, 0.0, 0.0),  # exterior along +X
+      wp.vec3(0.0, 1.05, 0.0),  # exterior along +Y
+      wp.vec3(0.0, 0.0, 1.05),  # exterior along +Z
+      wp.vec3(1.0, 1.0, 0.0),  # boundary edge
+      wp.vec3(1.0, 1.0, 1.0),  # boundary corner
+      wp.vec3(2.0, 0.0, 0.0),  # exterior along +X
+    ]
+    size = wp.vec3(1.0, 1.0, 1.0)
+    pts_wp = wp.array(test_pts, dtype=wp.vec3)
+    out_wp = wp.zeros(len(test_pts), dtype=wp.vec3)
+    wp.launch(eval_grad_box, dim=len(test_pts), inputs=[pts_wp, size, out_wp])
+    wp.synchronize()
+
+    grads = out_wp.numpy()
+    self.assertFalse(np.isnan(grads).any(), f"NaN in box gradients: {grads}")
+    # Exterior points along axes should point along outward face normal
+    np.testing.assert_allclose(grads[2], [1.0, 0.0, 0.0], atol=1e-5)
+    np.testing.assert_allclose(grads[3], [0.0, 1.0, 0.0], atol=1e-5)
+    np.testing.assert_allclose(grads[4], [0.0, 0.0, 1.0], atol=1e-5)
+    np.testing.assert_allclose(grads[7], [1.0, 0.0, 0.0], atol=1e-5)
+
+  def test_grad_ellipsoid(self):
+    """Tests that grad_ellipsoid handles singular points without producing NaNs."""
+
+    @wp.kernel
+    def eval_grad_ellipsoid(
+      points: wp.array[wp.vec3],
+      size: wp.vec3,
+      out_grad: wp.array[wp.vec3],
+    ):
+      tid = wp.tid()
+      out_grad[tid] = collision_sdf.grad_ellipsoid(points[tid], size)
+
+    test_pts = [
+      wp.vec3(0.0, 0.0, 0.0),  # origin (singular)
+      wp.vec3(2.0, 0.0, 0.0),  # exterior along X
+      wp.vec3(0.0, 3.0, 0.0),  # exterior along Y
+      wp.vec3(0.0, 0.0, 1.5),  # exterior along Z
+    ]
+    size = wp.vec3(1.0, 2.0, 1.0)
+    pts_wp = wp.array(test_pts, dtype=wp.vec3)
+    out_wp = wp.zeros(len(test_pts), dtype=wp.vec3)
+    wp.launch(eval_grad_ellipsoid, dim=len(test_pts), inputs=[pts_wp, size, out_wp])
+    wp.synchronize()
+
+    grads = out_wp.numpy()
+    self.assertFalse(np.isnan(grads).any(), f"NaN in ellipsoid gradients: {grads}")
+    np.testing.assert_allclose(grads[1], [1.0, 0.0, 0.0], atol=1e-5)
+    np.testing.assert_allclose(grads[2], [0.0, 1.0, 0.0], atol=1e-5)
+    np.testing.assert_allclose(grads[3], [0.0, 0.0, 1.0], atol=1e-5)
+
 
 if __name__ == "__main__":
   absltest.main()
