@@ -998,8 +998,10 @@ def implicit(m: Model, d: Data):
       outputs=[d.qLU],
     )
 
-    # 3. Compute RNE derivatives, scale by timestep, and subtract in-place from qLU
-    derivative.deriv_rne_vel(m, d, d.qLU, flg_subtract=True)
+    # 3. Compute RNE derivatives, scale by timestep, and add in-place to qLU.
+    # Note: inverse dynamics Coriolis enters equations of motion as -qfrc_bias,
+    # so M - dt * df/dv = M + dt * d(qfrc_bias)/dv.
+    derivative.deriv_rne_vel(m, d, d.qLU)
 
     # 4. Factorize and solve: qacc = qLU \ Ma
     qacc = wp.empty((d.nworld, m.nv), dtype=float)

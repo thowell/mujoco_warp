@@ -316,6 +316,42 @@ class ForwardTest(parameterized.TestCase):
 
     np.testing.assert_allclose(d.qvel.numpy()[0], mjd.qvel, atol=1e-3, rtol=1e-3, err_msg="qvel")
 
+  def test_implicit_coriolis_two_hinge(self):
+    """Verify implicit integrator with non-planar multi-body Coriolis coupling tracks MuJoCo."""
+    mjm, mjd, m_warp, d_warp = test_data.fixture(
+      xml="""
+      <mujoco model="two_hinges">
+        <option timestep="0.001" integrator="implicit" gravity="0 0 0"/>
+        <worldbody>
+          <body name="body1" pos="0 0 0">
+            <joint name="joint1" type="hinge" pos="0 0 0" axis="0 1 0"/>
+            <geom type="cylinder" size="0.05 0.2" pos="0 0 0.2" mass="1"/>
+            <body name="body2" pos="0 0 0.4">
+              <joint name="joint2" type="hinge" pos="0 0 0" axis="1 0 0"/>
+              <geom type="cylinder" size="0.05 0.2" pos="0 0 0.2" mass="1"/>
+            </body>
+          </body>
+        </worldbody>
+        <keyframe>
+          <key qpos="0.5 0.5" qvel="30 -30"/>
+        </keyframe>
+      </mujoco>
+      """,
+      keyframe=0,
+    )
+
+    for i in range(20):
+      mjw.step(m_warp, d_warp)
+      mujoco.mj_step(mjm, mjd)
+
+      np.testing.assert_allclose(
+        d_warp.qvel.numpy()[0],
+        mjd.qvel,
+        atol=1e-3,
+        rtol=1e-3,
+        err_msg=f"step {i} qvel mismatch between implicit integrator and MuJoCo",
+      )
+
   @parameterized.parameters(IntegratorType.IMPLICIT, IntegratorType.IMPLICITFAST)
   def test_standalone_free_body_implicit_fluid(self, integrator):
     """Verify IMPLICIT and IMPLICITFAST match MuJoCo for standalone free body in fluid."""
