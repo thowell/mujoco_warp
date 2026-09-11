@@ -274,15 +274,14 @@ def _spring_damper_tendon_passive(
 @wp.kernel
 def _spring_damper_flexedge_passive(
   # Model:
-  nflex: int,
-  flex_edgeadr: wp.array[int],
-  flex_edgenum: wp.array[int],
   flexedge_length0: wp.array[float],
+  flex_edgestiffness: wp.array[float],
+  flex_edgedamping: wp.array[float],
+  flexedge_rigid: wp.array[bool],
   flexedge_J_rownnz: wp.array[int],
   flexedge_J_rowadr: wp.array[int],
   flexedge_J_colind: wp.array[int],
-  flex_edgestiffness: wp.array[float],
-  flex_edgedamping: wp.array[float],
+  flex_edgeflexid: wp.array[int],
   # Data in:
   flexedge_J_in: wp.array2d[float],
   flexedge_length_in: wp.array2d[float],
@@ -296,11 +295,10 @@ def _spring_damper_flexedge_passive(
 ):
   worldid, edgeid = wp.tid()
 
-  for i in range(nflex):
-    eid = edgeid - flex_edgeadr[i]
-    if eid >= 0 and eid < flex_edgenum[i]:
-      f = i
-      break
+  if flexedge_rigid[edgeid]:
+    return
+
+  f = flex_edgeflexid[edgeid]
 
   stiffness = float(0.0)
   if not dsbl_spring:
@@ -1385,15 +1383,14 @@ def passive(m: Model, d: Data):
       _spring_damper_flexedge_passive,
       dim=(d.nworld, m.nflexedge),
       inputs=[
-        m.nflex,
-        m.flex_edgeadr,
-        m.flex_edgenum,
         m.flexedge_length0,
+        m.flex_edgestiffness,
+        m.flex_edgedamping,
+        m.flexedge_rigid,
         m.flexedge_J_rownnz,
         m.flexedge_J_rowadr,
         m.flexedge_J_colind,
-        m.flex_edgestiffness,
-        m.flex_edgedamping,
+        m.flex_edgeflexid,
         d.flexedge_J,
         d.flexedge_length,
         d.flexedge_velocity,
