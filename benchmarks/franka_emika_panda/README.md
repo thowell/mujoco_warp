@@ -2,7 +2,7 @@
 
 ## Description
 
-Measures MuJoCo Warp throughput for Panda robots in idle and sparse-contact scenes.
+Measures MuJoCo Warp throughput for the Franka Emika Panda in idle and threading scenes.
 
 ### franka_emika_panda
 
@@ -20,25 +20,27 @@ Measures MuJoCo Warp throughput for Panda robots in idle and sparse-contact scen
 
 ![franka_emika_panda](rollout.webp)
 
-### franka_emika_pandas_sparse_contact
+### panda_threading
 
-Five independent Panda grippers press against fixed boxes. Each constraint row
-touches one 9-DoF chain, giving the 45-DoF system a naturally block-sparse
-constraint topology. The default rollout averages approximately 27 contacts and
-119 constraint rows per world (p95: 35 and 155), which fit the 64-contact and
-192-constraint capacities.
+A Franka Emika Panda arm picks up a nut from the table, aligns it above a fixed threaded bolt,
+and threads it down to the base flange using convex decomposition meshes (51 bolt pieces and 167 nut pieces).
+The rollout averages approximately 23 contacts and 126 constraint rows per world (p95: 24 and 173),
+fitting within the 512-contact and 4096-constraint capacities.
 
 | Property | Value |
 |----------|-------|
-| Bodies | 56 |
-| DoFs | 45 |
-| Actuators | 40 |
-| Geoms | 116 |
-| Timestep | 0.005s |
+| Bodies | 14 |
+| DoFs | 15 |
+| Actuators | 8 |
+| Geoms | 306 |
+| Timestep | 0.002s |
 | Solver | Newton |
 | Friction | Pyramidal |
 | Integrator | ImplicitFast |
 | Matrix Format | Sparse |
-| Parallel Worlds | 4096 |
-| Contact Capacity / World | 64 |
-| Constraint Capacity / World | 192 |
+| Parallel Worlds | 1024 |
+| Contact Capacity / World | 512 |
+| Constraint Capacity / World | 4096 |
+
+![panda_threading](rollout_panda_threading.webp)
+

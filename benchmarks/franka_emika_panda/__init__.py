@@ -15,11 +15,12 @@ BENCHMARKS = [
     "assets": [(ASSETS[0], "franka_emika_panda")],
   },
   {
-    "name": "franka_emika_pandas_sparse_contact",
-    "mjcf": "scene_sparse_contact.xml",
-    "nworld": 4096,
-    "nconmax": 64,
-    "njmax": 192,
+    "name": "panda_threading",
+    "mjcf": "scene_threading.xml",
+    "replay": "threading.npz",
+    "nworld": 1024,
+    "nconmax": 512,
+    "njmax": 4096,
     "assets": [(ASSETS[0], "franka_emika_panda")],
   },
 ]
