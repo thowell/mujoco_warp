@@ -3010,12 +3010,11 @@ def _energy_pos_passive_tendon(
 @wp.kernel
 def _energy_pos_passive_flex(
   # Model:
-  nflex: int,
   flex_dim: wp.array[int],
-  flex_edgeadr: wp.array[int],
-  flex_edgenum: wp.array[int],
   flexedge_length0: wp.array[float],
   flex_edgestiffness: wp.array[float],
+  flexedge_rigid: wp.array[bool],
+  flex_edgeflexid: wp.array[int],
   # Data in:
   flexedge_length_in: wp.array2d[float],
   # Data out:
@@ -3023,11 +3022,10 @@ def _energy_pos_passive_flex(
 ):
   worldid, edgeid = wp.tid()
 
-  for i in range(nflex):
-    eid = edgeid - flex_edgeadr[i]
-    if eid >= 0 and eid < flex_edgenum[i]:
-      f = i
-      break
+  if flexedge_rigid[edgeid]:
+    return
+
+  f = flex_edgeflexid[edgeid]
 
   if flex_dim[f] > 1:
     return
@@ -3089,12 +3087,11 @@ def energy_pos(m: Model, d: Data):
       _energy_pos_passive_flex,
       dim=(d.nworld, m.nflexedge),
       inputs=[
-        m.nflex,
         m.flex_dim,
-        m.flex_edgeadr,
-        m.flex_edgenum,
         m.flexedge_length0,
         m.flex_edgestiffness,
+        m.flexedge_rigid,
+        m.flex_edgeflexid,
         d.flexedge_length,
       ],
       outputs=[d.energy],
