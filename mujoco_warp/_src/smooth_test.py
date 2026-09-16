@@ -26,6 +26,7 @@ from mujoco_warp import ConeType
 from mujoco_warp import DisableBit
 from mujoco_warp import test_data
 from mujoco_warp._src import types
+from mujoco_warp._src import util_pkg
 
 # tolerance for difference between MuJoCo and MJWarp smooth calculations - mostly
 # due to float precision
@@ -306,7 +307,8 @@ class SmoothTest(parameterized.TestCase):
     d.cfrc_ext.zero_()
     mjw.rne_postconstraint(m, d)
 
-    _assert_eq(d.cfrc_ext.numpy()[0], mjd.cfrc_ext, "cfrc_ext (equality)")
+    if util_pkg.check_version("mujoco>=3.13.1"):
+      _assert_eq(d.cfrc_ext.numpy()[0], mjd.cfrc_ext, "cfrc_ext (equality)")
 
     mjm, mjd, m, d = test_data.fixture("constraints.xml", keyframe=1, overrides={"opt.disableflags": DisableBit.EQUALITY})
 
@@ -317,6 +319,67 @@ class SmoothTest(parameterized.TestCase):
     mjw.rne_postconstraint(m, d)
 
     _assert_eq(d.cfrc_ext.numpy()[0], mjd.cfrc_ext, "cfrc_ext (contact)")
+
+  @parameterized.parameters(
+    (
+      """
+      <mujoco>
+        <option gravity="0 0 -1"/>
+        <worldbody>
+          <body name="body1">
+            <geom type="box" size="0.05 0.05 0.05"/>
+            <site name="sensor"/>
+          </body>
+          <body name="body2" pos="0 1 0">
+            <joint type="free"/>
+            <inertial pos="1 0 0" mass="1" diaginertia="1 1 1"/>
+            <geom type="box" size="0.05 0.05 0.05" pos="1 0 0"/>
+          </body>
+        </worldbody>
+        <equality>
+          <weld body1="body1" body2="body2" solimp="0.999 0.999 0.001" solref="0.005 1"/>
+        </equality>
+        <sensor>
+          <force site="sensor" user="0 0 2"/>
+          <torque site="sensor" user="1 -1 0"/>
+        </sensor>
+      </mujoco>
+      """,
+    ),
+    (
+      """
+      <mujoco>
+        <option gravity="0 0 -1"/>
+        <worldbody>
+          <body name="body1" euler="0 45 0">
+            <geom type="box" size="0.05 0.05 0.05"/>
+            <site name="sensor" euler="0 0 90"/>
+          </body>
+          <body name="body2" pos="0 1 0" euler="30 30 30">
+            <joint type="free"/>
+            <inertial pos="1 0 0" mass="1" diaginertia="1 1 1"/>
+            <geom type="box" size="0.05 0.05 0.05" pos="1 0 0"/>
+          </body>
+        </worldbody>
+        <equality>
+          <weld body1="body1" body2="body2" torquescale="4" solimp="0.999 0.999 0.001" solref="0.005 1"/>
+        </equality>
+        <sensor>
+          <force site="sensor" user="0 1.41421356237 1.41421356237"/>
+          <torque site="sensor" user="-0.75 -1.166386108 1.166386108"/>
+        </sensor>
+      </mujoco>
+      """,
+    ),
+  )
+  def test_rne_post_weld_force_torque_lever(self, xml):
+    """Tests force and torque sensor readings on weld lever models."""
+    mjm, _, m, d = test_data.fixture(xml=xml)
+
+    for _ in range(20):
+      mjw.step(m, d)
+
+    _assert_eq(d.sensordata.numpy()[0], mjm.sensor_user.flatten(), "weld force/torque sensor readings")
 
   def test_com_vel(self):
     """Tests com_vel."""
