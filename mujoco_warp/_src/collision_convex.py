@@ -1000,7 +1000,14 @@ def ccd_kernel_builder(
       )
 
   # runs convex collision on a set of geom pairs to recover contact info (non-heightfield)
-  @wp.kernel(module="unique", enable_backward=False, grid_stride=False, launch_bounds=(block_dim, _CCD_MIN_BLOCKS))
+  # Compile occupancy queries and launches with the same block dimension.
+  @wp.kernel(
+    module="unique",
+    module_options={"block_dim": block_dim},
+    enable_backward=False,
+    grid_stride=False,
+    launch_bounds=(block_dim, _CCD_MIN_BLOCKS),
+  )
   def ccd_kernel(
     # Model:
     opt_ccd_tolerance: wp.array[float],
