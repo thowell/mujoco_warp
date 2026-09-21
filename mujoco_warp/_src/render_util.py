@@ -524,17 +524,14 @@ def create_render_context(
 
   textures_registry = []
   # Only materialize GPU textures when the caller actually needs them.
-  if use_textures:
+  if use_textures or has_skybox:
+    empty_tex = None if use_textures else wp.Texture2D(width=1, height=1, num_channels=4, dtype=wp.float32)
+    skybox_id = skybox_tex_ids[0] if has_skybox else -1
     for i in range(mjm.ntex):
-      textures_registry.append(create_warp_texture(mjm, i))
-  elif has_skybox:
-    dummy_data = wp.zeros((1, 1, 4), dtype=float)
-    dummy_tex = wp.Texture2D(dummy_data, filter_mode=wp.TextureFilterMode.LINEAR)
-    for i in range(mjm.ntex):
-      if i == skybox_tex_ids[0]:
+      if use_textures or i == skybox_id:
         textures_registry.append(create_warp_texture(mjm, i))
       else:
-        textures_registry.append(dummy_tex)
+        textures_registry.append(empty_tex)
   textures = wp.array(textures_registry, dtype=wp.Texture2D)
 
   # Filter active cameras

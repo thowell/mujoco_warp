@@ -1507,6 +1507,43 @@ class RenderTest(parameterized.TestCase):
     else:
       self.assertEqual(red_count, 0, f"Box at dist {dist} should be clipped")
 
+  @parameterized.named_parameters(
+    ("inside", 0.0, True),
+    ("clipped", -5.0, False),
+  )
+  def test_zfar_clipping_flex(self, dist: float, is_visible: bool):
+    """Flex geometry past the far clipping plane (zfar) is clipped."""
+    mjm, mjd, m, d = test_data.fixture(
+      xml=f"""
+    <mujoco>
+      <statistic extent="2.0"/>
+      <visual>
+        <map zfar="1.0"/>
+      </visual>
+      <worldbody>
+        <camera pos="0 0 1" xyaxes="1 0 0 0 1 0" fovy="45"/>
+        <flexcomp name="cloth" type="grid" count="3 3 1" spacing="0.1 0.1 0.1" dim="2" mass="1" pos="0 0 {dist}" rgba="0 1 0 1">
+          <edge damping="0.1"/>
+        </flexcomp>
+      </worldbody>
+    </mujoco>
+    """,
+      nworld=1,
+    )
+    rc = mjw.create_render_context(
+      mjm,
+      nworld=1,
+      cam_res=(32, 32),
+      render_rgb=True,
+    )
+    mjw.render(m, d, rc)
+    rgb = _unpack_rgb(rc.rgb_data.numpy()[0]).reshape(32, 32, 3)
+    green_count = np.count_nonzero(rgb[..., 1] > 100)
+    if is_visible:
+      self.assertGreater(green_count, 0, f"Flex at dist {dist} should be visible")
+    else:
+      self.assertEqual(green_count, 0, f"Flex at dist {dist} should be clipped")
+
 
 if __name__ == "__main__":
   wp.init()
