@@ -402,6 +402,7 @@ class GainType(enum.IntEnum):
   MUSCLE = mujoco.mjtGain.mjGAIN_MUSCLE
   USER = mujoco.mjtGain.mjGAIN_USER
   DCMOTOR = mujoco.mjtGain.mjGAIN_DCMOTOR
+  SO3 = mujoco.mjtGain.mjGAIN_SO3
 
 
 class BiasType(enum.IntEnum):
@@ -438,6 +439,18 @@ class CtrlInput(enum.IntFlag):
   FF = mujoco.mjtCtrlInput.mjINPUT_FF
   VOLTAGE = mujoco.mjtCtrlInput.mjINPUT_VOLTAGE
   NONE = mujoco.mjtCtrlInput.mjINPUT_NONE
+
+
+class CtrlChart(enum.IntEnum):
+  """Orientation chart type for SO(3) actuators.
+
+  Attributes:
+    EXPMAP: exponential-map orientation target (3 controls)
+    QUAT: quaternion orientation target (4 controls)
+  """
+
+  EXPMAP = mujoco.mjtCtrlChart.mjCHART_EXPMAP
+  QUAT = mujoco.mjtCtrlChart.mjCHART_QUAT
 
 
 class JointType(enum.IntEnum):
