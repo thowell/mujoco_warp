@@ -90,7 +90,8 @@ class ForwardTest(parameterized.TestCase):
 
     # TODO(team): test actearly
 
-  def test_rotational_setpoint_wrapping(self):
+  @parameterized.parameters(IntegratorType.EULER, IntegratorType.RK4)
+  def test_rotational_setpoint_wrapping(self, integrator):
     mjm, mjd, m, d = test_data.fixture(
       xml="""
     <mujoco>
@@ -112,8 +113,12 @@ class ForwardTest(parameterized.TestCase):
       </keyframe>
     </mujoco>
     """,
+      overrides={"opt.integrator": integrator},
       keyframe=0,
     )
+
+    for arr in (d.actuator_force, d.qfrc_actuator):
+      arr.fill_(wp.inf)
 
     mjw.fwd_actuation(m, d)
 

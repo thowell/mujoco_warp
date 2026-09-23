@@ -164,11 +164,9 @@ def _wrap_period(
 
   # joint transmission on a ball joint
   if trntype == TrnType.JOINT or trntype == TrnType.JOINTINPARENT:
-    jntid = trnid[0]
-    if jnt_type.shape[0] > 0 and jntid >= 0 and jntid < jnt_type.shape[0]:
-      if jnt_type[jntid] == JointType.BALL:
-        lin_gear = wp.vec3(gear[0], gear[1], gear[2])
-        return wp.static(2.0 * wp.pi) * wp.length(lin_gear)
+    if jnt_type[trnid[0]] == JointType.BALL:
+      lin_gear = wp.vec3(gear[0], gear[1], gear[2])
+      return wp.static(2.0 * wp.pi) * wp.length(lin_gear)
 
   return 0.0
 
@@ -264,7 +262,7 @@ def _next_activation(
         act_dot_scale,
         limit and actuator_actlimited[uid],
       )
-      if dyntype == DynType.INTEGRATOR:
+      if limit and dyntype == DynType.INTEGRATOR:
         gaintype = actuator_gaintype[uid]
         biastype = actuator_biastype[uid]
         gainprm = actuator_gainprm[actuator_gainprm_id, uid]
