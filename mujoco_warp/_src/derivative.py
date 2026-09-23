@@ -88,16 +88,7 @@ def _qderiv_actuator_passive_vel(
       dVdw = -gainprm[6] * R0 / K + K
 
     # winding resistance at current temperature
-    R = R0
-    if dynprm[2] > 0.0:
-      slots = util_misc.dcmotor_slots(dynprm, gainprm)
-      if slots[2] >= 0:
-        adr = actuator_actadr[actid] + slots[2]
-        T = act_in[worldid, adr]
-        alpha = gainprm[2]
-        T0 = gainprm[3]
-        Ta = dynprm[4]
-        R = wp.max(MJ_MINVAL, gainprm[0] * (1.0 + alpha * (T + Ta - T0)))
+    R = util_misc.dcmotor_resistance(act_in, worldid, actuator_actadr[actid], dynprm, gainprm)
 
     if te > 0.0:
       # stateful current with actearly: d(K*next_act)/dω
@@ -132,16 +123,7 @@ def _qderiv_actuator_passive_vel(
       if te <= 0.0:
         gainprm = actuator_gainprm[actuator_gainprm_id, actid]
         K = gainprm[1]
-        R = wp.max(MJ_MINVAL, gainprm[0])
-        if dynprm[2] > 0.0:
-          slots = util_misc.dcmotor_slots(dynprm, gainprm)
-          if slots[2] >= 0:
-            adr = actuator_actadr[actid] + slots[2]
-            T = act_in[worldid, adr]
-            alpha = gainprm[2]
-            T0 = gainprm[3]
-            Ta = dynprm[4]
-            R = wp.max(MJ_MINVAL, gainprm[0] * (1.0 + alpha * (T + Ta - T0)))
+        R = util_misc.dcmotor_resistance(act_in, worldid, actuator_actadr[actid], dynprm, gainprm)
         bias += -K * K / R
 
   if bias == 0.0 and gain == 0.0:

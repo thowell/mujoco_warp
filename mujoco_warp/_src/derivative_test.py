@@ -1187,6 +1187,16 @@ class DerivativeTest(parameterized.TestCase):
       err_msg="thermal DCMotor velocity derivative vs expected",
     )
 
+    # Test direct parity with MuJoCo C qDeriv (populated via implicitfast step)
+    mjm.opt.integrator = mujoco.mjtIntegrator.mjINT_IMPLICITFAST
+    mujoco.mj_step(mjm, mjd)
+    np.testing.assert_allclose(
+      actual_qderiv,
+      mjd.qDeriv[:4],
+      atol=1e-4,
+      err_msg="thermal DCMotor velocity derivative vs mjd.qDeriv",
+    )
+
   _FLUID_SCENARIOS = {
     "basic": """
       <mujoco>
