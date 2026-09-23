@@ -718,6 +718,7 @@ def _project_spatial_B(
 @wp.kernel
 def _implicit_free_body_solve(
   # Model:
+  nbody: int,
   opt_timestep: wp.array[float],
   opt_wind: wp.array[wp.vec3],
   opt_density: wp.array[float],
@@ -725,6 +726,7 @@ def _implicit_free_body_solve(
   opt_integrator: int,
   opt_disableflags: int,
   opt_enableflags: int,
+  body_rootid: wp.array[int],
   body_dofadr: wp.array[int],
   body_geomnum: wp.array[int],
   body_geomadr: wp.array[int],
@@ -828,112 +830,116 @@ def _implicit_free_body_solve(
   wind = opt_wind[worldid % opt_wind.shape[0]]
 
   if density > 0.0 or viscosity > 0.0:
-    if body_fluid_ellipsoid[bodyid]:
-      subtree_root = subtree_com_in[worldid, bodyid]
-      xipos = xipos_in[worldid, bodyid]
-      cvel = cvel_in[worldid, bodyid]
-      ang_global = wp.spatial_top(cvel)
-      lin_global = wp.spatial_bottom(cvel)
-      lin_com = lin_global - wp.cross(xipos - subtree_root, ang_global)
+    subtree_root = subtree_com_in[worldid, bodyid]
 
-      geomadr = body_geomadr[bodyid]
-      geomnum = body_geomnum[bodyid]
+    for b in range(bodyid, nbody):
+      if body_rootid[b] != bodyid:
+        break
 
-      for g in range(geomnum):
-        geomid = geomadr + g
-        coef = geom_fluid[geomid, 0]
-        if coef <= 0.0:
-          continue
+      if body_fluid_ellipsoid[b]:
+        xipos = xipos_in[worldid, b]
+        cvel = cvel_in[worldid, b]
+        ang_global = wp.spatial_top(cvel)
+        lin_global = wp.spatial_bottom(cvel)
+        lin_com = lin_global - wp.cross(xipos - subtree_root, ang_global)
 
-        size = geom_size[worldid % geom_size.shape[0], geomid]
-        semiaxes = passive.geom_semiaxes(size, geom_type[geomid])
-        geom_rot = geom_xmat_in[worldid, geomid]
-        geom_rotT = wp.transpose(geom_rot)
-        geom_pos = geom_xpos_in[worldid, geomid]
+        geomadr = body_geomadr[b]
+        geomnum = body_geomnum[b]
 
-        # compute local velocity
-        lin_point = lin_com + wp.cross(ang_global, geom_pos - xipos)
-        l_ang = geom_rotT @ ang_global
-        l_lin = geom_rotT @ lin_point
+        for g in range(geomnum):
+          geomid = geomadr + g
+          coef = geom_fluid[geomid, 0]
+          if coef <= 0.0:
+            continue
 
-        if wind[0] != 0.0 or wind[1] != 0.0 or wind[2] != 0.0:
-          l_lin -= geom_rotT @ wind
+          size = geom_size[worldid % geom_size.shape[0], geomid]
+          semiaxes = passive.geom_semiaxes(size, geom_type[geomid])
+          geom_rot = geom_xmat_in[worldid, geomid]
+          geom_rotT = wp.transpose(geom_rot)
+          geom_pos = geom_xpos_in[worldid, geomid]
 
-        ang_vel = l_ang
-        lin_vel = l_lin
+          # compute local velocity
+          lin_point = lin_com + wp.cross(ang_global, geom_pos - xipos)
+          l_ang = geom_rotT @ ang_global
+          l_lin = geom_rotT @ lin_point
 
-        blunt_drag_coef = geom_fluid[geomid, 1]
-        slender_drag_coef = geom_fluid[geomid, 2]
-        ang_drag_coef = geom_fluid[geomid, 3]
-        kutta_lift_coef = geom_fluid[geomid, 4]
-        magnus_lift_coef = geom_fluid[geomid, 5]
-        virtual_mass = wp.vec3(geom_fluid[geomid, 6], geom_fluid[geomid, 7], geom_fluid[geomid, 8])
-        virtual_inertia = wp.vec3(geom_fluid[geomid, 9], geom_fluid[geomid, 10], geom_fluid[geomid, 11])
+          if wind[0] != 0.0 or wind[1] != 0.0 or wind[2] != 0.0:
+            l_lin -= geom_rotT @ wind
 
-        # Compute 6x6 spatial B matrix once per geom (unsymmetrized for free body)
-        B00, B01, B10, B11 = derivative._geom_ellipsoid_fluid_B(
-          semiaxes,
-          blunt_drag_coef,
-          slender_drag_coef,
-          ang_drag_coef,
-          kutta_lift_coef,
-          magnus_lift_coef,
-          virtual_mass,
-          virtual_inertia,
-          ang_vel,
-          lin_vel,
+          ang_vel = l_ang
+          lin_vel = l_lin
+
+          blunt_drag_coef = geom_fluid[geomid, 1]
+          slender_drag_coef = geom_fluid[geomid, 2]
+          ang_drag_coef = geom_fluid[geomid, 3]
+          kutta_lift_coef = geom_fluid[geomid, 4]
+          magnus_lift_coef = geom_fluid[geomid, 5]
+          virtual_mass = wp.vec3(geom_fluid[geomid, 6], geom_fluid[geomid, 7], geom_fluid[geomid, 8])
+          virtual_inertia = wp.vec3(geom_fluid[geomid, 9], geom_fluid[geomid, 10], geom_fluid[geomid, 11])
+
+          # Compute 6x6 spatial B matrix once per geom (unsymmetrized for free body)
+          B00, B01, B10, B11 = derivative._geom_ellipsoid_fluid_B(
+            semiaxes,
+            blunt_drag_coef,
+            slender_drag_coef,
+            ang_drag_coef,
+            kutta_lift_coef,
+            magnus_lift_coef,
+            virtual_mass,
+            virtual_inertia,
+            ang_vel,
+            lin_vel,
+            density,
+            viscosity,
+          )
+
+          # 3x3 block projection of J^T @ B @ J
+          offset = geom_pos - subtree_root
+          J_T_B_J = _project_spatial_B(cdof_in, worldid, dof_adr, geom_rotT, offset, B00, B01, B10, B11)
+          for r in range(6):
+            for c in range(6):
+              A[r, c] -= timestep * J_T_B_J[r, c]
+
+      elif body_mass[worldid % body_mass.shape[0], b] >= MJ_MINVAL:
+        b_ipos = xipos_in[worldid, b]
+        b_imat = ximat_in[worldid, b]
+
+        cvel = cvel_in[worldid, b]
+        v_subtree_ang = wp.vec3(cvel[0], cvel[1], cvel[2])
+        v_subtree_lin = wp.vec3(cvel[3], cvel[4], cvel[5])
+
+        lin_com = v_subtree_lin - wp.cross(b_ipos - subtree_root, v_subtree_ang)
+        b_imat_T = wp.transpose(b_imat)
+        v_local_ang = b_imat_T @ v_subtree_ang
+        v_local_lin = b_imat_T @ (lin_com - wind)
+
+        lvel = wp.spatial_vector(
+          v_local_ang[0],
+          v_local_ang[1],
+          v_local_ang[2],
+          v_local_lin[0],
+          v_local_lin[1],
+          v_local_lin[2],
+        )
+
+        B_box = derivative._deriv_box_fluid(
+          opt_integrator,
+          body_mass,
+          body_inertia,
+          worldid,
+          b,
+          lvel,
           density,
           viscosity,
         )
-
-        # 3x3 block projection of J^T @ B @ J
-        offset = geom_pos - subtree_root
-        J_T_B_J = _project_spatial_B(cdof_in, worldid, dof_adr, geom_rotT, offset, B00, B01, B10, B11)
+        B00 = wp.diag(wp.vec3(B_box[0, 0], B_box[1, 1], B_box[2, 2]))
+        B11 = wp.diag(wp.vec3(B_box[3, 3], B_box[4, 4], B_box[5, 5]))
+        zero33 = wp.mat33(0.0)
+        offset_box = b_ipos - subtree_root
+        J_T_B_J = _project_spatial_B(cdof_in, worldid, dof_adr, b_imat_T, offset_box, B00, zero33, zero33, B11)
         for r in range(6):
           for c in range(6):
             A[r, c] -= timestep * J_T_B_J[r, c]
-
-    elif mass >= MJ_MINVAL:
-      b_ipos = xipos_in[worldid, bodyid]
-      b_imat = ximat_in[worldid, bodyid]
-      subtree_root = subtree_com_in[worldid, bodyid]
-
-      vel_subtree = cvel_in[worldid, bodyid]
-      v_subtree_ang = wp.vec3(vel_subtree[0], vel_subtree[1], vel_subtree[2])
-      v_subtree_lin = wp.vec3(vel_subtree[3], vel_subtree[4], vel_subtree[5])
-
-      lin_com = v_subtree_lin - wp.cross(b_ipos - subtree_root, v_subtree_ang)
-      b_imat_T = wp.transpose(b_imat)
-      v_local_ang = b_imat_T @ v_subtree_ang
-      v_local_lin = b_imat_T @ (lin_com - wind)
-
-      lvel = wp.spatial_vector(
-        v_local_ang[0],
-        v_local_ang[1],
-        v_local_ang[2],
-        v_local_lin[0],
-        v_local_lin[1],
-        v_local_lin[2],
-      )
-
-      B_box = derivative._deriv_box_fluid(
-        opt_integrator,
-        body_mass,
-        body_inertia,
-        worldid,
-        bodyid,
-        lvel,
-        density,
-        viscosity,
-      )
-      B00 = wp.diag(wp.vec3(B_box[0, 0], B_box[1, 1], B_box[2, 2]))
-      B11 = wp.diag(wp.vec3(B_box[3, 3], B_box[4, 4], B_box[5, 5]))
-      zero33 = wp.mat33(0.0)
-      offset_box = b_ipos - subtree_root
-      J_T_B_J = _project_spatial_B(cdof_in, worldid, dof_adr, b_imat_T, offset_box, B00, zero33, zero33, B11)
-      for r in range(6):
-        for c in range(6):
-          A[r, c] -= timestep * J_T_B_J[r, c]
 
   # 5. Solve A * x = qfrc
   A_fact, pivot, ok = math.lu_factor_6x6(A)
@@ -953,6 +959,7 @@ def _launch_implicit_free_body_solve(m: Model, d: Data, qacc: wp.array2d[float])
     _implicit_free_body_solve,
     dim=(d.nworld, m.body_freeadr.size),
     inputs=[
+      m.nbody,
       m.opt.timestep,
       m.opt.wind,
       m.opt.density,
@@ -960,6 +967,7 @@ def _launch_implicit_free_body_solve(m: Model, d: Data, qacc: wp.array2d[float])
       m.opt.integrator,
       m.opt.disableflags,
       m.opt.enableflags,
+      m.body_rootid,
       m.body_dofadr,
       m.body_geomnum,
       m.body_geomadr,
