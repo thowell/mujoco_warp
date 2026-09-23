@@ -2174,8 +2174,11 @@ def get_data_into(
   nacon = min(d.nacon.numpy()[0], d.naconmax)
   nefc = min(d.nefc.numpy()[world_id], d.njmax)
 
-  ncon_filter = np.zeros_like(d.contact.worldid.numpy(), dtype=bool)
-  ncon_filter[:nacon] = d.contact.worldid.numpy()[:nacon] == world_id
+  contact_worldid = d.contact.worldid.numpy()
+  contact_type = d.contact.type.numpy()
+  ncon_filter = np.zeros_like(contact_worldid, dtype=bool)
+  is_constraint = (contact_type[:nacon] & types.ContactType.CONSTRAINT) != 0
+  ncon_filter[:nacon] = (contact_worldid[:nacon] == world_id) & is_constraint
   ncon = ncon_filter.sum()
 
   if ncon != result.ncon or nefc != result.nefc:
@@ -2206,17 +2209,21 @@ def get_data_into(
     contact_efc_address = d.contact.efc_address.numpy()[ncon_filter]
 
     efc_idx_c = []
-    contact_efc_address_ordered = [ne + nf + nl]
+    contact_efc_address_ordered = []
+    efc_offset = ne + nf + nl
     for i in range(ncon):
+      if contact_efc_address[i, 0] < 0:
+        contact_efc_address_ordered.append(-1)
+        continue
       dim = contact_dim[i]
       if mjm.opt.cone == mujoco.mjtCone.mjCONE_PYRAMIDAL:
         ndim = np.maximum(1, 2 * (dim - 1))
       else:
         ndim = dim
       efc_idx_c.append(contact_efc_address[i, :ndim])
-      if i < ncon - 1:
-        contact_efc_address_ordered.append(contact_efc_address_ordered[-1] + ndim)
-    efc_idx = np.concatenate((efc_idx_efl, *efc_idx_c))
+      contact_efc_address_ordered.append(efc_offset)
+      efc_offset += ndim
+    efc_idx = np.concatenate((efc_idx_efl, *efc_idx_c)) if efc_idx_c else efc_idx_efl
     contact_efc_address_ordered = np.array(contact_efc_address_ordered)
   else:
     efc_idx = np.array(np.arange(nefc))
