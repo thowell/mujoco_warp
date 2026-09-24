@@ -23,6 +23,7 @@ from absl.testing import parameterized
 
 import mujoco_warp as mjw
 from mujoco_warp import ConeType
+from mujoco_warp import DisableBit
 from mujoco_warp import test_data
 from mujoco_warp._src import bvh
 from mujoco_warp._src import collision_core
@@ -3660,6 +3661,254 @@ class FlexContactNnzTest(parameterized.TestCase):
           estimated_max_nnz,
           f"Contact row {idx} actual NNZ ({actual_nnz}) exceeded static estimate ({estimated_max_nnz})",
         )
+
+
+class FlexEdgeTest(parameterized.TestCase):
+  """Tests for flex edge properties."""
+
+  @parameterized.product(
+    nworld=[1, 2],
+    spring=(0, DisableBit.SPRING),
+    damper=(0, DisableBit.DAMPER),
+  )
+  def test_flex_edge_passive_and_energy(self, nworld, spring, damper):
+    """Test 1D flex edge passive forces and potential energy parity and disable flags."""
+    mjm, mjd, m, d = test_data.fixture(
+      xml="""
+      <mujoco>
+        <option gravity="0 0 0">
+          <flag energy="enable"/>
+        </option>
+        <worldbody>
+          <flexcomp name="rope" type="grid" count="3 1 1" spacing="0.1 0.1 0.1" dim="1" mass="1">
+            <edge stiffness="100" damping="1" equality="false"/>
+          </flexcomp>
+        </worldbody>
+      </mujoco>
+      """,
+      qpos_noise=0.05,
+      qvel_noise=0.1,
+      overrides={"opt.disableflags": spring | damper},
+      nworld=nworld,
+    )
+
+    mjds = [mjd]
+    if nworld == 2:
+      mjd1 = mujoco.MjData(mjm)
+      qpos = d.qpos.numpy()
+      qvel = d.qvel.numpy()
+      qpos[1, 0] += 0.05
+      qvel[1, 0] += 0.1
+      d.qpos.assign(qpos)
+      d.qvel.assign(qvel)
+      mjd1.qpos[:] = qpos[1]
+      mjd1.qvel[:] = qvel[1]
+      mujoco.mj_forward(mjm, mjd1)
+      mjds.append(mjd1)
+
+    d.flexvert_xpos.fill_(wp.inf)
+    d.flexedge_length.fill_(wp.inf)
+    d.flexedge_velocity.fill_(wp.inf)
+    d.flexedge_J.fill_(wp.inf)
+    d.energy.fill_(wp.inf)
+    for arr in (d.qfrc_spring, d.qfrc_damper, d.qfrc_passive):
+      arr.fill_(wp.inf)
+
+    mjw.fwd_position(m, d)
+    mjw.fwd_velocity(m, d)
+    mjw.energy_pos(m, d)
+    mjw.passive(m, d)
+
+    for w in range(nworld):
+      np.testing.assert_allclose(
+        d.energy.numpy()[w, 0],
+        mjds[w].energy[0],
+        atol=_TOLERANCE,
+        err_msg=f"potential energy mismatch (world {w})",
+      )
+      np.testing.assert_allclose(
+        d.qfrc_spring.numpy()[w],
+        mjds[w].qfrc_spring,
+        atol=_TOLERANCE,
+        err_msg=f"qfrc_spring mismatch (world {w})",
+      )
+      np.testing.assert_allclose(
+        d.qfrc_damper.numpy()[w],
+        mjds[w].qfrc_damper,
+        atol=_TOLERANCE,
+        err_msg=f"qfrc_damper mismatch (world {w})",
+      )
+      np.testing.assert_allclose(
+        d.qfrc_passive.numpy()[w],
+        mjds[w].qfrc_passive,
+        atol=_TOLERANCE,
+        err_msg=f"qfrc_passive mismatch (world {w})",
+      )
+
+    if nworld == 2 and not (spring and damper):
+      self.assertFalse(np.allclose(d.qfrc_passive.numpy()[0], d.qfrc_passive.numpy()[1]))
+
+  def test_rigid_flex_not_implemented(self):
+    """Test rigid flex raises NotImplementedError."""
+    with self.assertRaises(NotImplementedError):
+      test_data.fixture(
+        xml="""
+        <mujoco>
+          <worldbody>
+            <flexcomp name="rope" type="grid" count="3 1 1" spacing="0.1 0.1 0.1" dim="1" mass="1" rigid="true"/>
+          </worldbody>
+        </mujoco>
+        """
+      )
+
+  @parameterized.parameters(1, 2)
+  def test_flex_2d_edge_passive_and_energy(self, nworld):
+    """Test dim=2 flex edge stiffness generates passive forces but no potential energy."""
+    mjm, mjd, m, d = test_data.fixture(
+      xml="""
+      <mujoco>
+        <option gravity="0 0 0">
+          <flag energy="enable"/>
+        </option>
+        <worldbody>
+          <flexcomp name="cloth" type="grid" count="3 3 1" spacing="0.1 0.1 0.1" dim="2" mass="1">
+            <edge damping="1" equality="false"/>
+          </flexcomp>
+        </worldbody>
+      </mujoco>
+      """,
+      overrides={"flex_edgestiffness": "100.0"},
+      qpos_noise=0.05,
+      qvel_noise=0.1,
+      nworld=nworld,
+    )
+
+    mjds = [mjd]
+    if nworld == 2:
+      mjd1 = mujoco.MjData(mjm)
+      qpos = d.qpos.numpy()
+      qvel = d.qvel.numpy()
+      qpos[1, 0] += 0.05
+      qvel[1, 0] += 0.1
+      d.qpos.assign(qpos)
+      d.qvel.assign(qvel)
+      mjd1.qpos[:] = qpos[1]
+      mjd1.qvel[:] = qvel[1]
+      mujoco.mj_forward(mjm, mjd1)
+      mjds.append(mjd1)
+
+    d.flexvert_xpos.fill_(wp.inf)
+    d.flexedge_length.fill_(wp.inf)
+    d.flexedge_velocity.fill_(wp.inf)
+    d.flexedge_J.fill_(wp.inf)
+    d.energy.fill_(wp.inf)
+    for arr in (d.qfrc_spring, d.qfrc_damper, d.qfrc_passive):
+      arr.fill_(wp.inf)
+
+    mjw.fwd_position(m, d)
+    mjw.fwd_velocity(m, d)
+    mjw.energy_pos(m, d)
+    mjw.passive(m, d)
+
+    for w in range(nworld):
+      self.assertGreater(float(np.linalg.norm(d.qfrc_spring.numpy()[w])), 0.0)
+      np.testing.assert_allclose(
+        d.qfrc_spring.numpy()[w],
+        mjds[w].qfrc_spring,
+        atol=_TOLERANCE,
+        err_msg=f"qfrc_spring mismatch (world {w})",
+      )
+      self.assertEqual(d.energy.numpy()[w, 0], 0.0)
+      self.assertEqual(mjds[w].energy[0], 0.0)
+
+    if nworld == 2:
+      self.assertFalse(np.allclose(d.qfrc_spring.numpy()[0], d.qfrc_spring.numpy()[1]))
+
+  @parameterized.parameters(1, 2)
+  def test_flex_edge_rigid(self, nworld):
+    """Test rigid flex edges are skipped in passive force and energy computations."""
+    mjm, mjd, m, d = test_data.fixture(
+      xml="""
+      <mujoco>
+        <option gravity="0 0 0">
+          <flag energy="enable"/>
+        </option>
+        <worldbody>
+          <flexcomp name="rope" type="grid" count="4 1 1" spacing="0.1 0.1 0.1" dim="1" mass="1">
+            <pin id="0 1"/>
+            <edge stiffness="100" damping="1" equality="false"/>
+          </flexcomp>
+        </worldbody>
+      </mujoco>
+      """,
+      qpos_noise=0.05,
+      qvel_noise=0.1,
+      nworld=nworld,
+    )
+
+    self.assertTrue(m.flexedge_rigid.numpy()[0])
+    self.assertFalse(m.flexedge_rigid.numpy()[1])
+
+    mjm.flexedge_length0[0] = 0.2
+    m.flexedge_length0.assign(mjm.flexedge_length0)
+    mujoco.mj_forward(mjm, mjd)
+
+    mjds = [mjd]
+    if nworld == 2:
+      mjd1 = mujoco.MjData(mjm)
+      qpos = d.qpos.numpy()
+      qvel = d.qvel.numpy()
+      qpos[1, 0] += 0.05
+      qvel[1, 0] += 0.1
+      d.qpos.assign(qpos)
+      d.qvel.assign(qvel)
+      mjd1.qpos[:] = qpos[1]
+      mjd1.qvel[:] = qvel[1]
+      mujoco.mj_forward(mjm, mjd1)
+      mjds.append(mjd1)
+
+    d.flexvert_xpos.fill_(wp.inf)
+    d.flexedge_length.fill_(wp.inf)
+    d.flexedge_velocity.fill_(wp.inf)
+    d.flexedge_J.fill_(wp.inf)
+    d.energy.fill_(wp.inf)
+    for arr in (d.qfrc_spring, d.qfrc_damper, d.qfrc_passive):
+      arr.fill_(wp.inf)
+
+    mjw.fwd_position(m, d)
+    mjw.fwd_velocity(m, d)
+    mjw.energy_pos(m, d)
+    mjw.passive(m, d)
+
+    for w in range(nworld):
+      np.testing.assert_allclose(
+        d.energy.numpy()[w, 0],
+        mjds[w].energy[0],
+        atol=_TOLERANCE,
+        err_msg=f"potential energy mismatch (world {w})",
+      )
+      np.testing.assert_allclose(
+        d.qfrc_spring.numpy()[w],
+        mjds[w].qfrc_spring,
+        atol=_TOLERANCE,
+        err_msg=f"qfrc_spring mismatch (world {w})",
+      )
+      np.testing.assert_allclose(
+        d.qfrc_damper.numpy()[w],
+        mjds[w].qfrc_damper,
+        atol=_TOLERANCE,
+        err_msg=f"qfrc_damper mismatch (world {w})",
+      )
+      np.testing.assert_allclose(
+        d.qfrc_passive.numpy()[w],
+        mjds[w].qfrc_passive,
+        atol=_TOLERANCE,
+        err_msg=f"qfrc_passive mismatch (world {w})",
+      )
+
+    if nworld == 2:
+      self.assertFalse(np.allclose(d.qfrc_passive.numpy()[0], d.qfrc_passive.numpy()[1]))
+      self.assertNotAlmostEqual(float(d.energy.numpy()[0, 0]), float(d.energy.numpy()[1, 0]))
 
 
 if __name__ == "__main__":
