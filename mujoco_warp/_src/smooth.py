@@ -353,7 +353,6 @@ def _flex_edges(
   flex_vertbodyid: wp.array[int],
   flex_edge: wp.array[wp.vec2i],
   flexedge_J_rowadr: wp.array[int],
-  flexedge_J_colind: wp.array[int],
   flex_edgeflexid: wp.array[int],
   # Data in:
   qvel_in: wp.array2d[float],
@@ -645,7 +644,6 @@ def flex(m: Model, d: Data):
       m.flex_vertbodyid,
       m.flex_edge,
       m.flexedge_J_rowadr,
-      m.flexedge_J_colind,
       m.flex_edgeflexid,
       d.qvel,
       d.subtree_com,
