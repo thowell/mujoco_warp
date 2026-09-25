@@ -902,6 +902,7 @@ def _flex_bending(
   flexvert_xpos_in: wp.array2d[wp.vec3],
   cvel_in: wp.array2d[wp.spatial_vector],
   # In:
+  dsbl_spring: bool,
   dsbl_damper: bool,
   # Out:
   flex_spring_body_force_out: wp.array2d[wp.spatial_vector],
@@ -922,26 +923,43 @@ def _flex_bending(
   if flex_dim[f] != 2:
     return
 
-  if flex_edgeflap[edgeid][1] == -1:
+  flap = flex_edgeflap[edgeid]
+  if flap[1] == -1:
     return
 
+  has_spring = not dsbl_spring
+  damping = flex_damping[f]
+  has_damper = not dsbl_damper and damping > 0.0
+  if not has_spring and not has_damper:
+    return
+
+  edge = flex_edge[edgeid]
+  vertadr = flex_vertadr[f]
   v = wp.vec4i(
-    flex_vertadr[f] + flex_edge[edgeid][0],
-    flex_vertadr[f] + flex_edge[edgeid][1],
-    flex_vertadr[f] + flex_edgeflap[edgeid][0],
-    flex_vertadr[f] + flex_edgeflap[edgeid][1],
+    vertadr + edge[0],
+    vertadr + edge[1],
+    vertadr + flap[0],
+    vertadr + flap[1],
   )
 
-  frc = mat43()
-  if flex_bending[bendingadr + 17 * eid + 16]:
-    v0 = flexvert_xpos_in[worldid, v[0]]
-    v1 = flexvert_xpos_in[worldid, v[1]]
-    v2 = flexvert_xpos_in[worldid, v[2]]
-    v3 = flexvert_xpos_in[worldid, v[3]]
+  vpos = mat43()
+  bodyids = wp.vec4i()
+  has_dof = wp.vec4i(0, 0, 0, 0)
+  for j in range(4):
+    vpos[j] = flexvert_xpos_in[worldid, v[j]]
+    bodyid_j = flex_vertbodyid[v[j]]
+    bodyids[j] = bodyid_j
+    if bodyid_j >= 0:
+      if body_dofnum[body_weldid[bodyid_j]] > 0:
+        has_dof[j] = 1
 
-    ed0 = v1 - v0
-    ed1 = v2 - v0
-    ed2 = v3 - v0
+  bbase = bendingadr + 17 * eid
+  c16 = flex_bending[bbase + 16]
+  frc = mat43()
+  if has_spring and c16 != 0.0:
+    ed0 = vpos[1] - vpos[0]
+    ed1 = vpos[2] - vpos[0]
+    ed2 = vpos[3] - vpos[0]
 
     frc[1] = wp.cross(ed1, ed2)
     frc[2] = wp.cross(ed2, ed0)
@@ -950,47 +968,41 @@ def _flex_bending(
 
   # Gather velocities if damping is enabled
   vel = mat43()
-  if not dsbl_damper and flex_damping[f] > 0.0:
+  if has_damper:
     for j in range(4):
-      bodyid_j = flex_vertbodyid[v[j]]
-      if body_dofnum[body_weldid[bodyid_j]] == 3:
+      if has_dof[j]:
+        bodyid_j = bodyids[j]
         cvel_j = cvel_in[worldid, bodyid_j]
         omega_j = wp.spatial_top(cvel_j)
         vcom_j = wp.spatial_bottom(cvel_j)
         com_j = subtree_com_in[worldid, body_rootid[bodyid_j]]
-        r_j = flexvert_xpos_in[worldid, v[j]] - com_j
+        r_j = vpos[j] - com_j
         vel[j] = vcom_j + wp.cross(omega_j, r_j)
 
-  force_spring = mat43()
-  force_damper = mat43()
   for i in range(4):
-    for x in range(3):
-      acc_spring = float(0.0)
-      acc_damper = float(0.0)
-      for j in range(4):
-        coeff = flex_bending[bendingadr + 17 * eid + 4 * i + j]
-        acc_spring += coeff * flexvert_xpos_in[worldid, v[j]][x]
-        if not dsbl_damper and flex_damping[f] > 0.0:
-          acc_damper += coeff * vel[j, x]
-
-      force_spring[i, x] = -(acc_spring + flex_bending[bendingadr + 17 * eid + 16] * frc[i, x])
-      if not dsbl_damper and flex_damping[f] > 0.0:
-        force_damper[i, x] = -acc_damper
-
-  for i in range(4):
-    bodyid = flex_vertbodyid[v[i]]
-    if body_dofnum[body_weldid[bodyid]] != 3:
+    if not has_dof[i]:
       continue
-    frc_s = force_spring[i]
-    node_pos = flexvert_xpos_in[worldid, v[i]]
+    acc_spring = wp.vec3(0.0)
+    acc_damper = wp.vec3(0.0)
+    for j in range(4):
+      coeff = flex_bending[bbase + 4 * i + j]
+      if has_spring:
+        acc_spring += coeff * vpos[j]
+      if has_damper:
+        acc_damper += coeff * vel[j]
+
+    bodyid = bodyids[i]
+    node_pos = vpos[i]
     body_xipos = xipos_in[worldid, bodyid]
     offset = body_xipos - node_pos
 
-    spatial_frc_s = wp.spatial_vector(frc_s, -wp.cross(offset, frc_s))
-    wp.atomic_add(flex_spring_body_force_out, worldid, bodyid, spatial_frc_s)
+    if has_spring:
+      frc_s = -(acc_spring + c16 * frc[i])
+      spatial_frc_s = wp.spatial_vector(frc_s, -wp.cross(offset, frc_s))
+      wp.atomic_add(flex_spring_body_force_out, worldid, bodyid, spatial_frc_s)
 
-    if not dsbl_damper and flex_damping[f] > 0.0:
-      frc_d = force_damper[i] * flex_damping[f]
+    if has_damper:
+      frc_d = -acc_damper * damping
       spatial_frc_d = wp.spatial_vector(frc_d, -wp.cross(offset, frc_d))
       wp.atomic_add(flex_damper_body_force_out, worldid, bodyid, spatial_frc_d)
 
@@ -1501,6 +1513,7 @@ def passive(m: Model, d: Data):
         d.subtree_com,
         d.flexvert_xpos,
         d.cvel,
+        dsbl_spring,
         dsbl_damper,
       ],
       outputs=[

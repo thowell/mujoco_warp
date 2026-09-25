@@ -1056,6 +1056,146 @@ class FlexPassiveForcesTest(parameterized.TestCase):
         err_msg=f"qfrc_spring mismatch for interpolated elastic2d={elastic2d} dof={dof} (world {w})",
       )
 
+  @parameterized.product(
+    case=[
+      ("hinge", "<joint type='hinge' axis='0 1 0'/>", False, False),
+      ("ball", "<joint type='ball'/>", False, False),
+      ("free", "<freejoint/>", False, False),
+      ("moving_ancestor", "<joint type='hinge' axis='0 1 0'/>", True, False),
+      ("shared_body", "<freejoint/>", False, True),
+    ],
+    elastic2d=["stretch", "bend", "both"],
+    nworld=[1, 2],
+  )
+  def test_flex_attachment_jacobian_passive(self, case, elastic2d, nworld):
+    """Tests 2D flex stretching and bending passive forces for articulated attachments."""
+    name, joints, sliding_child, shared_body = case
+    inertia = '<inertial pos="0 0 0" mass="0.1" diaginertia=".01 .02 .03"/>'
+    slides = '<joint type="slide" axis="1 0 0"/><joint type="slide" axis="0 1 0"/><joint type="slide" axis="0 0 1"/>'
+    positions = ("0 0 0", ".1 0 0", "0 .1 0", ".1 .1 0")
+
+    count = 2 if shared_body else 3
+    v_bodies = "".join(f'<body name="v{v}" pos="{positions[v]}">{inertia}{slides}</body>' for v in range(count))
+    v2_xml = '<body name="v2" pos="-.08 .02 .02"/>' if shared_body else ""
+    v3_inner = f"{inertia}{slides}" if sliding_child else ""
+    carrier_xml = f'<body name="carrier" pos=".08 .08 -.02">{inertia}{joints}{v2_xml}<body name="v3" pos=".02 .02 .02">{v3_inner}</body></body>'
+
+    mjm, mjd, m, d = test_data.fixture(
+      xml=f"""
+      <mujoco>
+        <option gravity="0 0 0"/>
+        <worldbody>
+          {v_bodies}
+          {carrier_xml}
+        </worldbody>
+        <deformable>
+          <flex name="patch" dim="2" body="v0 v1 v2 v3" element="0 1 2 1 3 2">
+            <contact contype="0" conaffinity="0" selfcollide="none"/>
+            <elasticity young="100" poisson=".3" thickness=".02" damping=".02" elastic2d="{elastic2d}"/>
+          </flex>
+        </deformable>
+      </mujoco>
+      """,
+      qpos_noise=0.05,
+      qvel_noise=0.5,
+      nworld=nworld,
+    )
+
+    ref_v_bodies = "".join(f'<body name="v{v}" pos="{positions[v]}">{inertia}{slides}</body>' for v in range(4))
+    ref_mjm, ref_mjd, _, _ = test_data.fixture(
+      xml=f"""
+      <mujoco>
+        <option gravity="0 0 0"/>
+        <worldbody>
+          {ref_v_bodies}
+        </worldbody>
+        <deformable>
+          <flex name="patch" dim="2" body="v0 v1 v2 v3" element="0 1 2 1 3 2">
+            <contact contype="0" conaffinity="0" selfcollide="none"/>
+            <elasticity young="100" poisson=".3" thickness=".02" damping=".02" elastic2d="{elastic2d}"/>
+          </flex>
+        </deformable>
+      </mujoco>
+      """,
+    )
+
+    qpos_np = d.qpos.numpy().copy()
+    qvel_np = d.qvel.numpy().copy()
+    if nworld == 2:
+      qpos1 = qpos_np[1].astype(np.float64)
+      mujoco.mj_integratePos(mjm, qpos1, -0.8 * qvel_np[0].astype(np.float64), 0.04)
+      qpos_np[1] = qpos1.astype(np.float32)
+      qvel_np[1] = -0.7 * qvel_np[0]
+      d.qpos.assign(qpos_np)
+      d.qvel.assign(qvel_np)
+
+    for arr in (d.flexvert_xpos, d.cvel, d.qfrc_spring, d.qfrc_damper, d.qfrc_passive):
+      arr.fill_(wp.inf)
+
+    mjw.kinematics(m, d)
+    mjw.com_pos(m, d)
+    mjw.flex(m, d)
+    mjw.com_vel(m, d)
+    mjw.passive(m, d)
+
+    jacp = np.zeros((3, mjm.nv))
+    zero_torque = np.zeros(3)
+    for w in range(nworld):
+      mjd.qpos[:] = qpos_np[w]
+      mjd.qvel[:] = qvel_np[w]
+      mujoco.mj_kinematics(mjm, mjd)
+      mujoco.mj_comPos(mjm, mjd)
+      mujoco.mj_flex(mjm, mjd)
+      mujoco.mj_comVel(mjm, mjd)
+
+      for v in range(4):
+        gv = mjm.flex_vertadr[0] + v
+        vpos = mjd.flexvert_xpos[gv]
+        bid = mjm.flex_vertbodyid[gv]
+        mujoco.mj_jac(mjm, mjd, jacp, None, vpos, bid)
+        ref_bid = ref_mjm.flex_vertbodyid[v]
+        ref_mjd.qpos[3 * v : 3 * (v + 1)] = vpos - ref_mjm.body_pos[ref_bid]
+        ref_mjd.qvel[3 * v : 3 * (v + 1)] = jacp @ mjd.qvel
+
+      mujoco.mj_forward(ref_mjm, ref_mjd)
+
+      expected_spring = np.zeros(mjm.nv)
+      expected_damper = np.zeros(mjm.nv)
+      for v in range(4):
+        gv = mjm.flex_vertadr[0] + v
+        vpos = mjd.flexvert_xpos[gv]
+        bid = mjm.flex_vertbodyid[gv]
+        mujoco.mj_applyFT(mjm, mjd, ref_mjd.qfrc_spring[3 * v : 3 * (v + 1)], zero_torque, vpos, bid, expected_spring)
+        mujoco.mj_applyFT(mjm, mjd, ref_mjd.qfrc_damper[3 * v : 3 * (v + 1)], zero_torque, vpos, bid, expected_damper)
+      expected_passive = expected_spring + expected_damper
+
+      self.assertGreater(np.linalg.norm(expected_spring), 1e-6)
+      self.assertGreater(np.linalg.norm(expected_damper), 1e-6)
+      np.testing.assert_allclose(
+        d.qfrc_spring.numpy()[w],
+        expected_spring,
+        atol=1e-4,
+        rtol=1e-4,
+        err_msg=f"qfrc_spring mismatch for case={name} elastic2d={elastic2d} world={w}",
+      )
+      np.testing.assert_allclose(
+        d.qfrc_damper.numpy()[w],
+        expected_damper,
+        atol=1e-4,
+        rtol=1e-4,
+        err_msg=f"qfrc_damper mismatch for case={name} elastic2d={elastic2d} world={w}",
+      )
+      np.testing.assert_allclose(
+        d.qfrc_passive.numpy()[w],
+        expected_passive,
+        atol=1e-4,
+        rtol=1e-4,
+        err_msg=f"qfrc_passive mismatch for case={name} elastic2d={elastic2d} world={w}",
+      )
+
+    if nworld == 2:
+      self.assertFalse(np.allclose(d.qfrc_passive.numpy()[0], d.qfrc_passive.numpy()[1]))
+
 
 class FlexCollisionTest(parameterized.TestCase):
   """Tests for flex collisions."""
