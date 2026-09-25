@@ -822,11 +822,187 @@ class FlexPassiveForcesTest(parameterized.TestCase):
 
     for w in range(nworld):
       np.testing.assert_allclose(
+        d.qfrc_spring.numpy()[w],
+        mjd.qfrc_spring,
+        atol=atol,
+        err_msg=f"qfrc_spring mismatch for world {w}",
+      )
+      np.testing.assert_allclose(
+        d.qfrc_damper.numpy()[w],
+        mjd.qfrc_damper,
+        atol=atol,
+        err_msg=f"qfrc_damper mismatch for world {w}",
+      )
+      np.testing.assert_allclose(
         d.qfrc_passive.numpy()[w],
         mjd.qfrc_passive,
         atol=atol,
         err_msg=f"qfrc_passive mismatch for world {w}",
       )
+
+  @parameterized.parameters(1, 2)
+  def test_flex_welded_child_vertex_passive(self, nworld):
+    """Tests 2D flex passive forces when a vertex sits on a welded 0-DOF child body."""
+    mjm, mjd, m, d = test_data.fixture(
+      xml="""
+      <mujoco>
+        <option timestep="0.005" gravity="0 0 0"/>
+        <worldbody>
+          <body name="turned" pos="0.1 -0.2 0.3" euler="35 -50 70">
+            <body name="v0" pos="0 0 0">
+              <joint name="v0x" type="slide" axis="1 0 0"/>
+              <joint name="v0y" type="slide" axis="0 1 0"/>
+              <joint name="v0z" type="slide" axis="0 0 1"/>
+              <inertial pos="0 0 0" mass="0.1" diaginertia="1e-4 1e-4 1e-4"/>
+            </body>
+            <body name="v1" pos="1 0 0">
+              <joint name="v1x" type="slide" axis="1 0 0"/>
+              <joint name="v1y" type="slide" axis="0 1 0"/>
+              <joint name="v1z" type="slide" axis="0 0 1"/>
+              <inertial pos="0 0 0" mass="0.1" diaginertia="1e-4 1e-4 1e-4"/>
+            </body>
+            <body name="v2" pos="0.5 0.8 0.1">
+              <joint name="v2x" type="slide" axis="1 0 0"/>
+              <joint name="v2y" type="slide" axis="0 1 0"/>
+              <joint name="v2z" type="slide" axis="0 0 1"/>
+              <inertial pos="0 0 0" mass="0.1" diaginertia="1e-4 1e-4 1e-4"/>
+            </body>
+            <body name="carrier" pos="0.45 -0.78 0.07" euler="20 -35 45">
+              <joint name="v3x" type="slide" axis="1 0 0"/>
+              <joint name="v3y" type="slide" axis="0 1 0"/>
+              <joint name="v3z" type="slide" axis="0 0 1"/>
+              <inertial pos="0 0 0" mass="0.1" diaginertia="1e-4 1e-4 1e-4"/>
+              <body name="v3_welded" pos="0.05 -0.02 0.03">
+                <inertial pos="0 0 0" mass="0.05" diaginertia="1e-5 1e-5 1e-5"/>
+              </body>
+            </body>
+          </body>
+        </worldbody>
+        <deformable>
+          <flex name="flap" dim="2" body="v0 v1 v2 v3_welded"
+                vertex="0 0 0  0 0 0  0 0 0  0 0 0"
+                element="0 1 2  1 0 3">
+            <elasticity young="2000" poisson="0.25" thickness="0.01" damping="0.3" elastic2d="both"/>
+            <edge damping="2.0"/>
+            <contact selfcollide="none"/>
+          </flex>
+        </deformable>
+      </mujoco>
+      """,
+      qpos_noise=0.02,
+      qvel_noise=0.5,
+      nworld=nworld,
+    )
+
+    qpos_noisy = d.qpos.numpy().copy()
+    qvel_noisy = d.qvel.numpy().copy()
+
+    # 1. Uniform rigid world-space translation velocity should produce zero damping force.
+    d.qpos.zero_()
+    mjw.kinematics(m, d)
+    xmat = d.xmat.numpy()
+    qvel_uniform = np.zeros_like(qvel_noisy)
+    v_worlds = [np.array([0.7, -0.4, 1.2]), np.array([-0.5, 0.9, -0.3])]
+    for w in range(nworld):
+      for bname in ("v0", "v1", "v2", "carrier"):
+        bid = mujoco.mj_name2id(mjm, mujoco.mjtObj.mjOBJ_BODY, bname)
+        dofadr = mjm.body_dofadr[bid]
+        rot = xmat[w, bid].reshape(3, 3)
+        qvel_uniform[w, dofadr : dofadr + 3] = rot.T @ v_worlds[w]
+    d.qvel.assign(qvel_uniform)
+
+    for arr in (d.flexedge_velocity, d.qfrc_spring, d.qfrc_damper, d.qfrc_passive):
+      arr.fill_(wp.inf)
+    mjw.kinematics(m, d)
+    mjw.com_pos(m, d)
+    mjw.flex(m, d)
+    mjw.com_vel(m, d)
+    mjw.passive(m, d)
+    for w in range(nworld):
+      np.testing.assert_allclose(
+        d.flexedge_velocity.numpy()[w],
+        0.0,
+        atol=1e-5,
+        err_msg=f"uniform world velocity should produce zero edge velocity (world {w})",
+      )
+      np.testing.assert_allclose(
+        d.qfrc_damper.numpy()[w],
+        0.0,
+        atol=1e-5,
+        err_msg=f"uniform world velocity should produce zero damping (world {w})",
+      )
+
+    # 2. Non-uniform deformed state and velocity parity with MuJoCo C across distinct worlds.
+    qpos0 = np.array([0.02, -0.01, 0.03, -0.01, 0.02, -0.02, 0.01, -0.03, 0.02, -0.02, 0.01, 0.04], dtype=np.float32)
+    qvel0 = np.array([0.3, -0.2, 0.1, -0.4, 0.2, 0.3, 0.1, 0.5, -0.2, -0.3, 0.4, -0.1], dtype=np.float32)
+    qpos_noisy[0] = qpos0
+    qvel_noisy[0] = qvel0
+    mjd.qpos[:] = qpos0
+    mjd.qvel[:] = qvel0
+    mjds = [mjd]
+    if nworld == 2:
+      mjd1 = mujoco.MjData(mjm)
+      qpos_noisy[1] = qpos0 + 0.015
+      qvel_noisy[1] = qvel0 - 0.35
+      mjd1.qpos[:] = qpos_noisy[1]
+      mjd1.qvel[:] = qvel_noisy[1]
+      mjds.append(mjd1)
+
+    d.qpos.assign(qpos_noisy)
+    d.qvel.assign(qvel_noisy)
+    for arr in (d.flexedge_length, d.flexedge_velocity, d.flexedge_J, d.qfrc_spring, d.qfrc_damper, d.qfrc_passive):
+      arr.fill_(wp.inf)
+    mjw.kinematics(m, d)
+    mjw.com_pos(m, d)
+    mjw.flex(m, d)
+    mjw.com_vel(m, d)
+    mjw.passive(m, d)
+
+    for w in range(nworld):
+      mujoco.mj_kinematics(mjm, mjds[w])
+      mujoco.mj_comPos(mjm, mjds[w])
+      mujoco.mj_flex(mjm, mjds[w])
+      mujoco.mj_fwdVelocity(mjm, mjds[w])
+
+      np.testing.assert_allclose(
+        d.flexedge_length.numpy()[w],
+        mjds[w].flexedge_length,
+        atol=_TOLERANCE,
+        err_msg=f"flexedge_length mismatch for world {w}",
+      )
+      np.testing.assert_allclose(
+        d.flexedge_velocity.numpy()[w],
+        mjds[w].flexedge_velocity,
+        atol=_TOLERANCE,
+        err_msg=f"flexedge_velocity mismatch for world {w}",
+      )
+      np.testing.assert_allclose(
+        d.flexedge_J.numpy()[w],
+        mjds[w].flexedge_J,
+        atol=_TOLERANCE,
+        err_msg=f"flexedge_J mismatch for world {w}",
+      )
+      np.testing.assert_allclose(
+        d.qfrc_spring.numpy()[w],
+        mjds[w].qfrc_spring,
+        atol=_TOLERANCE,
+        err_msg=f"qfrc_spring mismatch for world {w}",
+      )
+      np.testing.assert_allclose(
+        d.qfrc_damper.numpy()[w],
+        mjds[w].qfrc_damper,
+        atol=_TOLERANCE,
+        err_msg=f"qfrc_damper mismatch for world {w}",
+      )
+      np.testing.assert_allclose(
+        d.qfrc_passive.numpy()[w],
+        mjds[w].qfrc_passive,
+        atol=_TOLERANCE,
+        err_msg=f"qfrc_passive mismatch for world {w}",
+      )
+
+    if nworld == 2:
+      self.assertFalse(np.allclose(d.qfrc_passive.numpy()[0], d.qfrc_passive.numpy()[1]))
 
   @parameterized.product(
     elastic2d_and_atol=[

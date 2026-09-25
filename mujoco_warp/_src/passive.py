@@ -760,9 +760,11 @@ def _flex_elasticity(
   flexedge_length_in: wp.array2d[float],
   flexedge_velocity_in: wp.array2d[float],
   # In:
+  dsbl_spring: bool,
   dsbl_damper: bool,
   # Out:
   flex_spring_body_force_out: wp.array2d[wp.spatial_vector],
+  flex_damper_body_force_out: wp.array2d[wp.spatial_vector],
 ):
   worldid, elemid = wp.tid()
   timestep = opt_timestep[worldid % opt_timestep.shape[0]]
@@ -779,6 +781,13 @@ def _flex_elasticity(
   if flex_stiffness[stiffness_adr_base] == 0.0:
     return
 
+  if timestep > 0.0 and not dsbl_damper:
+    kD = flex_damping[f] / timestep
+  else:
+    kD = 0.0
+  if dsbl_spring and kD == 0.0:
+    return
+
   local_elemid = elemid - flex_elemadr[f]
   dim = flex_dim[f]
   nvert = dim + 1
@@ -792,10 +801,6 @@ def _flex_elasticity(
       wp.matrix(1, 2, 2, 0, 0, 1, 0, 0, 0, 0, 0, 0, shape=(6, 2), dtype=int),
     ),
   )
-  if timestep > 0.0 and not dsbl_damper:
-    kD = flex_damping[f] / timestep
-  else:
-    kD = 0.0
 
   elem_data_adr = flex_elemdataadr[f] + local_elemid * (dim + 1)
   vbase = flex_vertadr[f]
@@ -814,14 +819,19 @@ def _flex_elasticity(
       gradient[e, 0 + i] = xpos0[i] - xpos1[i]
       gradient[e, 3 + i] = xpos1[i] - xpos0[i]
 
-  elongation = wp.spatial_vectorf(0.0)
+  elongation_spring = wp.spatial_vectorf(0.0)
+  elongation_damper = wp.spatial_vectorf(0.0)
   for e in range(nedge):
     idx = flex_elemedge[flex_elemedgeadr[f] + local_elemid * nedge + e]
-    vel = flexedge_velocity_in[worldid, flex_edgeadr[f] + idx]
-    deformed = flexedge_length_in[worldid, flex_edgeadr[f] + idx]
-    reference = flexedge_length0[flex_edgeadr[f] + idx]
-    previous = deformed - vel * timestep
-    elongation[e] = deformed * deformed - reference * reference + (deformed * deformed - previous * previous) * kD
+    e_idx = flex_edgeadr[f] + idx
+    deformed = flexedge_length_in[worldid, e_idx]
+    if not dsbl_spring:
+      reference = flexedge_length0[e_idx]
+      elongation_spring[e] = deformed * deformed - reference * reference
+    if kD > 0.0:
+      vel = flexedge_velocity_in[worldid, e_idx]
+      dL = vel * timestep
+      elongation_damper[e] = dL * (2.0 * deformed - dL) * kD
 
   metric = wp.matrix(0.0, shape=(6, 6))
   stiffness_size = 21
@@ -829,28 +839,44 @@ def _flex_elasticity(
   id = int(0)
   for ed1 in range(nedge):
     for ed2 in range(ed1, nedge):
-      metric[ed1, ed2] = flex_stiffness[stiffness_adr + id]
-      metric[ed2, ed1] = flex_stiffness[stiffness_adr + id]
+      val = flex_stiffness[stiffness_adr + id]
+      metric[ed1, ed2] = val
+      metric[ed2, ed1] = val
       id += 1
 
-  force = wp.matrix(0.0, shape=(6, 3))
-  for ed1 in range(nedge):
-    for ed2 in range(nedge):
-      for i in range(2):
-        for x in range(3):
-          force[edges[ed2, i], x] -= elongation[ed1] * gradient[ed2, 3 * i + x] * metric[ed1, ed2]
+  force_spring = wp.matrix(0.0, shape=(6, 3))
+  force_damper = wp.matrix(0.0, shape=(6, 3))
+  for ed2 in range(nedge):
+    s_val = float(0.0)
+    d_val = float(0.0)
+    for ed1 in range(nedge):
+      m_val = metric[ed1, ed2]
+      s_val += elongation_spring[ed1] * m_val
+      d_val += elongation_damper[ed1] * m_val
+    for i in range(2):
+      vi = edges[ed2, i]
+      for x in range(3):
+        g_val = gradient[ed2, 3 * i + x]
+        if not dsbl_spring:
+          force_spring[vi, x] -= s_val * g_val
+        if kD > 0.0:
+          force_damper[vi, x] -= d_val * g_val
 
   for v in range(nvert):
     vert = flex_elem[elem_data_adr + v]
-    bodyid = flex_vertbodyid[flex_vertadr[f] + vert]
-
-    frc = force[v]
-
-    node_pos = flexvert_xpos_in[worldid, flex_vertadr[f] + vert]
+    gvert = vbase + vert
+    bodyid = flex_vertbodyid[gvert]
+    node_pos = flexvert_xpos_in[worldid, gvert]
     body_xipos = xipos_in[worldid, bodyid]
     offset = body_xipos - node_pos
-    spatial_frc = wp.spatial_vector(frc, -wp.cross(offset, frc))
-    wp.atomic_add(flex_spring_body_force_out, worldid, bodyid, spatial_frc)
+    if not dsbl_spring:
+      frc_s = force_spring[v]
+      spatial_frc_s = wp.spatial_vector(frc_s, -wp.cross(offset, frc_s))
+      wp.atomic_add(flex_spring_body_force_out, worldid, bodyid, spatial_frc_s)
+    if kD > 0.0:
+      frc_d = force_damper[v]
+      spatial_frc_d = wp.spatial_vector(frc_d, -wp.cross(offset, frc_d))
+      wp.atomic_add(flex_damper_body_force_out, worldid, bodyid, spatial_frc_d)
 
 
 @wp.kernel
@@ -858,6 +884,8 @@ def _flex_bending(
   # Model:
   nflex: int,
   body_rootid: wp.array[int],
+  body_weldid: wp.array[int],
+  body_dofnum: wp.array[int],
   flex_dim: wp.array[int],
   flex_vertadr: wp.array[int],
   flex_edgeadr: wp.array[int],
@@ -925,12 +953,13 @@ def _flex_bending(
   if not dsbl_damper and flex_damping[f] > 0.0:
     for j in range(4):
       bodyid_j = flex_vertbodyid[v[j]]
-      cvel_j = cvel_in[worldid, bodyid_j]
-      omega_j = wp.spatial_top(cvel_j)
-      vcom_j = wp.spatial_bottom(cvel_j)
-      com_j = subtree_com_in[worldid, body_rootid[bodyid_j]]
-      r_j = flexvert_xpos_in[worldid, v[j]] - com_j
-      vel[j] = vcom_j + wp.cross(omega_j, r_j)
+      if body_dofnum[body_weldid[bodyid_j]] == 3:
+        cvel_j = cvel_in[worldid, bodyid_j]
+        omega_j = wp.spatial_top(cvel_j)
+        vcom_j = wp.spatial_bottom(cvel_j)
+        com_j = subtree_com_in[worldid, body_rootid[bodyid_j]]
+        r_j = flexvert_xpos_in[worldid, v[j]] - com_j
+        vel[j] = vcom_j + wp.cross(omega_j, r_j)
 
   force_spring = mat43()
   force_damper = mat43()
@@ -950,6 +979,8 @@ def _flex_bending(
 
   for i in range(4):
     bodyid = flex_vertbodyid[v[i]]
+    if body_dofnum[body_weldid[bodyid]] != 3:
+      continue
     frc_s = force_spring[i]
     node_pos = flexvert_xpos_in[worldid, v[i]]
     body_xipos = xipos_in[worldid, bodyid]
@@ -1413,7 +1444,7 @@ def passive(m: Model, d: Data):
     flex_spring_body_force = wp.zeros((d.nworld, m.nbody), dtype=wp.spatial_vector, device=d.qfrc_spring.device)
     flex_damper_body_force = wp.zeros((d.nworld, m.nbody), dtype=wp.spatial_vector, device=d.qfrc_spring.device)
 
-  if not dsbl_spring:
+  if not (dsbl_spring and dsbl_damper):
     wp.launch(
       _flex_elasticity,
       dim=(d.nworld, m.nflexelem),
@@ -1438,9 +1469,13 @@ def passive(m: Model, d: Data):
         d.flexvert_xpos,
         d.flexedge_length,
         d.flexedge_velocity,
+        dsbl_spring,
         dsbl_damper,
       ],
-      outputs=[flex_spring_body_force],
+      outputs=[
+        flex_spring_body_force,
+        flex_damper_body_force,
+      ],
     )
 
   if not dsbl_spring or not dsbl_damper:
@@ -1450,6 +1485,8 @@ def passive(m: Model, d: Data):
       inputs=[
         m.nflex,
         m.body_rootid,
+        m.body_weldid,
+        m.body_dofnum,
         m.flex_dim,
         m.flex_vertadr,
         m.flex_edgeadr,
