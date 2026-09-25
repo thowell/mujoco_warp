@@ -80,6 +80,7 @@ class BlockDim:
     solve_init_search_cg: solve init search CG block dimension (solver)
     contact_jac_tiled: contact Jacobian tiled block dimension (solver)
     qderiv_actuator_dense: qderiv actuator dense block dimension (derivative)
+    eff_pcg: effective-metric PCG block dimension (derivative)
     render: render block dimension (render)
   """
 
@@ -115,6 +116,7 @@ class BlockDim:
   contact_jac_tiled: int = 32
   # derivative
   qderiv_actuator_dense: int = 32
+  eff_pcg: int = 128
   # render
   render: int = 64
 
@@ -307,11 +309,13 @@ class EnableBit(enum.IntFlag):
     ENERGY: energy computation
     INVDISCRETE: discrete-time inverse dynamics
     SLEEP: sleeping
+    DIAGEXACT: exact diagonal of constraint inertia
   """
 
   ENERGY = mujoco.mjtEnableBit.mjENBL_ENERGY
   INVDISCRETE = mujoco.mjtEnableBit.mjENBL_INVDISCRETE
   SLEEP = mujoco.mjtEnableBit.mjENBL_SLEEP
+  DIAGEXACT = mujoco.mjtEnableBit.mjENBL_DIAGEXACT
   # unsupported: OVERRIDE, FWDINV, ISLAND
 
 
@@ -489,12 +493,14 @@ class IntegratorType(enum.IntEnum):
     RK4: 4th-order Runge Kutta
     IMPLICITFAST: implicit in velocity, no rne derivative
     IMPLICIT: implicit in velocity, with rne derivative
+    DISCRETE: discrete step map: constraint solve in the effective metric
   """
 
   EULER = mujoco.mjtIntegrator.mjINT_EULER
   RK4 = mujoco.mjtIntegrator.mjINT_RK4
   IMPLICITFAST = mujoco.mjtIntegrator.mjINT_IMPLICITFAST
   IMPLICIT = mujoco.mjtIntegrator.mjINT_IMPLICIT
+  DISCRETE = mujoco.mjtIntegrator.mjINT_DISCRETE
 
 
 class GeomType(enum.IntEnum):
@@ -1274,6 +1280,7 @@ class Model:
     flex_node0: reference node positions in qpos0            (nflexnode, 3)
     flexedge_length0: edge lengths in qpos0                  (nflexedge,)
     flexedge_invweight0: inv. inertia for the edge           (nflexedge,)
+    flexedge_rigid: edge is rigid (skipped in equality)      (nflexedge,)
     flex_radius: radius around primitive element             (nflex,)
     flex_stiffness: finite element stiffness matrix          (nflexstiffness,)
     flex_bending: bending stiffness                          (nflexbending,)
@@ -1449,6 +1456,7 @@ class Model:
     flg_surfacevel: whether model has non-zero surfacevel
     has_sdf_geom: whether the model contains SDF geoms
     has_flex_selfcollide: whether any flex has self-collision enabled
+    has_flex_passive: whether any flex has passive contact enabled
     has_ellipsoid_geom: whether the model contains ellipsoid geoms
     has_plane_geom: whether the model contains plane geoms
     has_1d_flex: whether the model contains 1D flexes
@@ -1543,9 +1551,9 @@ class Model:
     M_mulm_col: sparse matmul column indices
     M_mulm_madr: sparse matmul matrix addresses
     flex_elemflexid: maps each element index directly to its flexid         (nflexelem,)
+    flex_edgeflexid: maps each edge index directly to its flexid            (nflexedge,)
     flex_shellflexid: maps each shell index directly to its flexid          (nflexshelldata,)
     flex_vertflexid: maps each vertex index directly to its flexid          (nflexvert,)
-    flex_edgeflexid: maps each edge index directly to its flexid            (nflexedge,)
     flex_shelladr: maps each flex to its start shell index                  (nflex,)
     flex_faceadr: maps each flex to its start face index                    (nflex,)
     flex_cell_map: precomputed flex cell mapping (nflexintcell,)
@@ -1589,6 +1597,11 @@ class Model:
   nflexelemedge: int
   nflexshelldata: int
   nJfe: int
+  nefmK: int
+  nefmdof: int
+  nefmL: int
+  nefm0dof: int
+  nefm0L: int
   nmesh: int
   nmeshvert: int
   nmeshnormal: int
@@ -1781,6 +1794,7 @@ class Model:
   flex_node0: array("nflexnode", wp.vec3)
   flexedge_length0: array("nflexedge", float)
   flexedge_invweight0: array("nflexedge", float)
+  flexedge_rigid: array("nflexedge", bool)
   flex_radius: array("nflex", float)
   flex_stiffness: array("nflexstiffness", float)
   flex_bending: array("nflexbending", float)
@@ -1790,6 +1804,17 @@ class Model:
   flex_edgeequality: array("nflex", int)
   flexedge_rigid: array("nflexedge", bool)
   flex_centered: array("nflex", bool)
+  flex_passive: array("nflex", int)
+  efm_K_rownnz: array("nv", int)
+  efm_K_rowadr: array("nv", int)
+  efm_K_colind: array("nefmK", int)
+  efm_dofid: array("nefmdof", int)
+  efm_dofblk: array("nv", int)
+  efm0_dofid: array("nefm0dof", int)
+  efm0_L_rownnz: array("nefm0dof", int)
+  efm0_L_rowadr: array("nefm0dof", int)
+  efm0_L_colind: array("nefm0L", int)
+  efm0_L: array("nefm0L", float)
   flexedge_J_rownnz: array("nflexedge", int)
   flexedge_J_rowadr: array("nflexedge", int)
   flexedge_J_colind: array("nJfe", int)
@@ -1953,6 +1978,10 @@ class Model:
   flg_surfacevel: bool
   has_sdf_geom: bool
   has_flex_selfcollide: bool
+  has_flex_passive: bool
+  efm0_active: bool
+  flex_interp_assemblable: bool
+  has_unsupported_flex_interp: bool
   has_ellipsoid_geom: bool
   has_plane_geom: bool
   has_1d_flex: bool
@@ -2041,9 +2070,9 @@ class Model:
   M_mulm_col: array("nM_mulm", int)  # column index to gather from
   M_mulm_madr: array("nM_mulm", int)  # matrix address to read
   flex_elemflexid: array("nflexelem", int)
+  flex_edgeflexid: array("nflexedge", int)
   flex_shellflexid: array("nflexshelldata", int)
   flex_vertflexid: array("nflexvert", int)
-  flex_edgeflexid: array("nflexedge", int)
   flex_shelladr: array("nflex", int)
   flex_faceadr: array("nflex", int)
   flex_cell_map: array("nflexintcell", wp.vec4i)
@@ -2065,10 +2094,12 @@ class ContactType(enum.IntFlag):
   Attributes:
     CONSTRAINT: contact for constraint solver
     SENSOR: contact for collision sensor (GEOMDIST, GEOMNORMAL, GEOMFROMTO)
+    PASSIVE: passive contact for effective metric
   """
 
   CONSTRAINT = 1 << 0
   SENSOR = 1 << 1
+  PASSIVE = 1 << 2
 
 
 @dataclasses.dataclass
@@ -2260,6 +2291,17 @@ class Data:
     subtree_linvel: linear velocity of subtree com              (nworld, nbody, 3)
     subtree_angmom: angular momentum about subtree com          (nworld, nbody, 3)
     qLU: sparse LU factorization of (M - dt*qDeriv)             (nworld, nD)
+    efm_c: smooth-force shift h*K*qvel                          (nworld, nv)
+    efm_diag: effective-metric diagonal h*D + h^2*K             (nworld, nv)
+    efm_fluid: fluid drag blocks in M's sparsity pattern        (nworld, nC)
+    efm_ca: actuation-stage smooth-force shift                  (nworld, nv)
+    efm_K_val: effective flex stiffness CSR values              (nworld, nefmK)
+    efm_L: factored 3x3 diagonal blocks of M+K                  (nworld, nefmL)
+    qH: modified mass matrix M + metric diagonals               (nworld, nC)
+    qHLD: factor of modified mass matrix qH                     (nworld, qld_total)
+    qHDiagInv: reciprocal diagonal of qH                        (nworld, nv)
+    efm_ts: tendon metric scale h^2*k + h*b                     (nworld, ntendon)
+    efm_as: actuator metric scale h^2*gp + h*gv                 (nworld, nactuator)
     actuator_force: actuator force in actuation space           (nworld, nu)
     qfrc_actuator: actuator force                               (nworld, nv)
     qfrc_smooth: net unconstrained force                        (nworld, nv)
@@ -2409,6 +2451,17 @@ class Data:
   subtree_linvel: array("nworld", "nbody", wp.vec3)
   subtree_angmom: array("nworld", "nbody", wp.vec3)
   qLU: array("nworld", "nD", float)
+  efm_c: array("nworld", "nv", float)
+  efm_diag: array("nworld", "nv", float)
+  efm_fluid: array("nworld", "nC", float)
+  efm_ca: array("nworld", "nv", float)
+  efm_K_val: array("nworld", "nefmK", float)
+  efm_L: array("nworld", "nefmL", float)
+  qH: array("nworld", "nC", float)
+  qHLD: array("nworld", "qld_total", float)
+  qHDiagInv: array("nworld", "nv", float)
+  efm_ts: array("nworld", "ntendon", float)
+  efm_as: array("nworld", "nactuator", float)
   actuator_force: array("nworld", "nactuator", float)
   qfrc_actuator: array("nworld", "nv", float)
   qfrc_smooth: array("nworld", "nv", float)
