@@ -122,9 +122,9 @@ def _add_qfrc_smooth_eff(
   dof_treeid: wp.array[int],
   # Data in:
   tree_awake_in: wp.array2d[int],
+  qfrc_smooth_in: wp.array2d[float],
   efm_c_in: wp.array2d[float],
   efm_ca_in: wp.array2d[float],
-  qfrc_smooth_in: wp.array2d[float],
   # Out:
   qfrc_smooth_eff_out: wp.array2d[float],
 ):
@@ -3863,7 +3863,7 @@ def init_context(m: types.Model, d: types.Data, ctx: SolverContext | InverseCont
       wp.launch(
         _add_qfrc_smooth_eff,
         dim=(d.nworld, m.nv),
-        inputs=[m.opt.enableflags, m.dof_treeid, d.tree_awake, d.efm_c, d.efm_ca, d.qfrc_smooth],
+        inputs=[m.opt.enableflags, m.dof_treeid, d.tree_awake, d.qfrc_smooth, d.efm_c, d.efm_ca],
         outputs=[qfrc_smooth_eff],
       )
       d = dataclasses.replace(d, qfrc_smooth=qfrc_smooth_eff)
@@ -3943,7 +3943,7 @@ def _solve(m: types.Model, d: types.Data, ctx: SolverContext, compact: bool = Fa
     wp.launch(
       _add_qfrc_smooth_eff,
       dim=(d.nworld, m.nv),
-      inputs=[m.opt.enableflags, m.dof_treeid, d.tree_awake, d.efm_c, d.efm_ca, d.qfrc_smooth],
+      inputs=[m.opt.enableflags, m.dof_treeid, d.tree_awake, d.qfrc_smooth, d.efm_c, d.efm_ca],
       outputs=[qfrc_smooth_eff],
     )
     d = dataclasses.replace(d, qfrc_smooth=qfrc_smooth_eff)

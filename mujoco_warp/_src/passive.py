@@ -277,9 +277,9 @@ def _spring_damper_tendon_passive(
 def _spring_damper_flexedge_passive(
   # Model:
   flexedge_length0: wp.array[float],
-  flexedge_rigid: wp.array[bool],
   flex_edgestiffness: wp.array[float],
   flex_edgedamping: wp.array[float],
+  flexedge_rigid: wp.array[bool],
   flexedge_J_rownnz: wp.array[int],
   flexedge_J_rowadr: wp.array[int],
   flexedge_J_colind: wp.array[int],
@@ -1857,9 +1857,9 @@ def passive(m: Model, d: Data):
       dim=(d.nworld, m.nflexedge),
       inputs=[
         m.flexedge_length0,
-        m.flexedge_rigid,
         m.flex_edgestiffness,
         m.flex_edgedamping,
+        m.flexedge_rigid,
         m.flexedge_J_rownnz,
         m.flexedge_J_rowadr,
         m.flexedge_J_colind,

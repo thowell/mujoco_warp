@@ -129,9 +129,9 @@ def _qfrc_inverse_discrete(
   # Data in:
   qfrc_bias_in: wp.array2d[float],
   qfrc_passive_in: wp.array2d[float],
+  qfrc_constraint_in: wp.array2d[float],
   efm_c_in: wp.array2d[float],
   efm_ca_in: wp.array2d[float],
-  qfrc_constraint_in: wp.array2d[float],
   # In:
   Ma: wp.array2d[float],
   # Data out:
@@ -208,9 +208,9 @@ def inverse(m: Model, d: Data):
       inputs=[
         d.qfrc_bias,
         d.qfrc_passive,
+        d.qfrc_constraint,
         d.efm_c,
         d.efm_ca,
-        d.qfrc_constraint,
         d.qfrc_inverse,
       ],
       outputs=[d.qfrc_inverse],

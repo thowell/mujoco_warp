@@ -2308,9 +2308,9 @@ def _write_filtered_contacts(warn_overflow: int):
     flex_friction: wp.array[wp.vec3],
     flex_margin: wp.array[float],
     flex_gap: wp.array[float],
+    flex_passive: wp.array[int],
     flex_dim: wp.array[int],
     flex_interp: wp.array[int],
-    flex_passive: wp.array[int],
     # Data in:
     naconmax_in: int,
     # In:
@@ -3262,9 +3262,9 @@ def _filter_and_write_contacts(
       m.flex_friction,
       m.flex_margin,
       m.flex_gap,
+      m.flex_passive,
       m.flex_dim,
       m.flex_interp,
-      m.flex_passive,
       d.naconmax,
       ws.ncand,
       ws.dist,

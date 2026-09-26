@@ -1964,9 +1964,9 @@ def _eff_rhs(
   dof_treeid: wp.array[int],
   # Data in:
   tree_awake_in: wp.array2d[int],
+  qfrc_smooth_in: wp.array2d[float],
   efm_c_in: wp.array2d[float],
   efm_ca_in: wp.array2d[float],
-  qfrc_smooth_in: wp.array2d[float],
   # Out:
   rhs_out: wp.array2d[float],
 ):
@@ -2360,12 +2360,12 @@ def _eff_flex_interp_stiff(
 @wp.func
 def _extract_3x3_diag_block(
   # Model:
-  efm_K_rownnz: wp.array[int],
-  efm_K_rowadr: wp.array[int],
-  efm_K_colind: wp.array[int],
   M_rownnz: wp.array[int],
   M_rowadr: wp.array[int],
   M_colind: wp.array[int],
+  efm_K_rownnz: wp.array[int],
+  efm_K_rowadr: wp.array[int],
+  efm_K_colind: wp.array[int],
   # Data in:
   M_in: wp.array2d[float],
   efm_K_val_in: wp.array2d[float],
@@ -2427,13 +2427,13 @@ def _write_cholesky33(
 @wp.kernel
 def _eff_factor_blocks(
   # Model:
+  M_rownnz: wp.array[int],
+  M_rowadr: wp.array[int],
+  M_colind: wp.array[int],
   efm_K_rownnz: wp.array[int],
   efm_K_rowadr: wp.array[int],
   efm_K_colind: wp.array[int],
   efm_dofid: wp.array[int],
-  M_rownnz: wp.array[int],
-  M_rowadr: wp.array[int],
-  M_colind: wp.array[int],
   # Data in:
   M_in: wp.array2d[float],
   efm_K_val_in: wp.array2d[float],
@@ -2443,7 +2443,7 @@ def _eff_factor_blocks(
   worldid, k = wp.tid()
   i = efm_dofid[k]
   B = _extract_3x3_diag_block(
-    efm_K_rownnz, efm_K_rowadr, efm_K_colind, M_rownnz, M_rowadr, M_colind, M_in, efm_K_val_in, i, worldid
+    M_rownnz, M_rowadr, M_colind, efm_K_rownnz, efm_K_rowadr, efm_K_colind, M_in, efm_K_val_in, i, worldid
   )
   _write_cholesky33(worldid, 9 * k, B[0, 0], B[1, 0], B[1, 1], B[2, 0], B[2, 1], B[2, 2], efm_L_out)
 
@@ -3302,13 +3302,13 @@ def eff_build(m: Model, d: Data):
       _eff_factor_blocks,
       dim=(d.nworld, m.nefmdof),
       inputs=[
+        m.M_rownnz,
+        m.M_rowadr,
+        m.M_colind,
         m.efm_K_rownnz,
         m.efm_K_rowadr,
         m.efm_K_colind,
         m.efm_dofid,
-        m.M_rownnz,
-        m.M_rowadr,
-        m.M_colind,
         d.M,
         d.efm_K_val,
       ],
@@ -3791,13 +3791,13 @@ def eff_mul_m(
 @wp.kernel
 def _eff_build_blocks_raw(
   # Model:
+  M_rownnz: wp.array[int],
+  M_rowadr: wp.array[int],
+  M_colind: wp.array[int],
   efm_K_rownnz: wp.array[int],
   efm_K_rowadr: wp.array[int],
   efm_K_colind: wp.array[int],
   efm_dofid: wp.array[int],
-  M_rownnz: wp.array[int],
-  M_rowadr: wp.array[int],
-  M_colind: wp.array[int],
   is_sparse: bool,
   # Data in:
   nefc_in: wp.array[int],
@@ -3811,7 +3811,7 @@ def _eff_build_blocks_raw(
   worldid, k = wp.tid()
   i = efm_dofid[k]
   B = _extract_3x3_diag_block(
-    efm_K_rownnz, efm_K_rowadr, efm_K_colind, M_rownnz, M_rowadr, M_colind, M_in, efm_K_val_in, i, worldid
+    M_rownnz, M_rowadr, M_colind, efm_K_rownnz, efm_K_rowadr, efm_K_colind, M_in, efm_K_val_in, i, worldid
   )
 
   if not is_sparse:
@@ -3842,11 +3842,11 @@ def _eff_build_blocks_raw(
 @wp.kernel
 def _eff_fold_tendon(
   # Model:
-  efm_dofid: wp.array[int],
-  efm_dofblk: wp.array[int],
   ten_J_rownnz: wp.array[int],
   ten_J_rowadr: wp.array[int],
   ten_J_colind: wp.array[int],
+  efm_dofid: wp.array[int],
+  efm_dofblk: wp.array[int],
   # Data in:
   ten_J_in: wp.array2d[float],
   efm_ts_in: wp.array2d[float],
@@ -4017,13 +4017,13 @@ def eff_prec_fold(m: Model, d: Data, out: Optional[wp.array] = None) -> wp.array
     _eff_build_blocks_raw,
     dim=(d.nworld, m.nefmdof),
     inputs=[
+      m.M_rownnz,
+      m.M_rowadr,
+      m.M_colind,
       m.efm_K_rownnz,
       m.efm_K_rowadr,
       m.efm_K_colind,
       m.efm_dofid,
-      m.M_rownnz,
-      m.M_rowadr,
-      m.M_colind,
       m.is_sparse,
       d.nefc,
       d.M,
@@ -4038,11 +4038,11 @@ def eff_prec_fold(m: Model, d: Data, out: Optional[wp.array] = None) -> wp.array
     _eff_fold_tendon,
     dim=(d.nworld, m.ntendon),
     inputs=[
-      m.efm_dofid,
-      dofblk,
       m.ten_J_rownnz,
       m.ten_J_rowadr,
       m.ten_J_colind,
+      m.efm_dofid,
+      dofblk,
       d.ten_J,
       d.efm_ts,
     ],
@@ -4210,9 +4210,9 @@ def eff_solve(m: Model, d: Data, qacc: wp.array2d[float], qfrc: Optional[wp.arra
         m.opt.enableflags,
         m.dof_treeid,
         d.tree_awake,
+        d.qfrc_smooth,
         d.efm_c,
         d.efm_ca,
-        d.qfrc_smooth,
       ],
       outputs=[rhs],
     )
