@@ -1909,59 +1909,59 @@ def fwd_actuation(m: Model, d: Data):
       outputs=[d.act_dot, d.actuator_force],
     )
 
-  if m.callback.act_dyn:
-    m.callback.act_dyn(m, d)
-  if m.callback.act_gain:
-    m.callback.act_gain(m, d)
-  if m.callback.act_bias:
-    m.callback.act_bias(m, d)
+    if m.callback.act_dyn:
+      m.callback.act_dyn(m, d)
+    if m.callback.act_gain:
+      m.callback.act_gain(m, d)
+    if m.callback.act_bias:
+      m.callback.act_bias(m, d)
 
-  if m.ntendon:
-    # total actuator force at tendon
-    ten_actfrc = wp.zeros((d.nworld, m.ntendon), dtype=float)
+    if m.ntendon:
+      # total actuator force at tendon
+      ten_actfrc = wp.zeros((d.nworld, m.ntendon), dtype=float)
+      wp.launch(
+        _tendon_actuator_force,
+        dim=(d.nworld, m.nactuator),
+        inputs=[m.actuator_trntype, m.actuator_trnid, d.actuator_force],
+        outputs=[ten_actfrc],
+      )
+
+      wp.launch(
+        _tendon_actuator_force_clamp,
+        dim=(d.nworld, m.nactuator),
+        inputs=[m.tendon_actfrclimited, m.tendon_actfrcrange, m.actuator_trntype, m.actuator_trnid, ten_actfrc],
+        outputs=[d.actuator_force],
+      )
+
+    # TODO(team): optimize performance
+    d.qfrc_actuator.zero_()
     wp.launch(
-      _tendon_actuator_force,
+      _qfrc_actuator,
       dim=(d.nworld, m.nactuator),
-      inputs=[m.actuator_trntype, m.actuator_trnid, d.actuator_force],
-      outputs=[ten_actfrc],
+      inputs=[
+        d.moment_rownnz,
+        d.moment_rowadr,
+        d.moment_colind,
+        d.actuator_moment,
+        d.actuator_force,
+      ],
+      outputs=[d.qfrc_actuator],
     )
-
+    gravity_enabled = not (m.opt.disableflags & DisableBit.GRAVITY)
     wp.launch(
-      _tendon_actuator_force_clamp,
-      dim=(d.nworld, m.nactuator),
-      inputs=[m.tendon_actfrclimited, m.tendon_actfrcrange, m.actuator_trntype, m.actuator_trnid, ten_actfrc],
-      outputs=[d.actuator_force],
+      _qfrc_actuator_gravcomp_limits,
+      dim=(d.nworld, m.nv),
+      inputs=[
+        m.jnt_actfrclimited,
+        m.jnt_actgravcomp,
+        m.jnt_actfrcrange,
+        m.dof_jntid,
+        d.qfrc_gravcomp,
+        d.qfrc_actuator,
+        gravity_enabled,
+      ],
+      outputs=[d.qfrc_actuator],
     )
-
-  # TODO(team): optimize performance
-  d.qfrc_actuator.zero_()
-  wp.launch(
-    _qfrc_actuator,
-    dim=(d.nworld, m.nactuator),
-    inputs=[
-      d.moment_rownnz,
-      d.moment_rowadr,
-      d.moment_colind,
-      d.actuator_moment,
-      d.actuator_force,
-    ],
-    outputs=[d.qfrc_actuator],
-  )
-  gravity_enabled = not (m.opt.disableflags & DisableBit.GRAVITY)
-  wp.launch(
-    _qfrc_actuator_gravcomp_limits,
-    dim=(d.nworld, m.nv),
-    inputs=[
-      m.jnt_actfrclimited,
-      m.jnt_actgravcomp,
-      m.jnt_actfrcrange,
-      m.dof_jntid,
-      d.qfrc_gravcomp,
-      d.qfrc_actuator,
-      gravity_enabled,
-    ],
-    outputs=[d.qfrc_actuator],
-  )
   if m.opt.integrator == IntegratorType.DISCRETE:
     derivative.eff_actuation(m, d)
     constraint.regularize_constraint(m, d)

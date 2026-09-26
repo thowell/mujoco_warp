@@ -476,7 +476,24 @@ def put_model(mjm: mujoco.MjModel, batch_sizes: dict[str, int] | None = None) ->
   m.has_flex_selfcollide = bool(
     mjm.nflex > 0 and np.any((mjm.flex_selfcollide != 0) & ((mjm.flex_contype & mjm.flex_conaffinity) != 0))
   )
-  m.has_flex_passive = bool(mjm.nflex > 0 and np.any(mjm.flex_passive != 0))
+  m.has_flex_passive = bool(
+    mjm.nflex > 0 and np.any((mjm.flex_passive != 0) & (mjm.flex_rigid == 0) & (mjm.flex_interp == 0) & (mjm.flex_dim >= 2))
+  )
+  m.has_tendon_stiffness = bool(mjm.ntendon > 0 and np.any(mjm.tendon_stiffness > 0))
+  m.has_tendon_damping = bool(mjm.ntendon > 0 and np.any(mjm.tendon_damping > 0))
+  m.has_efm_actuator = bool(
+    mjm.nu > 0
+    and np.any(
+      (
+        (mjm.actuator_gaintype == mujoco.mjtGain.mjGAIN_AFFINE)
+        & ((mjm.actuator_gainprm[:, 1] != 0) | (mjm.actuator_gainprm[:, 2] != 0))
+      )
+      | (
+        (mjm.actuator_biastype == mujoco.mjtBias.mjBIAS_AFFINE)
+        & ((mjm.actuator_biasprm[:, 1] != 0) | (mjm.actuator_biasprm[:, 2] != 0))
+      )
+    )
+  )
   m.has_1d_flex = bool(mjm.nflex > 0 and np.any(mjm.flex_dim == 1))
   m.has_2d_flex = bool(mjm.nflex > 0 and np.any(mjm.flex_dim == 2))
   m.has_3d_flex = bool(mjm.nflex > 0 and np.any(mjm.flex_dim == 3))
@@ -2145,12 +2162,8 @@ def put_data(
   contact.worldid = np.pad(np.repeat(np.arange(nworld), mjd.ncon), (0, naconmax - nworld * mjd.ncon))
   contact.worldid = wp.array(contact.worldid, dtype=int)
   con_type = np.ones(mjd.ncon, dtype=int)
-  if mjm.nflex > 0 and np.any(mjm.flex_passive != 0) and mjd.ncon > 0:
-    f0, f1 = mjd.contact.flex[: mjd.ncon].T
-    is_passive = ((f0 >= 0) & (mjm.flex_passive[np.maximum(0, f0)] != 0)) | (
-      (f1 >= 0) & (mjm.flex_passive[np.maximum(0, f1)] != 0)
-    )
-    con_type[is_passive] = int(types.ContactType.PASSIVE)
+  if mjd.ncon > 0:
+    con_type[mjd.contact.exclude[: mjd.ncon] == 4] = int(types.ContactType.PASSIVE)
   contact.type = wp.array(
     np.pad(np.tile(con_type, nworld), (0, naconmax - nworld * mjd.ncon), constant_values=1),
     dtype=int,

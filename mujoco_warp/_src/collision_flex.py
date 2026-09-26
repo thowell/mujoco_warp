@@ -32,7 +32,6 @@ from mujoco_warp._src.types import MJ_MINMU
 from mujoco_warp._src.types import MJ_MINVAL
 from mujoco_warp._src.types import ContactType
 from mujoco_warp._src.types import Data
-from mujoco_warp._src.types import DisableBit
 from mujoco_warp._src.types import GeomType
 from mujoco_warp._src.types import IntegratorType
 from mujoco_warp._src.types import Model
@@ -2290,7 +2289,6 @@ def _write_filtered_contacts(warn_overflow: int):
   def kernel(
     # Model:
     opt_integrator: int,
-    opt_disableflags: int,
     body_weldid: wp.array[int],
     geom_type: wp.array[int],
     geom_condim: wp.array[int],
@@ -2311,6 +2309,7 @@ def _write_filtered_contacts(warn_overflow: int):
     flex_margin: wp.array[float],
     flex_gap: wp.array[float],
     flex_dim: wp.array[int],
+    flex_interp: wp.array[int],
     flex_passive: wp.array[int],
     # Data in:
     naconmax_in: int,
@@ -2455,10 +2454,9 @@ def _write_filtered_contacts(warn_overflow: int):
     g0 = cand_geom[i][0]
     g1 = cand_geom[i][1]
     wants = (
-      ((f0 >= 0 and flex_passive[f0] != 0) or (f1 >= 0 and flex_passive[f1] != 0))
-      and opt_integrator == int(IntegratorType.DISCRETE)
-      and not (opt_disableflags & (DisableBit.SPRING | DisableBit.DAMPER))
-    )
+      (f0 >= 0 and flex_passive[f0] != 0 and flex_interp[f0] == 0 and flex_dim[f0] >= 2)
+      or (f1 >= 0 and flex_passive[f1] != 0 and flex_interp[f1] == 0 and flex_dim[f1] >= 2)
+    ) and opt_integrator == int(IntegratorType.DISCRETE)
     ok = (f0 >= 0 or (g0 >= 0 and body_weldid[geom_bodyid[g0]] == 0)) and (
       f1 >= 0 or (g1 >= 0 and body_weldid[geom_bodyid[g1]] == 0)
     )
@@ -3245,7 +3243,6 @@ def _filter_and_write_contacts(
     dim=d.naconmax,
     inputs=[
       m.opt.integrator,
-      m.opt.disableflags,
       m.body_weldid,
       m.geom_type,
       m.geom_condim,
@@ -3266,6 +3263,7 @@ def _filter_and_write_contacts(
       m.flex_margin,
       m.flex_gap,
       m.flex_dim,
+      m.flex_interp,
       m.flex_passive,
       d.naconmax,
       ws.ncand,

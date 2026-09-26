@@ -1643,7 +1643,10 @@ def _solve_init_dof(warmstart: bool, sparse: bool):
     worldid, dofid = wp.tid()
 
     if wp.static(WARMSTART):
-      qacc_out[worldid, dofid] = qacc_warmstart_in[worldid, dofid]
+      if nefc_in[worldid] > 0:
+        qacc_out[worldid, dofid] = qacc_warmstart_in[worldid, dofid]
+      else:
+        qacc_out[worldid, dofid] = qacc_smooth_in[worldid, dofid]
     else:
       qacc_out[worldid, dofid] = qacc_smooth_in[worldid, dofid]
 

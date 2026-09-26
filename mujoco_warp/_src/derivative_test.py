@@ -25,6 +25,7 @@ import mujoco_warp as mjw
 from mujoco_warp import test_data
 from mujoco_warp._src import derivative
 from mujoco_warp._src import forward
+from mujoco_warp._src import types
 
 # tolerance for difference between MuJoCo and mjwarp smooth calculations - mostly
 # due to float precision
@@ -2185,6 +2186,134 @@ class DerivativeTest(parameterized.TestCase):
     self.assertEqual(d.qacc_smooth.numpy()[0, 1], 0.0)
     self.assertEqual(d.qacc.numpy()[0, 1], 0.0)
     self.assertEqual(d.qfrc_constraint.numpy()[0, 1], 0.0)
+    _assert_eq(d.qacc_smooth.numpy()[0], mjd.qacc_smooth, "qacc_smooth")
+    _assert_eq(d.qacc.numpy()[0], mjd.qacc, "qacc")
+    if nworld == 2:
+      self.assertFalse(np.allclose(d.qacc.numpy()[0], d.qacc.numpy()[1]))
+
+  @parameterized.parameters(1, 2)
+  def test_discrete_disabled_actuation_gravcomp(self, nworld):
+    """Tests disabled actuation does not add gravcomp into qfrc_actuator for discrete integrator."""
+    mjm, mjd, m, d = test_data.fixture(
+      xml="""
+      <mujoco>
+        <option integrator="discrete" timestep="0.005">
+          <flag actuation="disable"/>
+        </option>
+        <worldbody>
+          <body gravcomp="1" pos="0 0 1">
+            <joint name="j" type="slide" axis="0 0 1" stiffness="10" damping="2"/>
+            <geom type="sphere" size="0.1" mass="1.0"/>
+          </body>
+        </worldbody>
+        <actuator>
+          <motor joint="j" gear="1"/>
+        </actuator>
+      </mujoco>
+      """,
+      qpos_noise=0.1,
+      ctrl_noise=1.0,
+      nworld=nworld,
+    )
+    if nworld == 2:
+      qpos_np = d.qpos.numpy()
+      qpos_np[1, 0] += 0.2
+      d.qpos = wp.array(qpos_np, dtype=float)
+
+    d.qfrc_actuator.fill_(wp.inf)
+    d.qacc_smooth.fill_(wp.inf)
+    d.qacc.fill_(wp.inf)
+
+    mujoco.mj_forward(mjm, mjd)
+    mjw.forward(m, d)
+
+    _assert_eq(d.qfrc_actuator.numpy()[0], mjd.qfrc_actuator, "qfrc_actuator")
+    _assert_eq(d.qacc_smooth.numpy()[0], mjd.qacc_smooth, "qacc_smooth")
+    _assert_eq(d.qacc.numpy()[0], mjd.qacc, "qacc")
+    if nworld == 2:
+      self.assertFalse(np.allclose(d.qacc.numpy()[0], d.qacc.numpy()[1]))
+
+  @parameterized.parameters(1, 2)
+  def test_discrete_passive_contact_eligibility(self, nworld):
+    """Tests passive flex contact eligibility with disabled spring, 1D flex, and dynamic bodies."""
+    mjm, mjd, m, d = test_data.fixture(
+      xml="""
+      <mujoco>
+        <option integrator="discrete" timestep="0.002">
+          <flag spring="disable"/>
+        </option>
+        <worldbody>
+          <geom type="plane" size="1 1 0.1"/>
+          <body pos="0 0 0.02">
+            <freejoint/>
+            <geom type="sphere" size="0.05" mass="1.0"/>
+          </body>
+          <flexcomp name="f" type="grid" count="2 2 1" spacing="0.1 0.1 0.1" pos="0 0 0.01" radius="0.02" mass="1.0" dim="2">
+            <contact passive="true" selfcollide="none"/>
+            <elasticity young="100" damping="1"/>
+          </flexcomp>
+        </worldbody>
+      </mujoco>
+      """,
+      qvel_noise=0.5,
+      nworld=nworld,
+    )
+    # Verify put_data preserves CPU contact classification (exclude == 4 -> PASSIVE)
+    expected_types = np.where(
+      mjd.contact.exclude[: mjd.ncon] == 4,
+      int(types.ContactType.PASSIVE),
+      int(types.ContactType.CONSTRAINT),
+    )
+    np.testing.assert_array_equal(d.contact.type.numpy()[: mjd.ncon], expected_types)
+
+    if nworld == 2:
+      qvel_np = d.qvel.numpy()
+      qvel_np[1] = qvel_np[0] * 1.5 - 0.2
+      d.qvel = wp.array(qvel_np, dtype=float)
+
+    d.qacc.fill_(wp.inf)
+    d.nefc.fill_(-1)
+
+    mujoco.mj_forward(mjm, mjd)
+    mjw.forward(m, d)
+
+    self.assertEqual(int(d.nefc.numpy()[0]), mjd.nefc)
+    _assert_eq(d.qacc.numpy()[0], mjd.qacc, "qacc")
+    if nworld == 2:
+      self.assertFalse(np.allclose(d.qacc.numpy()[0], d.qacc.numpy()[1]))
+
+  @parameterized.parameters(1, 2)
+  def test_discrete_direct_solve_with_motor(self, nworld):
+    """Tests that eff_solve uses direct qH solve when actuators/tendons add no metric coupling."""
+    mjm, mjd, m, d = test_data.fixture(
+      xml="""
+      <mujoco>
+        <option integrator="discrete" iterations="0" timestep="0.005"/>
+        <worldbody>
+          <body pos="0 0 1">
+            <joint name="j" type="slide" axis="0 0 1" stiffness="10" damping="2"/>
+            <geom type="sphere" size="0.1" mass="1.0"/>
+          </body>
+        </worldbody>
+        <actuator>
+          <motor joint="j" gear="1"/>
+        </actuator>
+      </mujoco>
+      """,
+      ctrl_noise=2.0,
+      nworld=nworld,
+    )
+    if nworld == 2:
+      ctrl_np = d.ctrl.numpy()
+      ctrl_np[1, 0] += 5.0
+      d.ctrl = wp.array(ctrl_np, dtype=float)
+
+    d.qacc_smooth.fill_(wp.inf)
+    d.qacc.fill_(wp.inf)
+
+    mujoco.mj_forward(mjm, mjd)
+    mjw.forward(m, d)
+
     _assert_eq(d.qacc_smooth.numpy()[0], mjd.qacc_smooth, "qacc_smooth")
     _assert_eq(d.qacc.numpy()[0], mjd.qacc, "qacc")
     if nworld == 2:

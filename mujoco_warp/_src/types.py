@@ -309,14 +309,12 @@ class EnableBit(enum.IntFlag):
     ENERGY: energy computation
     INVDISCRETE: discrete-time inverse dynamics
     SLEEP: sleeping
-    DIAGEXACT: exact diagonal of constraint inertia
   """
 
   ENERGY = mujoco.mjtEnableBit.mjENBL_ENERGY
   INVDISCRETE = mujoco.mjtEnableBit.mjENBL_INVDISCRETE
   SLEEP = mujoco.mjtEnableBit.mjENBL_SLEEP
-  DIAGEXACT = mujoco.mjtEnableBit.mjENBL_DIAGEXACT
-  # unsupported: OVERRIDE, FWDINV, ISLAND
+  # unsupported: OVERRIDE, FWDINV, ISLAND, DIAGEXACT
 
 
 class SleepPolicy(enum.IntEnum):
@@ -1802,7 +1800,6 @@ class Model:
   flex_edgestiffness: array("nflex", float)
   flex_edgedamping: array("nflex", float)
   flex_edgeequality: array("nflex", int)
-  flexedge_rigid: array("nflexedge", bool)
   flex_centered: array("nflex", bool)
   flex_passive: array("nflex", int)
   efm_K_rownnz: array("nv", int)
@@ -1979,6 +1976,9 @@ class Model:
   has_sdf_geom: bool
   has_flex_selfcollide: bool
   has_flex_passive: bool
+  has_tendon_stiffness: bool
+  has_tendon_damping: bool
+  has_efm_actuator: bool
   efm0_active: bool
   flex_interp_assemblable: bool
   has_unsupported_flex_interp: bool

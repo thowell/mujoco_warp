@@ -3463,7 +3463,7 @@ def eff_shift(m: Model, d: Data):
       outputs=[d.efm_c],
     )
 
-  if m.has_flex_passive and not (m.opt.disableflags & DisableBit.SPRING):
+  if m.has_flex_passive and not ((m.opt.disableflags & DisableBit.SPRING) and (m.opt.disableflags & DisableBit.DAMPER)):
     efm_con_dof, efm_con_val, efm_con_scale, _, efm_con_nnz = build_efm_contact(m, d)
     wp.launch(
       _eff_contact_shift,
@@ -4219,15 +4219,13 @@ def eff_solve(m: Model, d: Data, qacc: wp.array2d[float], qfrc: Optional[wp.arra
   else:
     rhs = qfrc
 
-  if (
-    m.nefmK == 0
-    and not m.efm0_active
-    and m.nflex == 0
-    and m.ntendon == 0
-    and m.nactuator == 0
-    and not m.has_flex_passive
-    and m.flex_interp_assemblable
-  ):
+  has_spring_or_damper = not ((m.opt.disableflags & DisableBit.SPRING) and (m.opt.disableflags & DisableBit.DAMPER))
+  has_efm_tendon = (m.has_tendon_stiffness and not (m.opt.disableflags & DisableBit.SPRING)) or (
+    m.has_tendon_damping and not (m.opt.disableflags & DisableBit.DAMPER)
+  )
+  has_efm_actuator = m.has_efm_actuator and not (m.opt.disableflags & (DisableBit.ACTUATION | DisableBit.DAMPER))
+  has_flex_any = has_spring_or_damper and (m.nefmK > 0 or m.efm0_active or m.has_flex_passive or not m.flex_interp_assemblable)
+  if not has_flex_any and not has_efm_tendon and not has_efm_actuator:
     smooth.solve_LD(m, d, d.qHLD, d.qHDiagInv, qacc, rhs)
     if m.opt.enableflags & EnableBit.SLEEP:
       wp.launch(
@@ -4240,7 +4238,7 @@ def eff_solve(m: Model, d: Data, qacc: wp.array2d[float], qfrc: Optional[wp.arra
 
   efm_nsolving.fill_(d.nworld)
   efm_iter.zero_()
-  efm_con = build_efm_contact(m, d) if m.has_flex_passive else None
+  efm_con = build_efm_contact(m, d) if (has_spring_or_damper and m.has_flex_passive) else None
 
   wp.launch_tiled(
     _pcg_init_tiled,
@@ -4303,8 +4301,9 @@ def eff_solve(m: Model, d: Data, qacc: wp.array2d[float], qfrc: Optional[wp.arra
       block_dim=m.block_dim.eff_pcg,
     )
 
-  if m.opt.graph_conditional and wp.get_device().is_cuda:
-    wp.capture_while(efm_nsolving, while_body=_pcg_iteration)
-  else:
-    for _ in range(max_it):
-      _pcg_iteration()
+  if max_it > 0:
+    if m.opt.graph_conditional and wp.get_device().is_cuda:
+      wp.capture_while(efm_nsolving, while_body=_pcg_iteration)
+    else:
+      for _ in range(max_it):
+        _pcg_iteration()
