@@ -479,8 +479,8 @@ def put_model(mjm: mujoco.MjModel, batch_sizes: dict[str, int] | None = None) ->
   m.has_flex_passive = bool(
     mjm.nflex > 0 and np.any((mjm.flex_passive != 0) & (mjm.flex_rigid == 0) & (mjm.flex_interp == 0) & (mjm.flex_dim >= 2))
   )
-  m.has_tendon_stiffness = bool(mjm.ntendon > 0 and np.any(mjm.tendon_stiffness > 0))
-  m.has_tendon_damping = bool(mjm.ntendon > 0 and np.any(mjm.tendon_damping > 0))
+  m.has_tendon_stiffness = bool(mjm.ntendon > 0 and (np.any(m.tendon_stiffness != 0) or np.any(m.tendon_stiffnesspoly != 0)))
+  m.has_tendon_damping = bool(mjm.ntendon > 0 and (np.any(m.tendon_damping != 0) or np.any(m.tendon_dampingpoly != 0)))
   m.has_efm_actuator = bool(
     mjm.nu > 0
     and np.any(
@@ -492,6 +492,12 @@ def put_model(mjm: mujoco.MjModel, batch_sizes: dict[str, int] | None = None) ->
         (mjm.actuator_biastype == mujoco.mjtBias.mjBIAS_AFFINE)
         & ((mjm.actuator_biasprm[:, 1] != 0) | (mjm.actuator_biasprm[:, 2] != 0))
       )
+      | (mjm.actuator_gaintype == mujoco.mjtGain.mjGAIN_MUSCLE)
+      | (mjm.actuator_biastype == mujoco.mjtBias.mjBIAS_MUSCLE)
+      | (mjm.actuator_gaintype == mujoco.mjtGain.mjGAIN_DCMOTOR)
+      | (mjm.actuator_biastype == mujoco.mjtBias.mjBIAS_DCMOTOR)
+      | (mjm.actuator_gaintype == mujoco.mjtGain.mjGAIN_SO3)
+      | (mjm.actuator_biastype == mujoco.mjtBias.mjBIAS_SO3)
     )
   )
   m.has_1d_flex = bool(mjm.nflex > 0 and np.any(mjm.flex_dim == 1))

@@ -2319,6 +2319,92 @@ class DerivativeTest(parameterized.TestCase):
     if nworld == 2:
       self.assertFalse(np.allclose(d.qacc.numpy()[0], d.qacc.numpy()[1]))
 
+  @parameterized.product(
+    case=[
+      "muscle",
+      "damper_disabled_servo",
+      "tendon_actuator_damping",
+      "tendon_dampingpoly",
+      "saturated_servo_zero_iterations",
+    ],
+    nworld=[1, 2],
+  )
+  def test_discrete_coupling_eligibility(self, case, nworld):
+    """Tests effective metric coupling eligibility and direct solve fallback."""
+    actuator = ""
+    flag = ""
+    iterations = 100
+    if case == "muscle":
+      actuator = '<muscle tendon="t" lengthrange="0.2 0.6" force="10"/>'
+    elif case == "damper_disabled_servo":
+      actuator = '<position tendon="t" kp="1000"/>'
+      flag = '<flag damper="disable"/>'
+    elif case == "tendon_actuator_damping":
+      actuator = '<general tendon="t" damping="10" gainprm="1"/>'
+    elif case == "saturated_servo_zero_iterations":
+      actuator = '<position tendon="t" kp="1000" forcerange="-1 1"/>'
+      iterations = 0
+
+    mjm, mjd, m, d = test_data.fixture(
+      xml=f"""
+      <mujoco>
+        <option integrator="discrete" timestep="0.01" iterations="{iterations}" gravity="0 0 0">
+          {flag}
+        </option>
+        <worldbody>
+          <body>
+            <joint name="j1" type="slide" axis="1 0 0"/>
+            <geom type="sphere" size="0.1" mass="1" contype="0" conaffinity="0"/>
+          </body>
+          <body pos="1 0 0">
+            <joint name="j2" type="slide" axis="1 0 0"/>
+            <geom type="sphere" size="0.1" mass="2" contype="0" conaffinity="0"/>
+          </body>
+        </worldbody>
+        <tendon>
+          <fixed name="t">
+            <joint joint="j1" coef="1"/>
+            <joint joint="j2" coef="1"/>
+          </fixed>
+        </tendon>
+        <actuator>
+          {actuator}
+        </actuator>
+      </mujoco>
+      """,
+      nworld=nworld,
+    )
+    if case == "tendon_dampingpoly":
+      mjm.tendon_dampingpoly[:] = [[10.0, 0.0]]
+      m = mjw.put_model(mjm)
+    mjd.qpos[:] = [0.2, 0.2]
+    mjd.qvel[:] = [0.1, 0.2]
+    if mjm.nu:
+      mjd.ctrl[:] = [0.5] if case == "muscle" else ([0.0] if case == "tendon_actuator_damping" else [0.1])
+    if mjm.na:
+      mjd.act[:] = [0.5]
+    mujoco.mj_forward(mjm, mjd)
+
+    d = mjw.put_data(mjm, mjd, nworld=nworld)
+    if nworld == 2:
+      qvel_np = d.qvel.numpy()
+      qvel_np[1] = [0.25, 0.35]
+      d.qvel = wp.array(qvel_np, dtype=float)
+      if case == "saturated_servo_zero_iterations":
+        ctrl_np = d.ctrl.numpy()
+        ctrl_np[1] = [0.8]
+        d.ctrl = wp.array(ctrl_np, dtype=float)
+
+    d.qacc_smooth.fill_(wp.inf)
+    d.qacc.fill_(wp.inf)
+
+    mjw.forward(m, d)
+
+    _assert_eq(d.qacc_smooth.numpy()[0], mjd.qacc_smooth, "qacc_smooth")
+    _assert_eq(d.qacc.numpy()[0], mjd.qacc, "qacc")
+    if nworld == 2:
+      self.assertFalse(np.allclose(d.qacc_smooth.numpy()[0], d.qacc_smooth.numpy()[1]))
+
 
 if __name__ == "__main__":
   wp.init()

@@ -2945,70 +2945,87 @@ def _eff_flex_interp_mul(check_skip: bool, is_shift: bool):
 def _pcg_init_tiled(
   # Model:
   nv: int,
+  nactuator: int,
+  ntendon: int,
   opt_enableflags: int,
   dof_treeid: wp.array[int],
   # Data in:
   tree_awake_in: wp.array2d[int],
+  efm_ts_in: wp.array2d[float],
+  efm_as_in: wp.array2d[float],
   # In:
   rhs_in: wp.array2d[float],
+  z0_in: wp.array2d[float],
+  flex_any: bool,
+  tendon_any: bool,
+  actuator_any: bool,
   # Data out:
   qacc_out: wp.array2d[float],
   # Out:
   efm_r_out: wp.array2d[float],
+  efm_p_out: wp.array2d[float],
+  efm_rz_out: wp.array[float],
   efm_bn_out: wp.array[float],
   efm_done_out: wp.array[bool],
   efm_nsolving_out: wp.array[int],
 ):
   worldid, tid = wp.tid()
-  local_bn = float(0.0)
   BLOCK_DIM = wp.block_dim()
   sleep_enabled = (opt_enableflags & EnableBit.SLEEP) != 0
+
+  active = flex_any
+  if not active and tendon_any:
+    for t in range(ntendon):
+      if efm_ts_in[worldid, t] != 0.0:
+        active = True
+        break
+  if not active and actuator_any:
+    for a in range(nactuator):
+      if efm_as_in[worldid, a] != 0.0:
+        active = True
+        break
+
+  if not active:
+    for dofid in range(tid, nv, BLOCK_DIM):
+      z = z0_in[worldid, dofid]
+      if sleep_enabled and tree_awake_in[worldid, dof_treeid[dofid]] == 0:
+        z = 0.0
+      qacc_out[worldid, dofid] = z
+      efm_r_out[worldid, dofid] = 0.0
+      efm_p_out[worldid, dofid] = 0.0
+    if tid == 0:
+      efm_bn_out[worldid] = 0.0
+      efm_rz_out[worldid] = 0.0
+      efm_done_out[worldid] = True
+      wp.atomic_sub(efm_nsolving_out, 0, 1)
+    return
+
+  local_bn = float(0.0)
+  local_rz = float(0.0)
   for dofid in range(tid, nv, BLOCK_DIM):
     b = rhs_in[worldid, dofid]
+    z = z0_in[worldid, dofid]
     if sleep_enabled and tree_awake_in[worldid, dof_treeid[dofid]] == 0:
       b = 0.0
+      z = 0.0
     efm_r_out[worldid, dofid] = b
+    efm_p_out[worldid, dofid] = z
     qacc_out[worldid, dofid] = 0.0
     local_bn += b * b
+    local_rz += b * z
 
   bn_tile = wp.tile(local_bn, preserve_type=True)
   bn_sum = wp.tile_reduce(wp.add, bn_tile)
+  rz_tile = wp.tile(local_rz, preserve_type=True)
+  rz_sum = wp.tile_reduce(wp.add, rz_tile)
   if tid == 0:
     bn = bn_sum[0]
     efm_bn_out[worldid] = bn
+    efm_rz_out[worldid] = rz_sum[0]
     done = bn <= MJ_MINVAL
     efm_done_out[worldid] = done
     if done:
       wp.atomic_sub(efm_nsolving_out, 0, 1)
-
-
-@wp.kernel(module="unique")
-def _pcg_init_p_tiled(
-  # Model:
-  nv: int,
-  # In:
-  efm_r_in: wp.array2d[float],
-  efm_z_in: wp.array2d[float],
-  efm_done_in: wp.array[bool],
-  # Out:
-  efm_p_out: wp.array2d[float],
-  efm_rz_out: wp.array[float],
-):
-  worldid, tid = wp.tid()
-  if efm_done_in[worldid]:
-    return
-
-  local_rz = float(0.0)
-  BLOCK_DIM = wp.block_dim()
-  for dofid in range(tid, nv, BLOCK_DIM):
-    z = efm_z_in[worldid, dofid]
-    efm_p_out[worldid, dofid] = z
-    local_rz += efm_r_in[worldid, dofid] * z
-
-  rz_tile = wp.tile(local_rz, preserve_type=True)
-  rz_sum = wp.tile_reduce(wp.add, rz_tile)
-  if tid == 0:
-    efm_rz_out[worldid] = rz_sum[0]
 
 
 @wp.kernel(module="unique")
@@ -4223,7 +4240,7 @@ def eff_solve(m: Model, d: Data, qacc: wp.array2d[float], qfrc: Optional[wp.arra
   has_efm_tendon = (m.has_tendon_stiffness and not (m.opt.disableflags & DisableBit.SPRING)) or (
     m.has_tendon_damping and not (m.opt.disableflags & DisableBit.DAMPER)
   )
-  has_efm_actuator = m.has_efm_actuator and not (m.opt.disableflags & (DisableBit.ACTUATION | DisableBit.DAMPER))
+  has_efm_actuator = m.has_efm_actuator and not (m.opt.disableflags & DisableBit.ACTUATION)
   has_flex_any = has_spring_or_damper and (m.nefmK > 0 or m.efm0_active or m.has_flex_passive or not m.flex_interp_assemblable)
   if not has_flex_any and not has_efm_tendon and not has_efm_actuator:
     smooth.solve_LD(m, d, d.qHLD, d.qHDiagInv, qacc, rhs)
@@ -4240,19 +4257,26 @@ def eff_solve(m: Model, d: Data, qacc: wp.array2d[float], qfrc: Optional[wp.arra
   efm_iter.zero_()
   efm_con = build_efm_contact(m, d) if (has_spring_or_damper and m.has_flex_passive) else None
 
+  eff_prec(m, d, efm_z, rhs)
   wp.launch_tiled(
     _pcg_init_tiled,
     dim=d.nworld,
-    inputs=[m.nv, m.opt.enableflags, m.dof_treeid, d.tree_awake, rhs],
-    outputs=[qacc, efm_r, efm_bn, efm_done, efm_nsolving],
-    block_dim=m.block_dim.eff_pcg,
-  )
-  eff_prec(m, d, efm_z, efm_r)
-  wp.launch_tiled(
-    _pcg_init_p_tiled,
-    dim=d.nworld,
-    inputs=[m.nv, efm_r, efm_z, efm_done],
-    outputs=[efm_p, efm_rz],
+    inputs=[
+      m.nv,
+      m.nactuator,
+      m.ntendon,
+      m.opt.enableflags,
+      m.dof_treeid,
+      d.tree_awake,
+      d.efm_ts,
+      d.efm_as,
+      rhs,
+      efm_z,
+      has_flex_any,
+      has_efm_tendon,
+      has_efm_actuator,
+    ],
+    outputs=[qacc, efm_r, efm_p, efm_rz, efm_bn, efm_done, efm_nsolving],
     block_dim=m.block_dim.eff_pcg,
   )
 
