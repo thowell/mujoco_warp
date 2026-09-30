@@ -25,7 +25,10 @@ from mujoco_warp._src import util_misc
 from mujoco_warp._src.passive import build_efm_contact
 from mujoco_warp._src.passive import ellipsoid_max_moment
 from mujoco_warp._src.passive import geom_semiaxes
+from mujoco_warp._src.passive import snh_project
+from mujoco_warp._src.passive import snh_projected_block
 from mujoco_warp._src.support import next_act
+from mujoco_warp._src.types import FLEX_STIFFNESS_3D
 from mujoco_warp._src.types import MJ_MINVAL
 from mujoco_warp._src.types import BiasType
 from mujoco_warp._src.types import Data
@@ -36,6 +39,8 @@ from mujoco_warp._src.types import GainType
 from mujoco_warp._src.types import IntegratorType
 from mujoco_warp._src.types import JointType
 from mujoco_warp._src.types import Model
+from mujoco_warp._src.types import mat43
+from mujoco_warp._src.types import mat63
 from mujoco_warp._src.types import vec6
 from mujoco_warp._src.types import vec10
 from mujoco_warp._src.warp_util import cache_kernel
@@ -2013,7 +2018,9 @@ def _eff_flex_stretch_stiff(
   flex_vertbodyid: wp.array[int],
   flex_elem: wp.array[int],
   flex_elemedge: wp.array[int],
+  flex_vert0: wp.array[wp.vec3],
   flexedge_length0: wp.array[float],
+  flex_size: wp.array[wp.vec3],
   flex_stiffness: wp.array[float],
   flex_damping: wp.array[float],
   flex_centered: wp.array[bool],
@@ -2065,24 +2072,26 @@ def _eff_flex_stretch_stiff(
     wp.matrix(1, 2, 2, 0, 0, 1, 0, 0, 0, 0, 0, 0, shape=(6, 2), dtype=int),
   )
 
-  dvec = wp.matrix(shape=(6, 3), dtype=float)
-  for e in range(nedge):
-    v0 = flex_elem[elem_data_adr + edges[e, 0]]
-    v1 = flex_elem[elem_data_adr + edges[e, 1]]
-    xp0 = flexvert_xpos_in[worldid, vbase + v0]
-    xp1 = flexvert_xpos_in[worldid, vbase + v1]
-    for x in range(3):
-      dvec[e, x] = xp0[x] - xp1[x]
+  elem_verts = wp.vec4i(-1, -1, -1, -1)
+  vert_dof = wp.vec4i(-1, -1, -1, -1)
+  vert_body = wp.vec4i(-1, -1, -1, -1)
+  vert_xpos = mat43()
+  for v in range(nvrt):
+    vert_idx = flex_elem[elem_data_adr + v]
+    elem_verts[v] = vert_idx
+    gvert = vbase + vert_idx
+    bid = body_weldid[flex_vertbodyid[gvert]]
+    vert_body[v] = bid
+    if body_dofnum[bid] == 3:
+      vert_dof[v] = body_dofadr[bid]
+    vert_xpos[v] = flexvert_xpos_in[worldid, gvert]
 
-  stiffness_adr = stiffness_adr_base + local_elemid * 21
-  metric = wp.matrix(shape=(6, 6), dtype=float)
-  id = int(0)
-  for e1 in range(nedge):
-    for e2 in range(e1, nedge):
-      val = flex_stiffness[stiffness_adr + id]
-      metric[e1, e2] = val
-      metric[e2, e1] = val
-      id += 1
+  dvec = mat63()
+  for e in range(nedge):
+    dvec[e] = vert_xpos[edges[e, 0]] - vert_xpos[edges[e, 1]]
+
+  stiffness_adr = stiffness_adr_base + local_elemid * (FLEX_STIFFNESS_3D if dim == 3 else 21)
+  snh = dim == 3 and FLEX_STIFFNESS_3D == 24 and flex_stiffness[stiffness_adr + 21] != 0.0
 
   delta_elen_sq = vec6(0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
   ee_base = flex_elemedgeadr[f] + local_elemid * nedge
@@ -2092,21 +2101,39 @@ def _eff_flex_stretch_stiff(
     elen0 = flexedge_length0[ebase + idx]
     delta_elen_sq[e] = elen * elen - elen0 * elen0
 
+  metric = wp.matrix(shape=(6, 6), dtype=float)
   Me = vec6(0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
-  for e1 in range(nedge):
-    me_val = float(0.0)
-    for e2 in range(nedge):
-      me_val += metric[e1, e2] * delta_elen_sq[e2]
-    Me[e1] = wp.max(me_val, 0.0)
+  rotation = wp.mat33(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+  proj_grad = mat43()
+  stretch = wp.mat33(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+  symmetric = wp.vec3(0.0, 0.0, 0.0)
+  skew = wp.vec3(0.0, 0.0, 0.0)
 
-  vert_dof = wp.vec4i(-1, -1, -1, -1)
-  vert_body = wp.vec4i(-1, -1, -1, -1)
-  for v in range(nvrt):
-    vert_idx = flex_elem[elem_data_adr + v]
-    bid = body_weldid[flex_vertbodyid[vbase + vert_idx]]
-    vert_body[v] = bid
-    if body_dofnum[bid] == 3:
-      vert_dof[v] = body_dofadr[bid]
+  if snh:
+    rotation, proj_grad, stretch, symmetric, skew = snh_project(
+      flex_vert0,
+      flex_stiffness,
+      stiffness_adr,
+      vbase,
+      elem_verts,
+      flex_size[f],
+      dvec,
+      delta_elen_sq,
+    )
+  else:
+    id = int(0)
+    for e1 in range(nedge):
+      for e2 in range(e1, nedge):
+        val = flex_stiffness[stiffness_adr + id]
+        metric[e1, e2] = val
+        metric[e2, e1] = val
+        id += 1
+
+    for e1 in range(nedge):
+      me_val = float(0.0)
+      for e2 in range(nedge):
+        me_val += metric[e1, e2] * delta_elen_sq[e2]
+      Me[e1] = wp.max(me_val, 0.0)
 
   for i in range(nvrt):
     dof_i = vert_dof[i]
@@ -2119,30 +2146,33 @@ def _eff_flex_stretch_stiff(
         continue
       bj = vert_body[j]
 
-      blk = wp.mat33(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
-      for a in range(nedge):
-        sa = 1.0 if i == edges[a, 0] else (-1.0 if i == edges[a, 1] else 0.0)
-        if sa == 0.0:
-          continue
-        for b in range(nedge):
-          sb = 1.0 if j == edges[b, 0] else (-1.0 if j == edges[b, 1] else 0.0)
-          if sb == 0.0:
+      if snh:
+        blk = scale * snh_projected_block(rotation, proj_grad, stretch, symmetric, skew, i, j)
+      else:
+        blk = wp.mat33(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+        for a in range(nedge):
+          sa = 1.0 if i == edges[a, 0] else (-1.0 if i == edges[a, 1] else 0.0)
+          if sa == 0.0:
             continue
-          w = 2.0 * scale * metric[a, b] * sa * sb
-          for r in range(3):
-            for c in range(3):
-              blk[r, c] += w * dvec[a, r] * dvec[b, c]
+          for b in range(nedge):
+            sb = 1.0 if j == edges[b, 0] else (-1.0 if j == edges[b, 1] else 0.0)
+            if sb == 0.0:
+              continue
+            w = 2.0 * scale * metric[a, b] * sa * sb
+            for r in range(3):
+              for c in range(3):
+                blk[r, c] += w * dvec[a, r] * dvec[b, c]
 
-      geo = float(0.0)
-      for a in range(nedge):
-        sa = 1.0 if i == edges[a, 0] else (-1.0 if i == edges[a, 1] else 0.0)
-        sb = 1.0 if j == edges[a, 0] else (-1.0 if j == edges[a, 1] else 0.0)
-        if sa != 0.0 and sb != 0.0:
-          geo += Me[a] * sa * sb
-      geo *= scale
-      blk[0, 0] += geo
-      blk[1, 1] += geo
-      blk[2, 2] += geo
+        geo = float(0.0)
+        for a in range(nedge):
+          sa = 1.0 if i == edges[a, 0] else (-1.0 if i == edges[a, 1] else 0.0)
+          sb = 1.0 if j == edges[a, 0] else (-1.0 if j == edges[a, 1] else 0.0)
+          if sa != 0.0 and sb != 0.0:
+            geo += Me[a] * sa * sb
+        geo *= scale
+        blk[0, 0] += geo
+        blk[1, 1] += geo
+        blk[2, 2] += geo
 
       R_bj = xmat_in[worldid, bj]
       blkd = wp.transpose(R_bi) * blk * R_bj
@@ -2578,7 +2608,9 @@ def _eff_flex_stretch_shift(
   flex_vertbodyid: wp.array[int],
   flex_elem: wp.array[int],
   flex_elemedge: wp.array[int],
+  flex_vert0: wp.array[wp.vec3],
   flexedge_length0: wp.array[float],
+  flex_size: wp.array[wp.vec3],
   flex_stiffness: wp.array[float],
   flex_centered: wp.array[bool],
   flex_elemflexid: wp.array[int],
@@ -2625,7 +2657,69 @@ def _eff_flex_stretch_shift(
     wp.matrix(1, 2, 2, 0, 0, 1, 0, 0, 0, 0, 0, 0, shape=(6, 2), dtype=int),
   )
 
-  dvec = wp.matrix(shape=(6, 3), dtype=float)
+  stiffness_adr = stiffness_adr_base + local_elemid * (FLEX_STIFFNESS_3D if dim == 3 else 21)
+  snh = dim == 3 and FLEX_STIFFNESS_3D == 24 and flex_stiffness[stiffness_adr + 21] != 0.0
+
+  delta_elen_sq = vec6(0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+  ee_base = flex_elemedgeadr[f] + local_elemid * nedge
+  for e in range(nedge):
+    idx = flex_elemedge[ee_base + e]
+    elen = flexedge_length_in[worldid, ebase + idx]
+    elen0 = flexedge_length0[ebase + idx]
+    delta_elen_sq[e] = elen * elen - elen0 * elen0
+
+  if snh:
+    elem_verts = wp.vec4i(
+      flex_elem[elem_data_adr + 0],
+      flex_elem[elem_data_adr + 1],
+      flex_elem[elem_data_adr + 2],
+      flex_elem[elem_data_adr + 3],
+    )
+    vert_xpos = mat43()
+    vert_body = wp.vec4i(-1, -1, -1, -1)
+    vert_dof = wp.vec4i(-1, -1, -1, -1)
+    w_vert = mat43()
+    for v in range(4):
+      gvert = vbase + elem_verts[v]
+      vert_xpos[v] = flexvert_xpos_in[worldid, gvert]
+      bv = body_weldid[flex_vertbodyid[gvert]]
+      vert_body[v] = bv
+      if body_dofnum[bv] == 3:
+        dof_v = body_dofadr[bv]
+        vert_dof[v] = dof_v
+        vloc_v = wp.vec3(qvel_in[worldid, dof_v], qvel_in[worldid, dof_v + 1], qvel_in[worldid, dof_v + 2])
+        w_vert[v] = xmat_in[worldid, bv] * vloc_v
+      else:
+        w_vert[v] = wp.vec3(0.0, 0.0, 0.0)
+
+    dvec_snh = mat63()
+    for e in range(6):
+      dvec_snh[e] = vert_xpos[edges[e, 0]] - vert_xpos[edges[e, 1]]
+
+    rotation, proj_grad, stretch, symmetric, skew = snh_project(
+      flex_vert0,
+      flex_stiffness,
+      stiffness_adr,
+      vbase,
+      elem_verts,
+      flex_size[f],
+      dvec_snh,
+      delta_elen_sq,
+    )
+    for i in range(4):
+      dofi = vert_dof[i]
+      if dofi < 0:
+        continue
+      hv = wp.vec3(0.0, 0.0, 0.0)
+      for j in range(4):
+        blk = snh_projected_block(rotation, proj_grad, stretch, symmetric, skew, i, j)
+        hv += blk * w_vert[j]
+      rli = wp.transpose(xmat_in[worldid, vert_body[i]]) * (scale * hv)
+      for x in range(3):
+        wp.atomic_add(efm_c_out, worldid, dofi + x, rli[x])
+    return
+
+  dvec = mat63()
   dw = wp.matrix(shape=(6, 3), dtype=float)
   g = vec6(0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
 
@@ -2659,7 +2753,6 @@ def _eff_flex_stretch_shift(
       ge += dx * dwx
     g[e] = ge
 
-  stiffness_adr = stiffness_adr_base + local_elemid * 21
   metric = wp.matrix(shape=(6, 6), dtype=float)
   id = int(0)
   for e1 in range(nedge):
@@ -2673,10 +2766,7 @@ def _eff_flex_stretch_shift(
   for e1 in range(nedge):
     me_val = float(0.0)
     for e2 in range(nedge):
-      idx = flex_elemedge[flex_elemedgeadr[f] + local_elemid * nedge + e2]
-      elen = flexedge_length_in[worldid, ebase + idx]
-      elen0 = flexedge_length0[ebase + idx]
-      me_val += metric[e1, e2] * (elen * elen - elen0 * elen0)
+      me_val += metric[e1, e2] * delta_elen_sq[e2]
     Me[e1] = wp.max(me_val, 0.0)
 
   for e in range(nedge):
@@ -3243,7 +3333,9 @@ def eff_build(m: Model, d: Data):
         m.flex_vertbodyid,
         m.flex_elem,
         m.flex_elemedge,
+        m.flex_vert0,
         m.flexedge_length0,
+        m.flex_size,
         m.flex_stiffness,
         m.flex_damping,
         m.flex_centered,
@@ -3413,7 +3505,9 @@ def eff_shift(m: Model, d: Data):
         m.flex_vertbodyid,
         m.flex_elem,
         m.flex_elemedge,
+        m.flex_vert0,
         m.flexedge_length0,
+        m.flex_size,
         m.flex_stiffness,
         m.flex_centered,
         m.flex_elemflexid,

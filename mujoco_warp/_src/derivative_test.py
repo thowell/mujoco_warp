@@ -26,6 +26,7 @@ from mujoco_warp import test_data
 from mujoco_warp._src import derivative
 from mujoco_warp._src import forward
 from mujoco_warp._src import types
+from mujoco_warp._src import util_pkg
 
 # tolerance for difference between MuJoCo and mjwarp smooth calculations - mostly
 # due to float precision
@@ -1369,19 +1370,25 @@ class DerivativeTest(parameterized.TestCase):
     )
 
     mjds = [mjd]
+    qvel = d.qvel.numpy()
+    qvel[0, 0] = 0.1
     if nworld == 2:
       mjd1 = mujoco.MjData(mjm)
       qpos = d.qpos.numpy()
-      qpos[1, 2] += 0.05
+      qpos[1, 2] += 0.02
+      qvel[1, 2] = -0.2
       d.qpos = wp.array(qpos, dtype=float, device=d.qpos.device)
       mjd1.qpos[:] = qpos[1]
       mjds.append(mjd1)
 
+    d.qvel = wp.array(qvel, dtype=float, device=d.qvel.device)
     for w in range(nworld):
+      mjds[w].qvel[:] = qvel[w]
       mujoco.mj_forward(mjm, mjds[w])
 
     d.qacc_smooth.fill_(wp.inf)
     d.efm_K_val.fill_(wp.inf)
+    d.efm_c.fill_(wp.inf)
     mjw.forward(m, d)
 
     self.assertGreater(m.nefmK, 0)
@@ -1397,6 +1404,179 @@ class DerivativeTest(parameterized.TestCase):
 
     if nworld == 2:
       self.assertFalse(np.allclose(d.efm_K_val.numpy()[0], d.efm_K_val.numpy()[1]))
+      self.assertFalse(np.allclose(d.efm_c.numpy()[0], d.efm_c.numpy()[1]))
+
+  @parameterized.product(
+    config=["deformed", "collapsed", "inverted"],
+    nworld=[1, 2],
+  )
+  def test_discrete_flex_3d_snh_psd_projection(self, config, nworld):
+    """Verifies SNH PSD-projected material Hessian, velocity shift, and inversion recovery."""
+    if not util_pkg.check_version("mujoco>=3.14.1.dev989511280"):
+      return
+    mjm, _, m, d = test_data.fixture(
+      xml="""
+      <mujoco>
+        <option solver="CG" integrator="discrete" timestep="0.01" gravity="0 0 0"/>
+        <worldbody>
+          <body name="v0" pos="0 0 0">
+            <inertial pos="0 0 0" mass="1" diaginertia="1 1 1"/>
+            <joint type="slide" axis="1 0 0"/>
+            <joint type="slide" axis="0 1 0"/>
+            <joint type="slide" axis="0 0 1"/>
+          </body>
+          <body name="v1" pos="1 0 0">
+            <inertial pos="0 0 0" mass="1" diaginertia="1 1 1"/>
+            <joint type="slide" axis="1 0 0"/>
+            <joint type="slide" axis="0 1 0"/>
+            <joint type="slide" axis="0 0 1"/>
+          </body>
+          <body name="v2" pos="0 1 0">
+            <inertial pos="0 0 0" mass="1" diaginertia="1 1 1"/>
+            <joint type="slide" axis="1 0 0"/>
+            <joint type="slide" axis="0 1 0"/>
+            <joint type="slide" axis="0 0 1"/>
+          </body>
+          <body name="v3" pos="0 0 1">
+            <inertial pos="0 0 0" mass="1" diaginertia="1 1 1"/>
+            <joint type="slide" axis="1 0 0"/>
+            <joint type="slide" axis="0 1 0"/>
+            <joint type="slide" axis="0 0 1"/>
+          </body>
+        </worldbody>
+        <deformable>
+          <flex name="tet" dim="3" body="v0 v1 v2 v3"
+                vertex="0 0 0  0 0 0  0 0 0  0 0 0" element="0 1 2 3">
+            <contact selfcollide="none" contype="0" conaffinity="0"/>
+            <elasticity young="1200" poisson="0.3" damping="0.1"/>
+          </flex>
+        </deformable>
+      </mujoco>
+      """,
+      nworld=nworld,
+    )
+
+    young, poisson, damping, h = 1200.0, 0.3, 0.1, 0.01
+    mu = young / (2.0 * (1.0 + poisson))
+    la = young * poisson / ((1.0 + poisson) * (1.0 - 2.0 * poisson))
+    kappa = la + mu
+    face = ((2, 1, 0), (0, 1, 3), (1, 2, 3), (2, 0, 3))
+    edge2face = ((2, 3), (1, 3), (2, 1), (1, 0), (0, 2), (0, 3))
+    verts0 = 2.0 * mjm.flex_size[0] * mjm.flex_vert0
+    v_elem = mjm.flex_elem[:4]
+    vol = (
+      np.dot(
+        np.cross(verts0[v_elem[1]] - verts0[v_elem[0]], verts0[v_elem[2]] - verts0[v_elem[0]]),
+        verts0[v_elem[3]] - verts0[v_elem[0]],
+      )
+      / 6.0
+    )
+    vol0 = abs(vol)
+    basis = np.zeros((6, 3, 3), dtype=np.float64)
+    for e, (fl, fr) in enumerate(edge2face):
+      fL, fR = face[fl], face[fr]
+      nL = np.cross(verts0[v_elem[fL[1]]] - verts0[v_elem[fL[0]]], verts0[v_elem[fL[2]]] - verts0[v_elem[fL[0]]])
+      nR = np.cross(verts0[v_elem[fR[1]]] - verts0[v_elem[fR[0]]], verts0[v_elem[fR[2]]] - verts0[v_elem[fR[0]]])
+      basis[e] = (np.outer(nL, nR) + np.outer(nR, nL)) / (72.0 * vol * vol)
+    trE = np.trace(basis, axis1=1, axis2=2)
+    trEE = np.einsum("eij,fji->ef", basis, basis)
+    K_snh = mu * vol0 * (trEE - np.outer(trE, trE))
+    mjm.flex_stiffness[:21] = K_snh[np.triu_indices(6)]
+    mjm.flex_stiffness[21] = -mu / (72.0 * vol0)
+    mjm.flex_stiffness[22] = vol0 * (la + 2.0 * mu) / 2.0
+    mjm.flex_stiffness[23] = 1.0 / (6.0 * vol)
+    m.flex_stiffness.assign(mjm.flex_stiffness)
+
+    qpos = np.zeros((nworld, mjm.nq), dtype=np.float32)
+    qvel = np.zeros((nworld, mjm.nv), dtype=np.float32)
+    if config == "deformed":
+      qpos[0] = np.array([0.02, -0.01, 0.03, 0.14, 0.03, -0.04, -0.02, 0.09, 0.01, 0.05, -0.03, 0.18], dtype=np.float32)
+    elif config == "collapsed":
+      qpos[0] = np.array([0.0, 0.0, 0.0, 0.08, 0.02, 0.0, -0.03, 0.11, 0.0, 0.25, 0.30, -1.0], dtype=np.float32)
+    else:
+      qpos[0] = np.array([0.0, 0.0, 0.0, 0.10, -0.03, 0.02, -0.04, 0.08, -0.01, 0.15, 0.12, -1.7], dtype=np.float32)
+    qvel[0] = np.array([0.3, -0.4, 0.2, -0.5, 0.2, -0.1, 0.4, -0.3, 0.5, -0.2, 0.6, -0.8], dtype=np.float32)
+    if nworld == 2:
+      qpos[1] = qpos[0] + np.array(
+        [0.01, -0.02, 0.01, 0.03, 0.01, -0.01, -0.02, 0.02, 0.01, -0.01, 0.02, -0.15], dtype=np.float32
+      )
+      qvel[1] = qvel[0] * 1.4 - 0.15
+
+    d.qpos.assign(qpos)
+    d.qvel.assign(qvel)
+    for arr in (d.efm_K_val, d.efm_L, d.efm_c, d.qfrc_damper, d.qacc_smooth, d.qacc):
+      arr.fill_(wp.inf)
+
+    mjw.forward(m, d)
+
+    scale = h * h + h * damping
+    rownnz = m.efm_K_rownnz.numpy()
+    rowadr = m.efm_K_rowadr.numpy()
+    colind = m.efm_K_colind.numpy()
+    xpos0 = np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]], dtype=np.float64)
+    Dm = np.column_stack([xpos0[v_elem[v + 1]] - xpos0[v_elem[0]] for v in range(3)])
+    Dm_inv = np.linalg.inv(Dm)
+    grad_n = np.zeros((4, 3), dtype=np.float64)
+    grad_n[1:] = Dm_inv
+    grad_n[0] = -np.sum(grad_n[1:], axis=0)
+    mu_v = -72.0 * mjm.flex_stiffness[21] * vol0 * vol0
+    lambda_v = 2.0 * mjm.flex_stiffness[22] - mu_v
+
+    for w in range(nworld):
+      val_w = d.efm_K_val.numpy()[w]
+      K_dense = np.zeros((mjm.nv, mjm.nv), dtype=np.float64)
+      for r in range(mjm.nv):
+        for k in range(rownnz[r]):
+          K_dense[r, colind[rowadr[r] + k]] = val_w[rowadr[r] + k] / scale
+
+      xpos_w = xpos0 + qpos[w].reshape(4, 3).astype(np.float64)
+      Ds = np.column_stack([xpos_w[v_elem[v + 1]] - xpos_w[v_elem[0]] for v in range(3)])
+      F = Ds @ Dm_inv
+      H9 = np.zeros((9, 9), dtype=np.float64)
+      cof = np.zeros(9, dtype=np.float64)
+      for i in range(3):
+        for a in range(3):
+          for j in range(3):
+            for b in range(3):
+              for l in range(3):
+                for c in range(3):
+                  eps_ijl = (i - j) * (j - l) * (l - i) // 2
+                  eps_abc = (a - b) * (b - c) * (c - a) // 2
+                  term = eps_ijl * eps_abc * F[l, c]
+                  H9[3 * i + a, 3 * j + b] += term
+                  cof[3 * i + a] += 0.5 * term * F[j, b]
+      J = float(np.dot(F[0], cof[:3]))
+      H9 = mu_v * np.eye(9) + lambda_v * np.outer(cof, cof) + (lambda_v * (J - 1.0) - mu_v) * H9
+      evals, evecs = np.linalg.eigh(H9)
+      H9_proj = (evecs * np.maximum(0.0, evals)) @ evecs.T
+      H_ref = np.zeros((12, 12), dtype=np.float64)
+      for i in range(4):
+        vi = v_elem[i]
+        for j in range(4):
+          vj = v_elem[j]
+          for x in range(3):
+            for y in range(3):
+              H_ref[3 * vi + x, 3 * vj + y] = grad_n[i] @ H9_proj[3 * x : 3 * x + 3, 3 * y : 3 * y + 3] @ grad_n[j]
+
+      np.testing.assert_allclose(K_dense, H_ref, atol=5e-3, rtol=1e-4)
+      np.testing.assert_allclose(K_dense, K_dense.T, atol=1e-4)
+      self.assertGreaterEqual(float(np.min(np.linalg.eigvalsh(0.5 * (K_dense + K_dense.T)))), -1e-4)
+      np.testing.assert_allclose(d.efm_c.numpy()[w], -h * (H_ref @ qvel[w]), atol=5e-3, rtol=1e-4)
+      np.testing.assert_allclose(d.qfrc_damper.numpy()[w], -damping * (H_ref @ qvel[w]), atol=5e-2, rtol=1e-4)
+      self.assertTrue(np.all(np.isfinite(d.efm_L.numpy()[w])))
+      self.assertTrue(np.all(np.isfinite(d.qacc_smooth.numpy()[w])))
+
+    if nworld == 2:
+      self.assertFalse(np.allclose(d.efm_K_val.numpy()[0], d.efm_K_val.numpy()[1]))
+      self.assertFalse(np.allclose(d.efm_c.numpy()[0], d.efm_c.numpy()[1]))
+
+    if config == "inverted" and nworld == 1:
+      d.qvel.zero_()
+      for _ in range(80):
+        mjw.step(m, d)
+      xpos_final = xpos0 + d.qpos.numpy()[0].reshape(4, 3)
+      Ds_final = np.column_stack([xpos_final[v_elem[v + 1]] - xpos_final[v_elem[0]] for v in range(3)])
+      self.assertGreater(float(np.linalg.det(Ds_final @ Dm_inv)), 0.1)
 
   @parameterized.parameters(1, 2)
   def test_eff_contact_stiffness_and_scale(self, nworld):

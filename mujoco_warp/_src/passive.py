@@ -18,6 +18,7 @@ import warp as wp
 from mujoco_warp._src import math
 from mujoco_warp._src import support
 from mujoco_warp._src import util_misc
+from mujoco_warp._src.types import FLEX_STIFFNESS_3D
 from mujoco_warp._src.types import MJ_MINVAL
 from mujoco_warp._src.types import ContactType
 from mujoco_warp._src.types import Data
@@ -27,6 +28,9 @@ from mujoco_warp._src.types import IntegratorType
 from mujoco_warp._src.types import JointType
 from mujoco_warp._src.types import Model
 from mujoco_warp._src.types import mat43
+from mujoco_warp._src.types import mat63
+from mujoco_warp._src.types import mat66
+from mujoco_warp._src.types import vec6
 from mujoco_warp._src.warp_util import cache_kernel
 from mujoco_warp._src.warp_util import event_scope
 
@@ -715,11 +719,519 @@ def _qfrc_passive_kernel(has_fluid: bool, flg_adhesion: bool, gravity_enabled: b
   return kernel
 
 
+@wp.func
+def _snh_cubic(tension: vec6, s: vec6, gamma: float) -> vec6:
+  a = s[0]
+  b = s[2]
+  c = s[4]
+  d = 0.5 * (s[0] + s[2] - s[1])
+  e = 0.5 * (s[0] + s[4] - s[5])
+  f = 0.5 * (s[2] + s[4] - s[3])
+  cof0 = b * c - f * f
+  cof1 = a * c - e * e
+  cof2 = a * b - d * d
+  cof3 = e * f - c * d
+  cof4 = d * f - b * e
+  cof5 = d * e - a * f
+  scale = 2.0 * gamma
+  return vec6(
+    tension[0] + scale * (cof0 + cof3 + cof4),
+    tension[1] - scale * cof3,
+    tension[2] + scale * (cof1 + cof3 + cof5),
+    tension[3] - scale * cof5,
+    tension[4] + scale * (cof2 + cof4 + cof5),
+    tension[5] - scale * cof4,
+  )
+
+
+@wp.func
+def _snh_volume(edgevec: mat63, inv_det_dm: float) -> tuple[float, mat43]:
+  a = -edgevec[0]
+  b = edgevec[2]
+  c = -edgevec[4]
+  bxc = wp.cross(b, c)
+  cxa = wp.cross(c, a)
+  axb = wp.cross(a, b)
+  g1 = bxc * inv_det_dm
+  g2 = cxa * inv_det_dm
+  g3 = axb * inv_det_dm
+  g0 = -(g1 + g2 + g3)
+  grad = mat43()
+  grad[0] = g0
+  grad[1] = g1
+  grad[2] = g2
+  grad[3] = g3
+  return wp.dot(a, bxc) * inv_det_dm, grad
+
+
+@wp.func
+def _snh_cubic_metric(metric: mat66, s: vec6, gamma: float) -> mat66:
+  a = s[0]
+  b = s[2]
+  c = s[4]
+  d = 0.5 * (s[0] + s[2] - s[1])
+  e = 0.5 * (s[0] + s[4] - s[5])
+  f = 0.5 * (s[2] + s[4] - s[3])
+
+  basis = wp.matrix(
+    1.0,
+    0.0,
+    0.0,
+    0.5,
+    0.5,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    -0.5,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.5,
+    0.0,
+    0.5,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    -0.5,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.5,
+    0.5,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    -0.5,
+    0.0,
+    shape=(6, 6),
+    dtype=float,
+  )
+  for j in range(6):
+    h0 = basis[j, 0]
+    h1 = basis[j, 1]
+    h2 = basis[j, 2]
+    h3 = basis[j, 3]
+    h4 = basis[j, 4]
+    h5 = basis[j, 5]
+    dc0 = h1 * c + b * h2 - 2.0 * f * h5
+    dc1 = h0 * c + a * h2 - 2.0 * e * h4
+    dc2 = h0 * b + a * h1 - 2.0 * d * h3
+    dc3 = h4 * f + e * h5 - h2 * d - c * h3
+    dc4 = h3 * f + d * h5 - h1 * e - b * h4
+    dc5 = h3 * e + d * h4 - h0 * f - a * h5
+    dg = vec6(dc0 + dc3 + dc4, -dc3, dc1 + dc3 + dc5, -dc5, dc2 + dc4 + dc5, -dc4)
+    for i in range(j + 1):
+      value = 2.0 * gamma * dg[i]
+      metric[i, j] += value
+      if i != j:
+        metric[j, i] += value
+  return metric
+
+
+@wp.func
+def _snh_positive3(A: wp.mat33) -> bool:
+  scale = float(0.0)
+  for row in range(3):
+    for col in range(3):
+      scale = wp.max(scale, wp.abs(A[row, col]))
+  tol = 1.0e-5 * scale
+  if A[0, 0] <= tol:
+    return False
+  pivot = A[1, 1] - A[0, 1] * (A[0, 1] / A[0, 0])
+  if pivot <= tol:
+    return False
+  cross = A[1, 2] - A[0, 1] * (A[0, 2] / A[0, 0])
+  return A[2, 2] - A[0, 2] * (A[0, 2] / A[0, 0]) - cross * (cross / pivot) > tol
+
+
+@wp.func
+def _snh_eigen3(A: wp.mat33) -> tuple[wp.vec3, wp.mat33]:
+  scale = float(0.0)
+  for row in range(3):
+    for col in range(3):
+      scale = wp.max(scale, wp.abs(A[row, col]))
+  Q = wp.identity(3, dtype=float)
+  if scale == 0.0:
+    return wp.vec3(0.0, 0.0, 0.0), Q
+  D = A * (1.0 / scale)
+  if D[0, 1] == 0.0 and D[0, 2] == 0.0 and D[1, 2] == 0.0:
+    return wp.vec3(A[0, 0], A[1, 1], A[2, 2]), Q
+
+  mean = (D[0, 0] + D[1, 1] + D[2, 2]) * (1.0 / 3.0)
+  B = D
+  B[0, 0] -= mean
+  B[1, 1] -= mean
+  B[2, 2] -= mean
+  bscale = float(0.0)
+  for row in range(3):
+    for col in range(3):
+      bscale = wp.max(bscale, wp.abs(B[row, col]))
+  B = B * (1.0 / bscale)
+  p = wp.sqrt(
+    (
+      B[0, 0] * B[0, 0]
+      + B[1, 1] * B[1, 1]
+      + B[2, 2] * B[2, 2]
+      + 2.0 * (B[0, 1] * B[0, 1] + B[0, 2] * B[0, 2] + B[1, 2] * B[1, 2])
+    )
+    * (1.0 / 6.0)
+  )
+  B = B * (1.0 / p)
+  determinant = (
+    B[0, 0] * (B[1, 1] * B[2, 2] - B[1, 2] * B[1, 2])
+    - B[0, 1] * (B[0, 1] * B[2, 2] - B[0, 2] * B[1, 2])
+    + B[0, 2] * (B[0, 1] * B[1, 2] - B[0, 2] * B[1, 1])
+  )
+  r_val = 0.5 * determinant
+
+  root = 2.0 * wp.cos(wp.acos(wp.min(1.0, wp.abs(r_val))) * (1.0 / 3.0))
+  if r_val < 0.0:
+    root = -root
+  B[0, 0] -= root
+  B[1, 1] -= root
+  B[2, 2] -= root
+
+  row0 = B[0]
+  row1 = B[1]
+  row2 = B[2]
+  cr0 = wp.cross(row0, row1)
+  cr1 = wp.cross(row0, row2)
+  cr2 = wp.cross(row1, row2)
+  n0 = wp.dot(cr0, cr0)
+  n1 = wp.dot(cr1, cr1)
+  n2 = wp.dot(cr2, cr2)
+  best_cr = cr0
+  best_n = n0
+  if n1 > best_n:
+    best_cr = cr1
+    best_n = n1
+  if n2 > best_n:
+    best_cr = cr2
+    best_n = n2
+  q = best_cr * (1.0 / wp.sqrt(best_n))
+
+  if wp.abs(q[0]) > wp.abs(q[1]):
+    inv = 1.0 / wp.sqrt(q[0] * q[0] + q[2] * q[2])
+    u = wp.vec3(-q[2] * inv, 0.0, q[0] * inv)
+  else:
+    inv = 1.0 / wp.sqrt(q[1] * q[1] + q[2] * q[2])
+    u = wp.vec3(0.0, q[2] * inv, -q[1] * inv)
+  v = wp.cross(q, u)
+  Du = D * u
+  Dv = D * v
+  Dq = D * q
+
+  a = wp.dot(u, Du)
+  b = wp.dot(u, Dv)
+  c = wp.dot(v, Dv)
+  cosine = 1.0
+  sine = 0.0
+  t = 0.0
+  if b != 0.0:
+    delta = 0.5 * (c - a)
+    wscale = wp.max(wp.abs(delta), wp.abs(b))
+    x = delta / wscale
+    y = b / wscale
+    t = (y if x >= 0.0 else -y) / (wp.abs(x) + wp.sqrt(x * x + y * y))
+    cosine = 1.0 / wp.sqrt(1.0 + t * t)
+    sine = t * cosine
+
+  value = wp.vec3(wp.dot(q, Dq) * scale, (a - t * b) * scale, (c + t * b) * scale)
+  c1 = cosine * u - sine * v
+  c2 = sine * u + cosine * v
+  Q = wp.mat33(q[0], c1[0], c2[0], q[1], c1[1], c2[1], q[2], c1[2], c2[2])
+  return value, Q
+
+
+@wp.func
+def _snh_jacobi_rot(A: wp.mat33, V: wp.mat33, p: int, q: int) -> tuple[wp.mat33, wp.mat33, bool]:
+  pp = A[0, p] * A[0, p] + A[1, p] * A[1, p] + A[2, p] * A[2, p]
+  qq = A[0, q] * A[0, q] + A[1, q] * A[1, q] + A[2, q] * A[2, q]
+  pq = A[0, p] * A[0, q] + A[1, p] * A[1, q] + A[2, p] * A[2, q]
+  if wp.abs(pq) <= 2.0e-6 * wp.sqrt(pp) * wp.sqrt(qq):
+    return A, V, True
+  delta = 0.5 * (qq - pp)
+  t = (pq if delta >= 0.0 else -pq) / (wp.abs(delta) + wp.sqrt(delta * delta + pq * pq))
+  c = 1.0 / wp.sqrt(1.0 + t * t)
+  s = t * c
+  for row in range(3):
+    arp = A[row, p]
+    arq = A[row, q]
+    A[row, p] = c * arp - s * arq
+    A[row, q] = s * arp + c * arq
+    vrp = V[row, p]
+    vrq = V[row, q]
+    V[row, p] = c * vrp - s * vrq
+    V[row, q] = s * vrp + c * vrq
+  return A, V, False
+
+
+@wp.func
+def _snh_swap_cols(A: wp.mat33, V: wp.mat33, s: wp.vec3, p: int, q: int) -> tuple[wp.mat33, wp.mat33, wp.vec3]:
+  if s[q] > s[p]:
+    sp = s[p]
+    s[p] = s[q]
+    s[q] = sp
+    for row in range(3):
+      arp = A[row, p]
+      A[row, p] = A[row, q]
+      A[row, q] = arp
+      vrp = V[row, p]
+      V[row, p] = V[row, q]
+      V[row, q] = vrp
+  return A, V, s
+
+
+@wp.func
+def _snh_svd(F: wp.mat33) -> tuple[wp.mat33, wp.vec3, wp.mat33]:
+  scale = float(0.0)
+  for row in range(3):
+    for col in range(3):
+      scale = wp.max(scale, wp.abs(F[row, col]))
+  A = F * (1.0 / scale) if scale > 0.0 else wp.mat33(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+  V = wp.identity(3, dtype=float)
+  for _ in range(24):
+    A, V, d01 = _snh_jacobi_rot(A, V, 0, 1)
+    A, V, d02 = _snh_jacobi_rot(A, V, 0, 2)
+    A, V, d12 = _snh_jacobi_rot(A, V, 1, 2)
+    if d01 and d02 and d12:
+      break
+
+  s = wp.vec3(
+    A[0, 0] * A[0, 0] + A[1, 0] * A[1, 0] + A[2, 0] * A[2, 0],
+    A[0, 1] * A[0, 1] + A[1, 1] * A[1, 1] + A[2, 1] * A[2, 1],
+    A[0, 2] * A[0, 2] + A[1, 2] * A[1, 2] + A[2, 2] * A[2, 2],
+  )
+  A, V, s = _snh_swap_cols(A, V, s, 0, 1)
+  A, V, s = _snh_swap_cols(A, V, s, 0, 2)
+  A, V, s = _snh_swap_cols(A, V, s, 1, 2)
+
+  if wp.determinant(V) < 0.0:
+    for r in range(3):
+      V[r, 2] = -V[r, 2]
+      A[r, 2] = -A[r, 2]
+
+  u0 = wp.vec3(A[0, 0], A[1, 0], A[2, 0])
+  u1 = wp.vec3(A[0, 1], A[1, 1], A[2, 1])
+  u2 = wp.vec3(A[0, 2], A[1, 2], A[2, 2])
+  s0 = wp.length(u0)
+  if s0 == 0.0:
+    return wp.identity(3, dtype=float), wp.vec3(0.0, 0.0, 0.0), V
+
+  u0 = u0 * (1.0 / s0)
+  u1 = u1 - wp.dot(u0, u1) * u0
+  norm = wp.length(u1)
+  if norm > 1.0e-6 * s0:
+    u1 = u1 * (1.0 / norm)
+  else:
+    axis = int(0)
+    if wp.abs(u0[1]) < wp.abs(u0[axis]):
+      axis = 1
+    if wp.abs(u0[2]) < wp.abs(u0[axis]):
+      axis = 2
+    u1 = wp.vec3(
+      (1.0 if axis == 0 else 0.0) - u0[axis] * u0[0],
+      (1.0 if axis == 1 else 0.0) - u0[axis] * u0[1],
+      (1.0 if axis == 2 else 0.0) - u0[axis] * u0[2],
+    )
+    u1 = wp.normalize(u1)
+
+  u2 = wp.cross(u0, u1)
+  a1 = wp.vec3(A[0, 1], A[1, 1], A[2, 1])
+  a2 = wp.vec3(A[0, 2], A[1, 2], A[2, 2])
+  sigma = wp.vec3(s0, wp.dot(u1, a1), wp.dot(u2, a2)) * scale
+  U = wp.mat33(u0[0], u1[0], u2[0], u0[1], u1[1], u2[1], u0[2], u1[2], u2[2])
+  return U, sigma, V
+
+
+@wp.func
+def snh_project(
+  # Model:
+  flex_vert0: wp.array[wp.vec3],
+  flex_stiffness: wp.array[float],
+  # In:
+  stiffness_adr: int,
+  vbase: int,
+  vert: wp.vec4i,
+  size: wp.vec3,
+  edgevec: mat63,
+  elongation: vec6,
+) -> tuple[wp.mat33, mat43, wp.mat33, wp.vec3, wp.vec3]:
+  v0 = flex_vert0[vbase + vert[0]]
+  v1 = flex_vert0[vbase + vert[1]] - v0
+  v2 = flex_vert0[vbase + vert[2]] - v0
+  v3 = flex_vert0[vbase + vert[3]] - v0
+  rest0 = wp.vec3(2.0 * size[0] * v1[0], 2.0 * size[1] * v1[1], 2.0 * size[2] * v1[2])
+  rest1 = wp.vec3(2.0 * size[0] * v2[0], 2.0 * size[1] * v2[1], 2.0 * size[2] * v2[2])
+  rest2 = wp.vec3(2.0 * size[0] * v3[0], 2.0 * size[1] * v3[1], 2.0 * size[2] * v3[2])
+
+  k21 = flex_stiffness[stiffness_adr + 21]
+  k22 = flex_stiffness[stiffness_adr + 22]
+  k23 = flex_stiffness[stiffness_adr + 23]
+
+  grad0 = wp.cross(rest1, rest2) * k23
+  grad1 = wp.cross(rest2, rest0) * k23
+  grad2 = wp.cross(rest0, rest1) * k23
+
+  F = -wp.outer(edgevec[0], grad0) + wp.outer(edgevec[2], grad1) - wp.outer(edgevec[4], grad2)
+  rotation, sigma, V = _snh_svd(F)
+  VT = wp.transpose(V)
+
+  hg1 = VT * grad0
+  hg2 = VT * grad1
+  hg3 = VT * grad2
+  hg0 = -(hg1 + hg2 + hg3)
+  gradient = mat43()
+  gradient[0] = hg0
+  gradient[1] = hg1
+  gradient[2] = hg2
+  gradient[3] = hg3
+
+  metric = mat66()
+  idx = int(0)
+  for e1 in range(6):
+    for e2 in range(e1, 6):
+      val = flex_stiffness[stiffness_adr + idx]
+      metric[e1, e2] = val
+      metric[e2, e1] = val
+      idx += 1
+
+  tension = vec6(0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+  for e1 in range(6):
+    t_val = float(0.0)
+    for e2 in range(6):
+      t_val += metric[e1, e2] * elongation[e2]
+    tension[e1] = t_val
+  tension = _snh_cubic(tension, elongation, k21)
+  metric = _snh_cubic_metric(metric, elongation, k21)
+
+  vertex = mat43()
+  vertex[0] = wp.vec3(0.0, 0.0, 0.0)
+  vertex[1] = VT * rest0
+  vertex[2] = VT * rest1
+  vertex[3] = VT * rest2
+
+  edges = wp.matrix(0, 1, 1, 2, 2, 0, 2, 3, 0, 3, 1, 3, shape=(6, 2), dtype=int)
+  reference = mat63()
+  sq0 = vec6(0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+  sq1 = vec6(0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+  sq2 = vec6(0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+  for e in range(6):
+    ref_e = vertex[edges[e, 0]] - vertex[edges[e, 1]]
+    reference[e] = ref_e
+    sq0[e] = ref_e[0] * ref_e[0]
+    sq1[e] = ref_e[1] * ref_e[1]
+    sq2[e] = ref_e[2] * ref_e[2]
+
+  prod0 = metric * sq0
+  prod1 = metric * sq1
+  prod2 = metric * sq2
+  geo = wp.vec3(wp.dot(tension, sq0), wp.dot(tension, sq1), wp.dot(tension, sq2))
+
+  J = sigma[0] * sigma[1] * sigma[2]
+  volume_stiffness = 2.0 * k22
+  pressure = volume_stiffness * (J - 1.0)
+  cof = wp.vec3(sigma[1] * sigma[2], sigma[0] * sigma[2], sigma[0] * sigma[1])
+
+  a00 = 2.0 * sigma[0] * sigma[0] * wp.dot(sq0, prod0) + volume_stiffness * cof[0] * cof[0] + geo[0]
+  a11 = 2.0 * sigma[1] * sigma[1] * wp.dot(sq1, prod1) + volume_stiffness * cof[1] * cof[1] + geo[1]
+  a22 = 2.0 * sigma[2] * sigma[2] * wp.dot(sq2, prod2) + volume_stiffness * cof[2] * cof[2] + geo[2]
+  a01 = 2.0 * sigma[0] * sigma[1] * wp.dot(sq0, prod1) + volume_stiffness * cof[0] * cof[1] + pressure * sigma[2]
+  a02 = 2.0 * sigma[0] * sigma[2] * wp.dot(sq0, prod2) + volume_stiffness * cof[0] * cof[2] + pressure * sigma[1]
+  a12 = 2.0 * sigma[1] * sigma[2] * wp.dot(sq1, prod2) + volume_stiffness * cof[1] * cof[2] + pressure * sigma[0]
+  A = wp.mat33(a00, a01, a02, a01, a11, a12, a02, a12, a22)
+
+  if _snh_positive3(A):
+    stretch = A
+  else:
+    eig, Q = _snh_eigen3(A)
+    ev0 = wp.max(0.0, eig[0])
+    ev1 = wp.max(0.0, eig[1])
+    ev2 = wp.max(0.0, eig[2])
+    QD = wp.mat33(
+      Q[0, 0] * ev0,
+      Q[0, 1] * ev1,
+      Q[0, 2] * ev2,
+      Q[1, 0] * ev0,
+      Q[1, 1] * ev1,
+      Q[1, 2] * ev2,
+      Q[2, 0] * ev0,
+      Q[2, 1] * ev1,
+      Q[2, 2] * ev2,
+    )
+    stretch = QD * wp.transpose(Q)
+
+  symmetric = wp.vec3(0.0, 0.0, 0.0)
+  skew = wp.vec3(0.0, 0.0, 0.0)
+  pair_i = wp.vec3i(0, 0, 1)
+  pair_j = wp.vec3i(1, 2, 2)
+  for mode in range(3):
+    ii = pair_i[mode]
+    jj = pair_j[mode]
+    direction = vec6(0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+    for e in range(6):
+      direction[e] = reference[e, ii] * reference[e, jj]
+    response = metric * direction
+    material = wp.dot(direction, response)
+    geometric = 0.5 * (geo[ii] + geo[jj])
+    sum_s = sigma[ii] + sigma[jj]
+    diff_s = sigma[ii] - sigma[jj]
+    cross_s = pressure * sigma[3 - ii - jj]
+    symmetric[mode] = wp.max(0.0, sum_s * sum_s * material + geometric - cross_s)
+    skew[mode] = wp.max(0.0, diff_s * diff_s * material + geometric + cross_s)
+
+  return rotation, gradient, stretch, symmetric, skew
+
+
+@wp.func
+def snh_projected_block(
+  # In:
+  rotation: wp.mat33,
+  gradient: mat43,
+  stretch: wp.mat33,
+  symmetric: wp.vec3,
+  skew: wp.vec3,
+  i: int,
+  j: int,
+) -> wp.mat33:
+  a = gradient[i]
+  b = gradient[j]
+  s0 = 0.5 * (symmetric[0] + skew[0])
+  d0 = 0.5 * (symmetric[0] - skew[0])
+  s1 = 0.5 * (symmetric[1] + skew[1])
+  d1 = 0.5 * (symmetric[1] - skew[1])
+  s2 = 0.5 * (symmetric[2] + skew[2])
+  d2 = 0.5 * (symmetric[2] - skew[2])
+
+  local = wp.mat33(
+    stretch[0, 0] * a[0] * b[0] + s0 * a[1] * b[1] + s1 * a[2] * b[2],
+    stretch[0, 1] * a[0] * b[1] + d0 * a[1] * b[0],
+    stretch[0, 2] * a[0] * b[2] + d1 * a[2] * b[0],
+    stretch[1, 0] * a[1] * b[0] + d0 * a[0] * b[1],
+    stretch[1, 1] * a[1] * b[1] + s0 * a[0] * b[0] + s2 * a[2] * b[2],
+    stretch[1, 2] * a[1] * b[2] + d2 * a[2] * b[1],
+    stretch[2, 0] * a[2] * b[0] + d1 * a[0] * b[2],
+    stretch[2, 1] * a[2] * b[1] + d2 * a[1] * b[2],
+    stretch[2, 2] * a[2] * b[2] + s1 * a[0] * b[0] + s2 * a[1] * b[1],
+  )
+  return rotation * local * wp.transpose(rotation)
+
+
 @wp.kernel
 def _flex_elasticity(
   # Model:
   nflex: int,
   opt_timestep: wp.array[float],
+  body_rootid: wp.array[int],
+  body_weldid: wp.array[int],
+  body_dofnum: wp.array[int],
   flex_dim: wp.array[int],
   flex_vertadr: wp.array[int],
   flex_edgeadr: wp.array[int],
@@ -731,14 +1243,18 @@ def _flex_elasticity(
   flex_vertbodyid: wp.array[int],
   flex_elem: wp.array[int],
   flex_elemedge: wp.array[int],
+  flex_vert0: wp.array[wp.vec3],
   flexedge_length0: wp.array[float],
+  flex_size: wp.array[wp.vec3],
   flex_stiffness: wp.array[float],
   flex_damping: wp.array[float],
   # Data in:
   xipos_in: wp.array2d[wp.vec3],
+  subtree_com_in: wp.array2d[wp.vec3],
   flexvert_xpos_in: wp.array2d[wp.vec3],
   flexedge_length_in: wp.array2d[float],
   flexedge_velocity_in: wp.array2d[float],
+  cvel_in: wp.array2d[wp.spatial_vector],
   # In:
   dsbl_spring: bool,
   dsbl_damper: bool,
@@ -751,14 +1267,11 @@ def _flex_elasticity(
 
   f = int(0)
   local_elemid = int(0)
-  elemnum = int(1)
   for i in range(nflex):
     locid = elemid - flex_elemadr[i]
-    enum = flex_elemnum[i]
-    if locid >= 0 and locid < enum:
+    if locid >= 0 and locid < flex_elemnum[i]:
       f = i
       local_elemid = locid
-      elemnum = enum
       break
 
   stiffness_adr_base = flex_stiffnessadr[f]
@@ -777,7 +1290,6 @@ def _flex_elasticity(
   dim = flex_dim[f]
   nvert = dim + 1
   nedge = 3 if dim == 2 else 6
-  local_elemid = elemid - flex_elemadr[f]
 
   edges = wp.where(
     dim == 1,
@@ -792,45 +1304,48 @@ def _flex_elasticity(
   elem_data_adr = flex_elemdataadr[f] + local_elemid * (dim + 1)
   vbase = flex_vertadr[f]
 
-  # skip trilinear/interp elements (vertbodyid == -1, no simplex stiffness)
-  vert0_check = flex_elem[elem_data_adr]
-  if flex_vertbodyid[vbase + vert0_check] < 0:
-    return
-  gradient = wp.matrix(0.0, shape=(6, 6))
-  for e in range(nedge):
-    vert0 = flex_elem[elem_data_adr + edges[e, 0]]
-    vert1 = flex_elem[elem_data_adr + edges[e, 1]]
-    xpos0 = flexvert_xpos_in[worldid, vbase + vert0]
-    xpos1 = flexvert_xpos_in[worldid, vbase + vert1]
-    for i in range(3):
-      gradient[e, 0 + i] = xpos0[i] - xpos1[i]
-      gradient[e, 3 + i] = xpos1[i] - xpos0[i]
+  elem_verts = wp.vec4i(-1, -1, -1, -1)
+  vert_body = wp.vec4i(-1, -1, -1, -1)
+  vert_xpos = mat43()
+  for v in range(nvert):
+    vert = flex_elem[elem_data_adr + v]
+    gvert = vbase + vert
+    bodyid = flex_vertbodyid[gvert]
+    if v == 0 and bodyid < 0:
+      return
+    elem_verts[v] = vert
+    vert_body[v] = bodyid
+    vert_xpos[v] = flexvert_xpos_in[worldid, gvert]
 
-  elongation_spring = wp.spatial_vectorf(0.0)
-  elongation_damper = wp.spatial_vectorf(0.0)
+  gradient = wp.matrix(0.0, shape=(6, 6))
+  edgevec = mat63()
+  for e in range(nedge):
+    d = vert_xpos[edges[e, 0]] - vert_xpos[edges[e, 1]]
+    edgevec[e] = d
+    for i in range(3):
+      gradient[e, 0 + i] = d[i]
+      gradient[e, 3 + i] = -d[i]
+
+  stiffness_adr = stiffness_adr_base + local_elemid * (FLEX_STIFFNESS_3D if dim == 3 else 21)
+  snh = dim == 3 and FLEX_STIFFNESS_3D == 24 and flex_stiffness[stiffness_adr + 21] != 0.0
+
+  elongation_spring = vec6(0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+  elongation_damper = vec6(0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
   elemedge_adr = flex_elemedgeadr[f] + local_elemid * nedge
   edge_adr = flex_edgeadr[f]
   for e in range(nedge):
     idx = flex_elemedge[elemedge_adr + e]
     e_idx = edge_adr + idx
     deformed = flexedge_length_in[worldid, e_idx]
-    if not dsbl_spring:
+    if not dsbl_spring or (snh and kD > 0.0):
       reference = flexedge_length0[e_idx]
       elongation_spring[e] = deformed * deformed - reference * reference
-    if kD > 0.0:
+    if kD > 0.0 and not snh:
       vel = flexedge_velocity_in[worldid, e_idx]
       dL = vel * timestep
       elongation_damper[e] = dL * (2.0 * deformed - dL) * kD
 
   metric = wp.matrix(0.0, shape=(6, 6))
-  stiffness_end = flex_stiffness.shape[0]
-  for i in range(f + 1, nflex):
-    next_adr = flex_stiffnessadr[i]
-    if next_adr >= 0:
-      stiffness_end = next_adr
-      break
-  stiffness_size = int((stiffness_end - stiffness_adr_base) / elemnum)
-  stiffness_adr = stiffness_adr_base + local_elemid * stiffness_size
   id = int(0)
   for ed1 in range(nedge):
     for ed2 in range(ed1, nedge):
@@ -839,8 +1354,8 @@ def _flex_elasticity(
       metric[ed2, ed1] = val
       id += 1
 
-  force_spring = wp.matrix(0.0, shape=(6, 3))
-  force_damper = wp.matrix(0.0, shape=(6, 3))
+  tension_spring = vec6(0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+  tension_damper = vec6(0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
   for ed2 in range(nedge):
     s_val = float(0.0)
     d_val = float(0.0)
@@ -848,20 +1363,71 @@ def _flex_elasticity(
       m_val = metric[ed1, ed2]
       s_val += elongation_spring[ed1] * m_val
       d_val += elongation_damper[ed1] * m_val
+    tension_spring[ed2] = s_val
+    tension_damper[ed2] = d_val
+
+  if snh and not dsbl_spring:
+    tension_spring = _snh_cubic(tension_spring, elongation_spring, flex_stiffness[stiffness_adr + 21])
+
+  force_spring = wp.matrix(0.0, shape=(6, 3))
+  force_damper = wp.matrix(0.0, shape=(6, 3))
+  for ed2 in range(nedge):
+    s_val = tension_spring[ed2]
+    d_val = tension_damper[ed2]
     for i in range(2):
       vi = edges[ed2, i]
       for x in range(3):
         g_val = gradient[ed2, 3 * i + x]
         if not dsbl_spring:
           force_spring[vi, x] -= s_val * g_val
-        if kD > 0.0:
+        if kD > 0.0 and not snh:
           force_damper[vi, x] -= d_val * g_val
 
+  if snh:
+    if not dsbl_spring:
+      J, vol_grad = _snh_volume(edgevec, flex_stiffness[stiffness_adr + 23])
+      pressure = 2.0 * flex_stiffness[stiffness_adr + 22] * (J - 1.0)
+      for v in range(4):
+        gv = vol_grad[v]
+        for x in range(3):
+          force_spring[v, x] -= pressure * gv[x]
+
+    if kD > 0.0:
+      rotation, proj_grad, stretch, symmetric, skew = snh_project(
+        flex_vert0,
+        flex_stiffness,
+        stiffness_adr,
+        vbase,
+        elem_verts,
+        flex_size[f],
+        edgevec,
+        elongation_spring,
+      )
+      vel_v = mat43()
+      for j in range(4):
+        bodyid_j = vert_body[j]
+        if bodyid_j >= 0 and body_dofnum[body_weldid[bodyid_j]] > 0:
+          cvel_j = cvel_in[worldid, bodyid_j]
+          omega_j = wp.spatial_top(cvel_j)
+          vcom_j = wp.spatial_bottom(cvel_j)
+          com_j = subtree_com_in[worldid, body_rootid[bodyid_j]]
+          r_j = vert_xpos[j] - com_j
+          vel_v[j] = vcom_j + wp.cross(omega_j, r_j)
+        else:
+          vel_v[j] = wp.vec3(0.0, 0.0, 0.0)
+
+      damp = flex_damping[f]
+      for i in range(4):
+        hv = wp.vec3(0.0, 0.0, 0.0)
+        for j in range(4):
+          blk = snh_projected_block(rotation, proj_grad, stretch, symmetric, skew, i, j)
+          hv += blk * vel_v[j]
+        for x in range(3):
+          force_damper[i, x] -= damp * hv[x]
+
   for v in range(nvert):
-    vert = flex_elem[elem_data_adr + v]
-    gvert = vbase + vert
-    bodyid = flex_vertbodyid[gvert]
-    node_pos = flexvert_xpos_in[worldid, gvert]
+    bodyid = vert_body[v]
+    node_pos = vert_xpos[v]
     body_xipos = xipos_in[worldid, bodyid]
     offset = body_xipos - node_pos
     if not dsbl_spring:
@@ -1881,6 +2447,9 @@ def passive(m: Model, d: Data):
       inputs=[
         m.nflex,
         m.opt.timestep,
+        m.body_rootid,
+        m.body_weldid,
+        m.body_dofnum,
         m.flex_dim,
         m.flex_vertadr,
         m.flex_edgeadr,
@@ -1892,13 +2461,17 @@ def passive(m: Model, d: Data):
         m.flex_vertbodyid,
         m.flex_elem,
         m.flex_elemedge,
+        m.flex_vert0,
         m.flexedge_length0,
+        m.flex_size,
         m.flex_stiffness,
         m.flex_damping,
         d.xipos,
+        d.subtree_com,
         d.flexvert_xpos,
         d.flexedge_length,
         d.flexedge_velocity,
+        d.cvel,
         dsbl_spring,
         dsbl_damper,
       ],

@@ -30,6 +30,7 @@ from mujoco_warp._src import collision_core
 from mujoco_warp._src import collision_flex
 from mujoco_warp._src import io
 from mujoco_warp._src import types
+from mujoco_warp._src import util_pkg
 
 _TOLERANCE = 5e-4
 
@@ -841,6 +842,131 @@ class FlexPassiveForcesTest(parameterized.TestCase):
       )
 
   @parameterized.parameters(1, 2)
+  def test_flex_3d_snh_passive(self, nworld):
+    """Tests 3D Stable Neo-Hookean spring forces and PSD-projected Rayleigh damping."""
+    if not util_pkg.check_version("mujoco>=3.14.1.dev989511280"):
+      return
+    mjm, mjd, m, d = test_data.fixture(
+      xml="""
+      <mujoco>
+        <option integrator="discrete" timestep="0.01" gravity="0 0 0"/>
+        <worldbody>
+          <body name="v0" pos="0 0 0">
+            <inertial pos="0 0 0" mass="1" diaginertia="1 1 1"/>
+            <joint type="slide" axis="1 0 0"/>
+            <joint type="slide" axis="0 1 0"/>
+            <joint type="slide" axis="0 0 1"/>
+          </body>
+          <body name="v1" pos="1 0 0">
+            <inertial pos="0 0 0" mass="1" diaginertia="1 1 1"/>
+            <joint type="slide" axis="1 0 0"/>
+            <joint type="slide" axis="0 1 0"/>
+            <joint type="slide" axis="0 0 1"/>
+          </body>
+          <body name="v2" pos="0 1 0">
+            <inertial pos="0 0 0" mass="1" diaginertia="1 1 1"/>
+            <joint type="slide" axis="1 0 0"/>
+            <joint type="slide" axis="0 1 0"/>
+            <joint type="slide" axis="0 0 1"/>
+          </body>
+          <body name="v3" pos="0 0 1">
+            <inertial pos="0 0 0" mass="1" diaginertia="1 1 1"/>
+            <joint type="slide" axis="1 0 0"/>
+            <joint type="slide" axis="0 1 0"/>
+            <joint type="slide" axis="0 0 1"/>
+          </body>
+        </worldbody>
+        <deformable>
+          <flex name="tet" dim="3" body="v0 v1 v2 v3"
+                vertex="0 0 0  0 0 0  0 0 0  0 0 0" element="0 1 2 3">
+            <elasticity young="1200" poisson="0.3" damping="0.1"/>
+            <contact selfcollide="none"/>
+          </flex>
+        </deformable>
+      </mujoco>
+      """,
+      nworld=nworld,
+    )
+
+    young, poisson = 1200.0, 0.3
+    mu = young / (2.0 * (1.0 + poisson))
+    la = young * poisson / ((1.0 + poisson) * (1.0 - 2.0 * poisson))
+    face = ((2, 1, 0), (0, 1, 3), (1, 2, 3), (2, 0, 3))
+    edge2face = ((2, 3), (1, 3), (2, 1), (1, 0), (0, 2), (0, 3))
+    verts = 2.0 * mjm.flex_size[0] * mjm.flex_vert0
+    v = mjm.flex_elem[:4]
+    vol = np.dot(np.cross(verts[v[1]] - verts[v[0]], verts[v[2]] - verts[v[0]]), verts[v[3]] - verts[v[0]]) / 6.0
+    vol0 = abs(vol)
+    basis = np.zeros((6, 3, 3), dtype=np.float64)
+    for e, (fl, fr) in enumerate(edge2face):
+      fL, fR = face[fl], face[fr]
+      nL = np.cross(verts[v[fL[1]]] - verts[v[fL[0]]], verts[v[fL[2]]] - verts[v[fL[0]]])
+      nR = np.cross(verts[v[fR[1]]] - verts[v[fR[0]]], verts[v[fR[2]]] - verts[v[fR[0]]])
+      basis[e] = (np.outer(nL, nR) + np.outer(nR, nL)) / (72.0 * vol * vol)
+    trE = np.trace(basis, axis1=1, axis2=2)
+    trEE = np.einsum("eij,fji->ef", basis, basis)
+    K_snh = mu * vol0 * (trEE - np.outer(trE, trE))
+    mjm.flex_stiffness[:21] = K_snh[np.triu_indices(6)]
+    mjm.flex_stiffness[21] = -mu / (72.0 * vol0)
+    mjm.flex_stiffness[22] = vol0 * (la + 2.0 * mu) / 2.0
+    mjm.flex_stiffness[23] = 1.0 / (6.0 * vol)
+    m.flex_stiffness.assign(mjm.flex_stiffness)
+
+    # Inverted and collapsed configurations where unprojected SNH Hessian is indefinite
+    qpos = np.zeros((nworld, mjm.nq), dtype=np.float32)
+    qvel = np.zeros((nworld, mjm.nv), dtype=np.float32)
+    qpos[0, 11] = -1.7
+    qvel[0] = np.array([0.3, -0.4, 0.2, -0.5, 0.2, -0.1, 0.4, -0.3, 0.5, -0.2, 0.6, -0.8], dtype=np.float32)
+    mjds = [mjd]
+    if nworld == 2:
+      qpos[1] = np.array([0.05, -0.02, 0.03, 0.12, 0.04, -0.05, -0.03, 0.08, 0.02, 0.04, -0.06, -1.0], dtype=np.float32)
+      qvel[1] = np.array([-0.2, 0.5, -0.3, 0.4, -0.1, 0.3, -0.5, 0.2, -0.4, 0.3, -0.7, 0.9], dtype=np.float32)
+      mjds.append(mujoco.MjData(mjm))
+
+    d.qpos.assign(qpos)
+    d.qvel.assign(qvel)
+    for arr in (d.qfrc_spring, d.qfrc_damper, d.qfrc_passive):
+      arr.fill_(wp.inf)
+
+    mjw.kinematics(m, d)
+    mjw.com_pos(m, d)
+    mjw.flex(m, d)
+    mjw.com_vel(m, d)
+    mjw.passive(m, d)
+
+    for w in range(nworld):
+      mjds[w].qpos[:] = qpos[w]
+      mjds[w].qvel[:] = qvel[w]
+      mujoco.mj_kinematics(mjm, mjds[w])
+      mujoco.mj_comPos(mjm, mjds[w])
+      mujoco.mj_flex(mjm, mjds[w])
+      mujoco.mj_fwdVelocity(mjm, mjds[w])
+      mujoco.mj_passive(mjm, mjds[w])
+
+      np.testing.assert_allclose(
+        d.qfrc_spring.numpy()[w],
+        mjds[w].qfrc_spring,
+        atol=_TOLERANCE,
+        err_msg=f"SNH qfrc_spring mismatch for world {w}",
+      )
+      # Under pure reflection (world 0), SNH produces a restoring force in +z on v3
+      if w == 0:
+        self.assertGreater(float(d.qfrc_spring.numpy()[w, 11]), 0.0)
+
+      # PSD-projected SNH Rayleigh damping must be strictly dissipative (v^T f_damper <= 0)
+      power = float(np.dot(qvel[w], d.qfrc_damper.numpy()[w]))
+      self.assertLess(power, 0.0)
+      np.testing.assert_allclose(
+        d.qfrc_passive.numpy()[w],
+        d.qfrc_spring.numpy()[w] + d.qfrc_damper.numpy()[w],
+        atol=1e-5,
+      )
+
+    if nworld == 2:
+      self.assertFalse(np.allclose(d.qfrc_spring.numpy()[0], d.qfrc_spring.numpy()[1]))
+      self.assertFalse(np.allclose(d.qfrc_damper.numpy()[0], d.qfrc_damper.numpy()[1]))
+
+  @parameterized.parameters(1, 2)
   def test_flex_welded_child_vertex_passive(self, nworld):
     """Tests 2D flex passive forces when a vertex sits on a welded 0-DOF child body."""
     mjm, mjd, m, d = test_data.fixture(
@@ -1233,20 +1359,6 @@ class FlexPassiveForcesTest(parameterized.TestCase):
       mjd1.qvel[:] = qvel[1]
       mujoco.mj_forward(mjm, mjd1)
       mjds.append(mjd1)
-
-    # Ensure 3D flex (flex 0) uses a 24-coefficient stride per element in m.flex_stiffness
-    nelem0 = int(mjm.flex_elemnum[0])
-    adr2 = int(mjm.flex_stiffnessadr[2])
-    stride0 = adr2 // nelem0
-    if stride0 == 21:
-      stiff_np = mjm.flex_stiffness
-      tet_stiff = stiff_np[:adr2].reshape(nelem0, 21)
-      tet_stiff_24 = np.pad(tet_stiff, ((0, 0), (0, 3)), mode="constant")
-      new_stiff = np.concatenate([tet_stiff_24.reshape(-1), stiff_np[adr2:]])
-      new_adr = mjm.flex_stiffnessadr.copy()
-      new_adr[2] = 24 * nelem0
-      m.flex_stiffness = wp.array(new_stiff, dtype=float)
-      m.flex_stiffnessadr = wp.array(new_adr, dtype=int)
 
     for arr in (d.qfrc_spring, d.qfrc_damper, d.qfrc_passive):
       arr.fill_(wp.inf)

@@ -20,6 +20,8 @@ import mujoco
 import numpy as np
 import warp as wp
 
+from mujoco_warp._src import util_pkg
+
 MJ_MINVAL = mujoco.mjMINVAL
 MJ_MAXVAL = mujoco.mjMAXVAL
 MJ_MINIMP = mujoco.mjMINIMP  # minimum constraint impedance
@@ -27,6 +29,7 @@ MJ_MAXIMP = mujoco.mjMAXIMP  # maximum constraint impedance
 MJ_MAXCONPAIR = mujoco.mjMAXCONPAIR
 MJ_MINMU = mujoco.mjMINMU  # minimum friction
 MJ_MINAWAKE = mujoco.mjMINAWAKE  # minimum number of timesteps before sleeping
+FLEX_STIFFNESS_3D = 24 if util_pkg.check_version("mujoco>=3.14.1.dev989511280") else 21
 # maximum size (by number of edges) of an horizon in EPA algorithm
 MJ_MAX_EPAHORIZON = 24
 # maximum average number of trianglarfaces EPA can insert at each iteration
@@ -1292,6 +1295,7 @@ class Model:
     flexedge_length0: edge lengths in qpos0                  (nflexedge,)
     flexedge_invweight0: inv. inertia for the edge           (nflexedge,)
     flex_radius: radius around primitive element             (nflex,)
+    flex_size: vertex bounding box half sizes in qpos0       (nflex, 3)
     flex_stiffness: finite element stiffness matrix          (nflexstiffness,)
     flex_bending: bending stiffness                          (nflexbending,)
     efm0_dofid: zero-mass flex DOF indices                   (nefm0dof,)
@@ -1822,6 +1826,7 @@ class Model:
   flexedge_length0: array("nflexedge", float)
   flexedge_invweight0: array("nflexedge", float)
   flex_radius: array("nflex", float)
+  flex_size: array("nflex", wp.vec3)
   flex_stiffness: array("nflexstiffness", float)
   flex_bending: array("nflexbending", float)
   efm0_dofid: array("nefm0dof", int)

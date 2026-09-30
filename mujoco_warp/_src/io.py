@@ -531,7 +531,13 @@ def put_model(mjm: mujoco.MjModel, batch_sizes: dict[str, int] | None = None) ->
     (mjm.flex_interp[f] != 0 or mjm.flex_edgeequality[f] != 2)
     and mjm.flex_stiffnessadr[f] >= 0
     and not mjm.flex_rigid[f]
-    and np.any(mjm.flex_stiffness[mjm.flex_stiffnessadr[f] : mjm.flex_stiffnessadr[f] + 21 * mjm.flex_elemnum[f]] != 0)
+    and np.any(
+      mjm.flex_stiffness[
+        mjm.flex_stiffnessadr[f] : mjm.flex_stiffnessadr[f]
+        + (types.FLEX_STIFFNESS_3D if mjm.flex_dim[f] == 3 else 21) * mjm.flex_elemnum[f]
+      ]
+      != 0
+    )
     for f in range(mjm.nflex)
   )
   m.efm0_active = bool(mjm.nefm0dof > 0 and not has_stretch_or_interp and not m.has_flex_passive)
