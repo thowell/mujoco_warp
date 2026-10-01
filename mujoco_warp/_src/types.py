@@ -20,8 +20,6 @@ import mujoco
 import numpy as np
 import warp as wp
 
-from mujoco_warp._src import util_pkg
-
 MJ_MINVAL = mujoco.mjMINVAL
 MJ_MAXVAL = mujoco.mjMAXVAL
 MJ_MINIMP = mujoco.mjMINIMP  # minimum constraint impedance
@@ -29,7 +27,7 @@ MJ_MAXIMP = mujoco.mjMAXIMP  # maximum constraint impedance
 MJ_MAXCONPAIR = mujoco.mjMAXCONPAIR
 MJ_MINMU = mujoco.mjMINMU  # minimum friction
 MJ_MINAWAKE = mujoco.mjMINAWAKE  # minimum number of timesteps before sleeping
-FLEX_STIFFNESS_3D = 24 if util_pkg.check_version("mujoco>=3.14.1.dev989511280") else 21
+FLEX_STIFFNESS_3D = 24
 # maximum size (by number of edges) of an horizon in EPA algorithm
 MJ_MAX_EPAHORIZON = 24
 # maximum average number of trianglarfaces EPA can insert at each iteration
@@ -1307,6 +1305,7 @@ class Model:
     flex_edgestiffness: edge stiffness                       (nflex,)
     flex_edgedamping: edge damping                           (nflex,)
     flex_edgeequality: edge equality type (0:none,1:edge,2:vert,3:strain) (nflex,)
+    flex_rigid: flex is rigid (all vertices on same body)    (nflex,)
     flexedge_rigid: edge is rigid (e.g. vertices welded to same body) (nflexedge,)
     flex_centered: flex vertices are centered at body origin (nflex,)
     flexedge_J_rownnz: number of nonzeros in Jacobian row    (nflexedge,)
@@ -1484,6 +1483,8 @@ class Model:
     has_sdf_geom: whether the model contains SDF geoms
     has_flex_selfcollide: whether any flex has self-collision enabled
     has_flex_passive: whether any flex has passive contact enabled
+    has_flex_snh: whether any flex uses 3D SNH elasticity
+    has_non_simple_flex: whether any flex has non-simple vertex bodies
     has_tendon_stiffness: whether any tendon has positive stiffness
     has_tendon_damping: whether any tendon has positive damping
     has_efm_actuator: whether any actuator contributes effective metric coupling
@@ -1589,6 +1590,7 @@ class Model:
     flex_vertflexid: maps each vertex index directly to its flexid          (nflexvert,)
     flex_shelladr: maps each flex to its start shell index                  (nflex,)
     flex_faceadr: maps each flex to its start face index                    (nflex,)
+    flex_simple: whether all vertices of flex are on simple bodies          (nflex,)
     flex_cell_map: precomputed flex cell mapping (nflexintcell,)
     flexstrain_J_rownnz: number of nonzeros in flex strain Jacobian row     (neq_flexstrain,)
     flexstrain_J_rowadr: row start address in colind array (neq_flexstrain,)
@@ -1838,6 +1840,7 @@ class Model:
   flex_edgestiffness: array("nflex", float)
   flex_edgedamping: array("nflex", float)
   flex_edgeequality: array("nflex", int)
+  flex_rigid: array("nflex", bool)
   flexedge_rigid: array("nflexedge", bool)
   flex_centered: array("nflex", bool)
   flexedge_J_rownnz: array("nflexedge", int)
@@ -2012,6 +2015,8 @@ class Model:
   has_sdf_geom: bool
   has_flex_selfcollide: bool
   has_flex_passive: bool
+  has_flex_snh: bool
+  has_non_simple_flex: bool
   has_tendon_stiffness: bool
   has_tendon_damping: bool
   has_efm_actuator: bool
@@ -2111,6 +2116,7 @@ class Model:
   flex_vertflexid: array("nflexvert", int)
   flex_shelladr: array("nflex", int)
   flex_faceadr: array("nflex", int)
+  flex_simple: array("nflex", bool)
   flex_cell_map: array("nflexintcell", wp.vec4i)
   flexstrain_J_rownnz: array("neq_flexstrain", int)
   flexstrain_J_rowadr: array("neq_flexstrain", int)
@@ -2290,6 +2296,9 @@ class Data:
     cdof: com-based motion axis of each dof (rot:lin)           (nworld, nv, 6)
     cinert: com-based body inertia and mass                     (nworld, nbody, 10)
     flexvert_xpos: cartesian flex vertex positions              (nworld, nflexvert, 3)
+    flex_hessian_valid: whether flex stretch Hessian is current (nworld, nflex)
+    flexvert_hessian: diagonal 3x3 blocks of stretch Hessian    (nworld, nflexvert, 6)
+    flexedge_hessian: off-diagonal 3x3 blocks of stretch Hessian (nworld, nflexedge, 3, 3)
     flexedge_J: edge length Jacobian                            (nworld, nJfe)
     flexedge_length: flex edge lengths                          (nworld, nflexedge)
     ten_wrapadr: start address of tendon's path                 (nworld, ntendon)
@@ -2451,6 +2460,9 @@ class Data:
   cdof: array("nworld", "nv", wp.spatial_vector)
   cinert: array("nworld", "nbody", vec10)
   flexvert_xpos: array("nworld", "nflexvert", wp.vec3)
+  flex_hessian_valid: array("nworld", "nflex", bool)
+  flexvert_hessian: array("nworld", "nflexvert", vec6)
+  flexedge_hessian: array("nworld", "nflexedge", wp.mat33)
   flexedge_J: array("nworld", "nJfe", float)
   flexedge_length: array("nworld", "nflexedge", float)
   ten_wrapadr: array("nworld", "ntendon", int)
