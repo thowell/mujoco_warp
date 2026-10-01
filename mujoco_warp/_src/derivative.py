@@ -3752,12 +3752,13 @@ def _eff_factor_folded_blocks(
 
 
 @event_scope
-def eff_prec_fold(m: Model, d: Data, out: Optional[wp.array] = None) -> wp.array:
+def eff_prec_fold(m: Model, d: Data, out: Optional[wp.array] = None, epB: Optional[wp.array] = None) -> wp.array:
   """Folds rank-1 metric terms and active/inactive efc rows into 3x3 preconditioner blocks."""
   epL = out if out is not None else wp.empty_like(d.efm_L)
   if m.nefmdof == 0:
     return epL
-  epB = wp.empty_like(d.efm_L)
+  if epB is None:
+    epB = wp.empty_like(d.efm_L)
   dofblk = m.efm_dofblk
 
   wp.launch(
