@@ -26,6 +26,7 @@ from mujoco_warp._src import history
 from mujoco_warp._src import sleep
 from mujoco_warp._src import support
 from mujoco_warp._src import types
+from mujoco_warp._src import util_pkg
 from mujoco_warp._src import warp_util
 from mujoco_warp._src.collision_driver import MJ_COLLISION_TABLE
 from mujoco_warp._src.set_const import set_const as set_const
@@ -511,7 +512,8 @@ def put_model(mjm: mujoco.MjModel, batch_sizes: dict[str, int] | None = None) ->
     mjm.nflex > 0 and np.any((mjm.flex_passive != 0) & (mjm.flex_rigid == 0) & (mjm.flex_interp == 0) & (mjm.flex_dim >= 2))
   )
   m.has_flex_snh = bool(
-    any(
+    types.FLEX_STIFFNESS_3D == 24
+    and any(
       mjm.flex_interp[f] == 0
       and mjm.flex_dim[f] == 3
       and mjm.flex_stiffnessadr[f] >= 0
@@ -2503,7 +2505,7 @@ def get_data_into(
     result.flexedge_J[:] = d.flexedge_J.numpy()[world_id].reshape(-1)
   result.flexedge_length[:] = d.flexedge_length.numpy()[world_id]
   result.flexedge_velocity[:] = d.flexedge_velocity.numpy()[world_id]
-  if mjm.nflex > 0:
+  if mjm.nflex > 0 and util_pkg.check_version("mujoco>=3.14.1.dev990351372"):
     result.flex_hessian_valid[:] = d.flex_hessian_valid.numpy()[world_id]
     result.flexvert_hessian[:] = d.flexvert_hessian.numpy()[world_id]
     result.flexedge_hessian[:] = d.flexedge_hessian.numpy()[world_id].reshape((-1, 9))

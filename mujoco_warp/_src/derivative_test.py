@@ -26,6 +26,7 @@ from mujoco_warp import test_data
 from mujoco_warp._src import derivative
 from mujoco_warp._src import forward
 from mujoco_warp._src import types
+from mujoco_warp._src import util_pkg
 
 # tolerance for difference between MuJoCo and mjwarp smooth calculations - mostly
 # due to float precision
@@ -1405,6 +1406,10 @@ class DerivativeTest(parameterized.TestCase):
       self.assertFalse(np.allclose(d.efm_K_val.numpy()[0], d.efm_K_val.numpy()[1]))
       self.assertFalse(np.allclose(d.efm_c.numpy()[0], d.efm_c.numpy()[1]))
 
+  @absltest.skipIf(
+    not util_pkg.check_version("mujoco>=3.14.1.dev990351372"),
+    "Requires MuJoCo >= 3.14.1.dev990351372",
+  )
   @parameterized.product(
     config=["deformed", "collapsed", "inverted"],
     nworld=[1, 2],
@@ -2560,6 +2565,10 @@ class DerivativeTest(parameterized.TestCase):
     if nworld == 2:
       self.assertFalse(np.allclose(d.qacc_smooth.numpy()[0], d.qacc_smooth.numpy()[1]))
 
+  @absltest.skipIf(
+    not util_pkg.check_version("mujoco>=3.14.1.dev990351372"),
+    "Requires MuJoCo >= 3.14.1.dev990351372",
+  )
   @parameterized.product(
     solver=(mujoco.mjtSolver.mjSOL_CG, mujoco.mjtSolver.mjSOL_NEWTON),
     nworld=(1, 2),
@@ -2609,6 +2618,10 @@ class DerivativeTest(parameterized.TestCase):
       self.assertGreater(z_final, 0.9)
       np.testing.assert_allclose(qpos_final[w], 0.0, atol=5e-2)
 
+  @absltest.skipIf(
+    not util_pkg.check_version("mujoco>=3.14.1.dev990351372"),
+    "Requires MuJoCo >= 3.14.1.dev990351372",
+  )
   @parameterized.product(
     case=((2, False), (3, False), (3, True)),
     nworld=(1, 2),
@@ -2752,6 +2765,10 @@ class DerivativeTest(parameterized.TestCase):
       mjw.forward(m, d)
       self.assertFalse(bool(np.any(d.flex_hessian_valid.numpy())))
 
+  @absltest.skipIf(
+    not util_pkg.check_version("mujoco>=3.14.1.dev990351372"),
+    "Requires MuJoCo >= 3.14.1.dev990351372",
+  )
   @parameterized.parameters(1, 2)
   def test_snh_stiffness_through_inversion(self, nworld):
     """Tests two-tetrahedron SNH stiffness matrix and damping across rank collapse and inversion."""
@@ -2918,6 +2935,10 @@ class DerivativeTest(parameterized.TestCase):
         if nworld == 2 and rank < 3:
           self.assertFalse(np.allclose(d.efm_K_val.numpy()[0], d.efm_K_val.numpy()[1]))
 
+  @absltest.skipIf(
+    not util_pkg.check_version("mujoco>=3.14.1.dev990351372"),
+    "Requires MuJoCo >= 3.14.1.dev990351372",
+  )
   @parameterized.parameters(0.0, 0.3, 0.499)
   def test_snh_projection_spectral_reference(self, poisson):
     """Tests SNH PSD projection across spectral cases (repeated, negative, near-zero, zero SVs)."""
@@ -3062,6 +3083,10 @@ class DerivativeTest(parameterized.TestCase):
         trans_sum = K_dense[:, axis::3].sum(axis=1)
         self.assertLessEqual(float(np.linalg.norm(trans_sum)) / norm_F, 1e-5)
 
+  @absltest.skipIf(
+    not util_pkg.check_version("mujoco>=3.14.1.dev990351372"),
+    "Requires MuJoCo >= 3.14.1.dev990351372",
+  )
   @parameterized.product(
     case=((2, False), (3, False), (3, True), ("mixed", True)),
     nworld=(1, 2),
@@ -3212,6 +3237,10 @@ class DerivativeTest(parameterized.TestCase):
     if nworld == 2:
       self.assertFalse(np.allclose(d.qacc.numpy()[0], d.qacc.numpy()[1]))
 
+  @absltest.skipIf(
+    not util_pkg.check_version("mujoco>=3.14.1.dev990351372"),
+    "Requires MuJoCo >= 3.14.1.dev990351372",
+  )
   @parameterized.product(
     case=("hinge", "ball", "free", "reordered_slides", "moving_ancestor"),
     nworld=(1, 2),

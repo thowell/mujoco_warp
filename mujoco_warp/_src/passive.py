@@ -1714,7 +1714,7 @@ def _flex_hessian_elem(
   ebase = flex_edgeadr[f]
   ee_base = flex_elemedgeadr[f] + local_elemid * nedge
   stiffness_adr = flex_stiffnessadr[f] + local_elemid * (FLEX_STIFFNESS_3D if dim == 3 else 21)
-  snh = dim == 3 and flex_stiffness[stiffness_adr + 21] != 0.0
+  snh = wp.static(FLEX_STIFFNESS_3D == 24) and dim == 3 and flex_stiffness[stiffness_adr + 21] != 0.0
 
   elem_verts = wp.vec4i(-1, -1, -1, -1)
   vert_xpos = mat43()
@@ -1908,7 +1908,7 @@ def _flex_stretch_mul_scale(
   if flex_stiffness[stiffness_adr] == 0.0:
     return 0.0
   if snh_only:
-    if flex_dim[f] != 3 or flex_stiffness[stiffness_adr + 21] == 0.0:
+    if not wp.static(FLEX_STIFFNESS_3D == 24) or flex_dim[f] != 3 or flex_stiffness[stiffness_adr + 21] == 0.0:
       return 0.0
   timestep = opt_timestep[worldid % opt_timestep.shape[0]]
   if use_timestep:
@@ -2390,7 +2390,7 @@ def _flex_elasticity(
   nedge = 3 if dim == 2 else 6
 
   stiffness_adr = stiffness_adr_base + local_elemid * (FLEX_STIFFNESS_3D if dim == 3 else 21)
-  snh = dim == 3 and flex_stiffness[stiffness_adr + 21] != 0.0
+  snh = wp.static(FLEX_STIFFNESS_3D == 24) and dim == 3 and flex_stiffness[stiffness_adr + 21] != 0.0
   if snh and dsbl_spring:
     return
 

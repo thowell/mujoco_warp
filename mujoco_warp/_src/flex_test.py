@@ -30,6 +30,7 @@ from mujoco_warp._src import collision_core
 from mujoco_warp._src import collision_flex
 from mujoco_warp._src import io
 from mujoco_warp._src import types
+from mujoco_warp._src import util_pkg
 
 _TOLERANCE = 5e-4
 
@@ -840,6 +841,10 @@ class FlexPassiveForcesTest(parameterized.TestCase):
         err_msg=f"qfrc_passive mismatch for world {w}",
       )
 
+  @absltest.skipIf(
+    not util_pkg.check_version("mujoco>=3.14.1.dev990351372"),
+    "Requires MuJoCo >= 3.14.1.dev990351372",
+  )
   @parameterized.parameters(1, 2)
   def test_flex_3d_snh_passive(self, nworld):
     """Tests 3D Stable Neo-Hookean spring forces and PSD-projected Rayleigh damping."""
@@ -1368,6 +1373,10 @@ class FlexPassiveForcesTest(parameterized.TestCase):
     if nworld == 2:
       self.assertFalse(np.allclose(d.qfrc_passive.numpy()[0], d.qfrc_passive.numpy()[1]))
 
+  @absltest.skipIf(
+    not util_pkg.check_version("mujoco>=3.14.1.dev990351372"),
+    "Requires MuJoCo >= 3.14.1.dev990351372",
+  )
   @parameterized.product(
     winding=[
       ("positive", "0 1 2 3"),
@@ -1542,6 +1551,8 @@ class FlexPassiveForcesTest(parameterized.TestCase):
   def test_flex_stretch_damping_and_disable_flags(self, case, nworld):
     """Tests stretch damping at zero/nonzero velocity and DisableBit.SPRING/DAMPER decoupling."""
     dim, snh = case
+    if snh and not util_pkg.check_version("mujoco>=3.14.1.dev990351372"):
+      self.skipTest("Requires MuJoCo >= 3.14.1.dev990351372")
 
     elem_str = "0 1 2" if dim == 2 else "0 1 2 3"
     body_str = "v0 v1 v2" if dim == 2 else "v0 v1 v2 v3"
@@ -1691,6 +1702,10 @@ class FlexPassiveForcesTest(parameterized.TestCase):
       np.testing.assert_allclose(d.qfrc_damper.numpy()[w], 0.0, atol=1e-6)
       np.testing.assert_allclose(d.qfrc_passive.numpy()[w], 0.0, atol=1e-6)
 
+  @absltest.skipIf(
+    not util_pkg.check_version("mujoco>=3.14.1.dev990351372"),
+    "Requires MuJoCo >= 3.14.1.dev990351372",
+  )
   @parameterized.parameters(1, 2)
   def test_flex_3d_stvk_vs_snh_reflection(self, nworld):
     """Tests that reflection produces zero force in 3D StVK but restoring force in 3D SNH."""

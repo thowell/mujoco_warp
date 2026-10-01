@@ -31,6 +31,7 @@ from mujoco_warp import GainType
 from mujoco_warp import IntegratorType
 from mujoco_warp import SolverType
 from mujoco_warp import test_data
+from mujoco_warp._src import util_pkg
 
 # tolerance for difference between MuJoCo and mjwarp smooth calculations - mostly
 # due to float precision
@@ -2985,6 +2986,10 @@ class DiscreteIntegratorTest(parameterized.TestCase):
     if nworld == 2:
       self.assertFalse(np.allclose(d.qacc.numpy()[0], d.qacc.numpy()[1]))
 
+  @absltest.skipIf(
+    not util_pkg.check_version("mujoco>=3.14.1.dev990351372"),
+    "Requires MuJoCo >= 3.14.1.dev990351372",
+  )
   def test_snh_requires_discrete_integrator(self):
     """Verifies that 3D SNH flex requires integrator='discrete' in put_model and forward/step."""
     spec = mujoco.MjSpec.from_string(
@@ -3049,6 +3054,10 @@ class DiscreteIntegratorTest(parameterized.TestCase):
       )
       mjw.forward(m_stvk, d_stvk)
 
+  @absltest.skipIf(
+    not util_pkg.check_version("mujoco>=3.14.1.dev990351372"),
+    "Requires MuJoCo >= 3.14.1.dev990351372",
+  )
   @absltest.skipIf(not wp.get_device().is_cuda, "requires CUDA device")
   @parameterized.parameters(1, 2)
   def test_discrete_snh_graph_capture(self, nworld):
