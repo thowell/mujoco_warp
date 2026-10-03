@@ -1727,7 +1727,7 @@ def _solve_init_jaref_kernel(is_sparse: bool, nv: int, dofs_per_thread: int, com
   return kernel
 
 
-@wp.kernel
+@wp.kernel(module="unique")
 def _solve_init_search_cg_tiled(
   # Model:
   nv: int,
@@ -2288,7 +2288,7 @@ def _update_gradient_grad(stable_fast: bool):
   return kernel
 
 
-@wp.kernel
+@wp.kernel(module="unique")
 def _update_gradient_grad_tiled(
   # Model:
   nv: int,
@@ -3271,16 +3271,10 @@ def _JTDACJ_sparse(
   return kernel
 
 
-def _jtdaj_groups_per_world(nworld: int, njmax: int, kernel: wp.Kernel | None = None) -> int:
+def _jtdaj_groups_per_world(nworld: int, njmax: int, kernel: wp.Kernel) -> int:
   # njmax is capacity and often mostly empty, so cap slots at a few resident waves.
-  device = wp.get_device()
-  if device.is_cpu:
-    device_warps = 1
-  else:
-    if kernel is None:
-      kernel = _JTDACJ_sparse(False, types.ConeType.PYRAMIDAL, 3)
-    block_size, min_grid_size = wp.get_suggested_block_size(kernel, device)
-    device_warps = max(1, block_size * min_grid_size // _JTDAJ_THREADS_PER_GROUP)
+  block_size, min_grid_size = wp.get_suggested_block_size(kernel)
+  device_warps = max(1, block_size * min_grid_size // _JTDAJ_THREADS_PER_GROUP)
   return max(1, min(njmax, _JTDAJ_OVERSUBSCRIBE_WAVES * device_warps // nworld))
 
 
@@ -3530,9 +3524,10 @@ def _update_gradient_incremental(m: types.Model, d: types.Data, ctx: SolverConte
   sc = _sparse_compact(ctx)
   if m.is_sparse or sc:
     dj = ctx.compact_d_full if sc else d
-    slots = _jtdaj_groups_per_world(d.nworld, ctx.quad_changed_ids.shape[1])
+    inc_kernel = _update_gradient_h_incremental_sparse(sc)
+    slots = _jtdaj_groups_per_world(d.nworld, ctx.quad_changed_ids.shape[1], inc_kernel)
     wp.launch(
-      _update_gradient_h_incremental_sparse(sc),
+      inc_kernel,
       dim=(d.nworld, slots, _JTDAJ_THREADS_PER_GROUP),
       inputs=[
         dj.efc.J_rownnz,
@@ -3579,7 +3574,7 @@ def _update_gradient_incremental(m: types.Model, d: types.Data, ctx: SolverConte
     )
 
 
-@wp.kernel
+@wp.kernel(module="unique")
 def _solve_search_update_cg_tiled(
   # Model:
   nv: int,

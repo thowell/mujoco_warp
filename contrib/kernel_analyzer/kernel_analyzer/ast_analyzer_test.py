@@ -562,6 +562,25 @@ def launch_it():
     self.assertEqual(len(shared_issues), 1, shared_issues)
     self.assertEqual(shared_issues[0].kernel, "bad_shared_kernel")
 
+  def test_shared_kernel_launch_tiled_custom_block_dim_raises_issue(self):
+    """Shared kernel launched via launch_tiled with block_dim must raise issue."""
+    code = """
+import warp as wp
+
+@wp.kernel
+def bad_tiled_kernel(x: int):
+  pass
+
+def launch_it():
+  wp.launch_tiled(bad_tiled_kernel, dim=1, inputs=[1], block_dim=64)
+  wp.launch_tiled(kernel=bad_tiled_kernel, dim=1, inputs=[1], block_dim=64)
+"""
+    issues = ast_analyzer.analyze(code, "test.py", "")
+    shared_issues = [i for i in issues if isinstance(i, ast_analyzer.SharedModuleCustomBlockDim)]
+    self.assertEqual(len(shared_issues), 2, shared_issues)
+    self.assertEqual(shared_issues[0].kernel, "bad_tiled_kernel")
+    self.assertEqual(shared_issues[1].kernel, "bad_tiled_kernel")
+
   def test_unique_kernel_custom_block_dim_no_issue(self):
     """Kernel with module='unique' launched with custom block_dim raises no issue."""
     code = """
@@ -573,24 +592,6 @@ def ok_unique_kernel(x: int):
 
 def launch_it():
   wp.launch(ok_unique_kernel, dim=1, inputs=[1], block_dim=64)
-"""
-    issues = ast_analyzer.analyze(code, "test.py", "")
-    shared_issues = [i for i in issues if isinstance(i, ast_analyzer.SharedModuleCustomBlockDim)]
-    self.assertEqual(len(shared_issues), 0, shared_issues)
-
-  def test_module_level_block_dim_allows_shared_launch(self):
-    """Module-level wp.set_module_options(block_dim=...) allows shared launch."""
-    code = """
-import warp as wp
-
-wp.set_module_options({"block_dim": 64})
-
-@wp.kernel
-def ok_shared_kernel(x: int):
-  pass
-
-def launch_it():
-  wp.launch(ok_shared_kernel, dim=1, inputs=[1], block_dim=64)
 """
     issues = ast_analyzer.analyze(code, "test.py", "")
     shared_issues = [i for i in issues if isinstance(i, ast_analyzer.SharedModuleCustomBlockDim)]

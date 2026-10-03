@@ -17,7 +17,6 @@ from typing import Tuple
 
 import warp as wp
 
-from mujoco_warp._src import types
 from mujoco_warp._src.math import safe_div
 from mujoco_warp._src.types import MJ_MAXVAL
 from mujoco_warp._src.types import MJ_MINVAL
@@ -27,7 +26,7 @@ from mujoco_warp._src.types import Model
 from mujoco_warp._src.types import RenderContext
 from mujoco_warp._src.types import vec6
 
-wp.set_module_options({"block_dim": types.BlockDim.ray, "enable_backward": False, "default_grid_stride": False})
+wp.set_module_options({"enable_backward": False, "default_grid_stride": False})
 
 # Widen ray prune bounds so a coincident hit survives to the closest-hit tie-break.
 RAY_TOL_REL = 1.0e-6
@@ -912,7 +911,7 @@ def _ray_geom_mesh(
     return -1.0, wp.vec3()
 
 
-@wp.kernel
+@wp.kernel(module="unique")
 def _ray(
   # Model:
   ngeom: int,
@@ -1330,5 +1329,4 @@ def rays(
         rc.hfield_bvh_id,
       ],
       outputs=[dist, geomid, normal],
-      block_dim=m.block_dim.ray,
     )

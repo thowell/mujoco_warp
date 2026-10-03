@@ -109,10 +109,7 @@ class MissingModuleUnique(Issue):
 @dataclasses.dataclass
 class SharedModuleCustomBlockDim(Issue):
   def __str__(self):
-    return (
-      f'"{self.kernel}" is launched with custom block_dim but shares a module. '
-      'Use @wp.kernel(module="unique") or module-level wp.set_module_options(block_dim=...).'
-    )
+    return f'"{self.kernel}" is launched with custom block_dim but shares a module. Use @wp.kernel(module="unique").'
 
 
 @dataclasses.dataclass
@@ -330,6 +327,8 @@ def analyze(source: str, filename: str, type_source: str) -> List[Issue]:
     """Check if decorator is wp.func."""
     return name and (name == "wp.func" or name.startswith("wp.func("))
 
+  top_kernels: dict[str, bool] = {}
+
   def _analyze_function(node: ast.FunctionDef, is_nested: bool):
     """Analyze a function definition for kernel issues."""
     # Recursively check nested functions first
@@ -347,9 +346,13 @@ def analyze(source: str, filename: str, type_source: str) -> List[Issue]:
       return  # not a kernel/func
 
     # Nested wp.kernel must have module="unique" (wp.func doesn't need it)
-    if is_nested and _is_kernel(decorator):
-      if 'module="unique"' not in decorator and "module='unique'" not in decorator:
-        issues.append(MissingModuleUnique(node, node.name))
+    if _is_kernel(decorator):
+      has_unique = 'module="unique"' in decorator or "module='unique'" in decorator
+      if is_nested:
+        if not has_unique:
+          issues.append(MissingModuleUnique(node, node.name))
+      else:
+        top_kernels[node.name] = has_unique
 
     _analyze_kernel(node)
 
@@ -604,67 +607,25 @@ def analyze(source: str, filename: str, type_source: str) -> List[Issue]:
         if inner is not sub_node and _is_wp_call(inner):
           issues.append(WarpCallInStatic(inner, ""))
 
-  # Check module-level wp.set_module_options(block_dim=...)
-  has_module_block_dim = False
-  for stmt in tree.body:
-    if isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Call):
-      func = stmt.value.func
-      if (
-        isinstance(func, ast.Attribute)
-        and func.attr == "set_module_options"
-        and isinstance(func.value, ast.Name)
-        and func.value.id == "wp"
-      ):
-        for kw in stmt.value.keywords:
-          if kw.arg == "block_dim":
-            has_module_block_dim = True
-        if stmt.value.args and isinstance(stmt.value.args[0], ast.Dict):
-          for k in stmt.value.args[0].keys:
-            if isinstance(k, ast.Constant) and k.value == "block_dim":
-              has_module_block_dim = True
-
-  def _is_kernel_dec(d: ast.AST) -> tuple[bool, bool]:
-    is_k = False
-    is_unique = False
-    if isinstance(d, ast.Attribute) and d.attr == "kernel":
-      if isinstance(d.value, ast.Name) and d.value.id == "wp":
-        is_k = True
-    elif isinstance(d, ast.Call):
-      func = d.func
-      if (
-        isinstance(func, ast.Attribute) and func.attr == "kernel" and isinstance(func.value, ast.Name) and func.value.id == "wp"
-      ):
-        is_k = True
-        for kw in d.keywords:
-          if kw.arg == "module" and isinstance(kw.value, ast.Constant) and kw.value.value == "unique":
-            is_unique = True
-    return is_k, is_unique
-
-  top_kernels = {}
-  for stmt in tree.body:
-    if isinstance(stmt, ast.FunctionDef):
-      for d in stmt.decorator_list:
-        is_k, is_unique = _is_kernel_dec(d)
-        if is_k:
-          top_kernels[stmt.name] = is_unique
-          break
-
-  # Check wp.launch calls with custom block_dim
+  # Check wp.launch and wp.launch_tiled calls with custom block_dim
   for sub_node in ast.walk(tree):
     if isinstance(sub_node, ast.Call):
       func = sub_node.func
       if (
-        isinstance(func, ast.Attribute) and func.attr == "launch" and isinstance(func.value, ast.Name) and func.value.id == "wp"
+        isinstance(func, ast.Attribute)
+        and func.attr in ("launch", "launch_tiled")
+        and isinstance(func.value, ast.Name)
+        and func.value.id == "wp"
       ):
         has_launch_bdim = any(kw.arg == "block_dim" for kw in sub_node.keywords)
-        if has_launch_bdim and sub_node.args:
-          first_arg = sub_node.args[0]
+        if has_launch_bdim:
+          first_arg = (
+            sub_node.args[0] if sub_node.args else next((kw.value for kw in sub_node.keywords if kw.arg == "kernel"), None)
+          )
           if isinstance(first_arg, ast.Name):
             target_name = first_arg.id
-            if target_name in top_kernels:
-              is_unique = top_kernels[target_name]
-              if not is_unique and not has_module_block_dim:
-                issues.append(SharedModuleCustomBlockDim(sub_node, target_name))
+            if target_name in top_kernels and not top_kernels[target_name]:
+              issues.append(SharedModuleCustomBlockDim(sub_node, target_name))
 
   # skip issues in ignored lines
   ignore_lines = set()
