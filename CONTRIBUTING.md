@@ -10,9 +10,10 @@
 
 ## Development Setup
 
+See the [README](README.md#tips-for-developers) for developer setup:
+
 ```bash
-uv venv && source .venv/bin/activate
-uv pip install -e .[dev]
+uv sync --all-extras
 uv run pre-commit install
 ```
 
@@ -23,9 +24,10 @@ uv run pre-commit install
 ## Code Style & Warp GPU Conventions
 
 - Line length limit is 128 characters. Docstring length limit is 100 characters.
-- All new source files must begin with the Apache 2.0 copyright header (`# Copyright 2026 The Newton Developers`).
+- All new source files must begin with the Apache 2.0 license header (copy it from an existing file and use the current year).
 - **Pre-commit & kernel analyzer:** Run `uv run pre-commit run --all-files`. For GPU kernels, follow parameter conventions
-  (`_in` for inputs, `_out` for outputs, matching `Model`/`Data` field order) and avoid `# kernel_analyzer: off` blocks.
+  (`_in` for inputs, `_out` for outputs, matching `Model`/`Data` field order) and avoid `# kernel_analyzer: off` blocks
+  unless necessary, with a comment explaining why.
 - **Global memory traffic:** Reads and writes to device global memory (`wp.array`) are expensive:
   - Hoist global array reads (`m.*`, `d.*`) into local variables (registers) before loops; minimize global memory writes.
   - Hoist loop-invariant calculations and precompute reciprocals outside loops (e.g. `inv_h = 1.0 / float(h)`).
@@ -40,44 +42,43 @@ uv run pre-commit install
 
 - **Test coverage for fixes and features:** PRs fixing a bug or adding a feature should generally include at least one test that
   fails on main (before the change) and passes with the PR. For bug fixes, this reproduces the issue; for new features, this
-  verifies the added functionality.
+  verifies the added functionality. Prefer targeted, efficient tests over exhaustive edge-case coverage.
 - **Inline XML in `test_data.fixture`:** Always use `test_data.fixture(xml="""...""")` with the XML string literal passed
   directly. Do not assign an intermediate `xml = ...` variable or use standalone `.xml` files unless testing multi-asset scenes.
 - **Pre-fill tested fields:** Because `test_data.fixture` initializes `d` with MuJoCo CPU values, reset tested output fields to
   `wp.inf` (floats) or `-1` (ints) before calling the function under test (e.g. `d.sensordata.fill_(wp.inf)`).
-- **Multi-world batching (`nworld: 1, 2`):** Parameterize new tests with `@parameterized.parameters(1, 2)`. When `nworld == 2`,
-  perturb world 1 so the worlds are heterogeneous, evaluate per-world CPU references, and assert world 0 and world 1 outputs are
-  not identical.
+- **Multi-world batching (`nworld: 1, 2`):** For changes that touch per-world indexing or batched `Model`/`Data` fields,
+  parameterize tests with `@parameterized.parameters(1, 2)`. When `nworld == 2`, perturb world 1 so the worlds are
+  heterogeneous, evaluate per-world CPU references, and assert world 0 and world 1 outputs are not identical.
 - **Parity against CPU:** Compare outputs against upstream CPU reference by invoking corresponding `mujoco.mj_*` functions
-  (`mj_forward`, `mj_sensorPos`, `mjd_smooth_vel`) using standard tolerances (`rtol=1e-5, atol=1e-5`).
+  (`mj_forward`, `mj_sensorPos`, `mj_step`) using standard tolerances (`rtol=1e-5, atol=1e-5`).
 - **Non-degenerate scenes:** Ensure test scenes include non-zero velocities (`fixture(qvel_noise=...)`) or rotations when
   testing velocity-dependent, spatial, or gyroscopic terms.
 - **Rendering tests:** Assert analytical geometric invariants (camera ray projection math, bounds) rather than brittle
   pixel-level comparisons.
-- **Dependencies:** Avoid `mock`, `SimpleNamespace`, or repo directory traversals (`__file__.parents`). Use `etils.epath` where
-  path handling is needed.
+- **Dependencies:** Avoid `mock` unless faking hardware or environment state, and avoid `SimpleNamespace` or repo directory
+  traversals (`__file__.parents`). Use `etils.epath` where path handling is needed.
 
 ## Contributing Benchmarks
 
-Benchmarks live under `benchmarks/<name>/`:
+Benchmarks live under `benchmarks/<name>/`; see [benchmarks/README.md](benchmarks/README.md) for configuration details
+(`BENCHMARKS` and `ASSETS` in `__init__.py`):
 
 ```
 benchmarks/<name>/
 ├── __init__.py           # Defines BENCHMARKS and optional ASSETS lists
 ├── <model>.xml           # MJCF XML model file
 ├── <trajectory>.npz      # (Optional) Control trajectory replay sequence
-├── rollout_<name>.webp   # Visual animation of benchmark rollout
+├── *.webp                # Visual animation of benchmark rollout (e.g. rollout.webp)
 └── README.md             # Overview, model properties table, and rollout preview
 ```
 
-- **Configuration:** Define `BENCHMARKS = [{...}]` in `__init__.py` with `name`, `mjcf`, `nworld` (typically 2048–8192),
-  `nconmax`, and `njmax` (and optional `nccdmax`, `nvmax`, `replay`, `assets`).
 - **Rendering & sleeping:** For vision benchmarks, set `"function": "render"` and define camera parameters. For sleeping
   benchmarks, set `override="opt.enableflags=SLEEP"` and `init_asleep=True`.
-- **Zero buffer overflow:** Benchmarks must run with zero overflow (`warn_overflow = 0` and `converged_worlds == nworld`).
-  Overflows drop contacts/constraints and distort throughput numbers.
-- **External assets:** Large meshes and assets must be fetched via shallow git clones defined in `ASSETS` and mapped in `assets`.
-  Never commit large asset packs directly to git.
+- **Zero buffer overflow:** Benchmarks must run without overflow (testspeed's default `--overflow_behavior=error` aborts on
+  overflow) and with `converged_worlds == nworld`. Overflows drop contacts/constraints and distort throughput numbers.
+- **External assets:** Large meshes and assets must be fetched via shallow git clones defined in `ASSETS` and mapped in
+  `assets`. Never commit large asset packs directly to git.
 - **Deterministic replay:** Dynamic benchmarks should supply an `.npz` control replay trajectory.
 - **Documentation:** Provide a `README.md` with scenario description, property table (Bodies, DOFs, Actuators, Geoms, Timestep,
   Solver, Integrator, Matrix Format), and an embedded `.webp` rollout animation.
