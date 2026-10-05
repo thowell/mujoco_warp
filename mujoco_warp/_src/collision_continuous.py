@@ -809,66 +809,88 @@ def ipc_init_geom_features_kernel(
               edge_geom_out[worldid, nge] = gi
             nge += 1
 
-  ngv_out[worldid] = wp.min(ngv, max_c)
-  nge_out[worldid] = wp.min(nge, max_e)
+  ngv_out[worldid] = ngv
+  nge_out[worldid] = nge
 
 
-@wp.kernel
-def ipc_update_geom_features_kernel(
-  # Model:
-  geom_type: wp.array[int],
-  geom_size: wp.array2d[wp.vec3],
-  # Data in:
-  geom_xpos_in: wp.array2d[wp.vec3],
-  geom_xmat_in: wp.array2d[wp.mat33],
-  # In:
-  ngv: wp.array[int],
-  nge: wp.array[int],
-  geom_corner_loc: wp.array2d[wp.vec3],
-  corner_geom: wp.array2d[int],
-  geom_edge_loc: wp.array3d[wp.vec3],
-  edge_geom: wp.array2d[int],
-  # Out:
-  geom_corners_out: wp.array2d[wp.vec3],
-  geom_edges_out: wp.array3d[wp.vec3],
-):
-  """Transforms static geom corners and edges into world space (mjc_GeomVerts, mjc_GeomEdges)."""
-  worldid, idx = wp.tid()
-  ngv_w = wp.min(ngv[worldid], geom_corners_out.shape[1])
-  nge_w = wp.min(nge[worldid], geom_edges_out.shape[1])
+@cache_kernel
+def ipc_update_geom_features_kernel(warn_overflow: int):
+  @wp.kernel(module="unique", enable_backward=False)
+  def kernel(
+    # Model:
+    geom_type: wp.array[int],
+    geom_size: wp.array2d[wp.vec3],
+    # Data in:
+    geom_xpos_in: wp.array2d[wp.vec3],
+    geom_xmat_in: wp.array2d[wp.mat33],
+    # In:
+    ngv: wp.array[int],
+    nge: wp.array[int],
+    geom_corner_loc: wp.array2d[wp.vec3],
+    corner_geom: wp.array2d[int],
+    geom_edge_loc: wp.array3d[wp.vec3],
+    edge_geom: wp.array2d[int],
+    # Data out:
+    overflow_out: wp.array[int],
+    # Out:
+    geom_corners_out: wp.array2d[wp.vec3],
+    geom_edges_out: wp.array3d[wp.vec3],
+  ):
+    """Transforms static geom corners and edges into world space (mjc_GeomVerts, mjc_GeomEdges)."""
+    worldid, idx = wp.tid()
+    max_c = geom_corners_out.shape[1]
+    max_e = geom_edges_out.shape[1]
+    ngv_raw = ngv[worldid]
+    nge_raw = nge[worldid]
+    if idx == 0 and (ngv_raw > max_c or nge_raw > max_e):
+      if wp.static(bool(warn_overflow & OverflowType.BROADPHASE)):
+        wp.printf(
+          "IPC static geom feature overflow (ngv=%u/%u, nge=%u/%u)\n"
+          "To disable the print warning: m.opt.warn_overflow &= ~mjw.OverflowType.BROADPHASE (or = 0 for all)\n",
+          ngv_raw,
+          max_c,
+          nge_raw,
+          max_e,
+        )
+      wp.atomic_or(overflow_out, worldid, wp.static(OverflowType.BROADPHASE))
 
-  sz_w = worldid % geom_size.shape[0]
-  if idx < ngv_w:
-    gi = corner_geom[worldid, idx]
-    gt = geom_type[gi]
-    gp = geom_xpos_in[worldid, gi]
-    gR = geom_xmat_in[worldid, gi]
-    loc = geom_corner_loc[worldid, idx]
-    if gt == int(GeomType.CAPSULE):
-      gsz = geom_size[sz_w, gi]
-      loc = wp.vec3(0.0, 0.0, loc[2] * gsz[1])
-    elif gt == int(GeomType.BOX):
-      gsz = geom_size[sz_w, gi]
-      loc = wp.vec3(loc[0] * gsz[0], loc[1] * gsz[1], loc[2] * gsz[2])
-    geom_corners_out[worldid, idx] = gp + gR * loc
+    ngv_w = wp.min(ngv_raw, max_c)
+    nge_w = wp.min(nge_raw, max_e)
 
-  if idx < nge_w:
-    gi = edge_geom[worldid, idx]
-    gt = geom_type[gi]
-    gp = geom_xpos_in[worldid, gi]
-    gR = geom_xmat_in[worldid, gi]
-    loc0 = geom_edge_loc[worldid, idx, 0]
-    loc1 = geom_edge_loc[worldid, idx, 1]
-    if gt == int(GeomType.CAPSULE):
-      gsz = geom_size[sz_w, gi]
-      loc0 = wp.vec3(0.0, 0.0, loc0[2] * gsz[1])
-      loc1 = wp.vec3(0.0, 0.0, loc1[2] * gsz[1])
-    elif gt == int(GeomType.BOX):
-      gsz = geom_size[sz_w, gi]
-      loc0 = wp.vec3(loc0[0] * gsz[0], loc0[1] * gsz[1], loc0[2] * gsz[2])
-      loc1 = wp.vec3(loc1[0] * gsz[0], loc1[1] * gsz[1], loc1[2] * gsz[2])
-    geom_edges_out[worldid, idx, 0] = gp + gR * loc0
-    geom_edges_out[worldid, idx, 1] = gp + gR * loc1
+    sz_w = worldid % geom_size.shape[0]
+    if idx < ngv_w:
+      gi = corner_geom[worldid, idx]
+      gt = geom_type[gi]
+      gp = geom_xpos_in[worldid, gi]
+      gR = geom_xmat_in[worldid, gi]
+      loc = geom_corner_loc[worldid, idx]
+      if gt == int(GeomType.CAPSULE):
+        gsz = geom_size[sz_w, gi]
+        loc = wp.vec3(0.0, 0.0, loc[2] * gsz[1])
+      elif gt == int(GeomType.BOX):
+        gsz = geom_size[sz_w, gi]
+        loc = wp.vec3(loc[0] * gsz[0], loc[1] * gsz[1], loc[2] * gsz[2])
+      geom_corners_out[worldid, idx] = gp + gR * loc
+
+    if idx < nge_w:
+      gi = edge_geom[worldid, idx]
+      gt = geom_type[gi]
+      gp = geom_xpos_in[worldid, gi]
+      gR = geom_xmat_in[worldid, gi]
+      loc0 = geom_edge_loc[worldid, idx, 0]
+      loc1 = geom_edge_loc[worldid, idx, 1]
+      if gt == int(GeomType.CAPSULE):
+        gsz = geom_size[sz_w, gi]
+        loc0 = wp.vec3(0.0, 0.0, loc0[2] * gsz[1])
+        loc1 = wp.vec3(0.0, 0.0, loc1[2] * gsz[1])
+      elif gt == int(GeomType.BOX):
+        gsz = geom_size[sz_w, gi]
+        loc0 = wp.vec3(loc0[0] * gsz[0], loc0[1] * gsz[1], loc0[2] * gsz[2])
+        loc1 = wp.vec3(loc1[0] * gsz[0], loc1[1] * gsz[1], loc1[2] * gsz[2])
+      geom_edges_out[worldid, idx, 0] = gp + gR * loc0
+      geom_edges_out[worldid, idx, 1] = gp + gR * loc1
+
+  return kernel
 
 
 @wp.kernel
@@ -902,7 +924,7 @@ def ipc_update_geom_aabbs_kernel(
 def ipc_update_geom_features(m: Model, d: Data, ws: Any):
   """Updates world-space static geom corners, edges, and AABBs across all worlds."""
   wp.launch(
-    ipc_update_geom_features_kernel,
+    ipc_update_geom_features_kernel(int(m.opt.warn_overflow)),
     dim=(d.nworld, max(ws.max_ngv, ws.max_nge)),
     inputs=[
       m.geom_type,
@@ -917,6 +939,7 @@ def ipc_update_geom_features(m: Model, d: Data, ws: Any):
       ws.edge_geom,
     ],
     outputs=[
+      d.overflow,
       ws.geom_corners,
       ws.geom_edges,
     ],

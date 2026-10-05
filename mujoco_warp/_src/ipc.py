@@ -551,8 +551,8 @@ def get_ipc_workspace(
   nconmax = max(d.naconmax // nworld, 1)
   nccdmax = max(d.naccdmax // nworld, 1)
   max_chain = max(min(m.njnt, m.nv), 1)
-  max_ngv = max(8 * m.ngeom + m.nmeshvert, 1)
-  max_nge = max(12 * m.ngeom + m.nmeshpolyvert, 1)
+  max_ngv = max(m.ngeom * max(8, m.nmeshvert), 1)
+  max_nge = max(m.ngeom * max(12, m.nmeshpolyvert), 1)
   max_aset = nconmax if m.nflexvert > 0 else 1
   max_cand = nccdmax if m.nflexvert > 0 else 1
 

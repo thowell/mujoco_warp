@@ -609,6 +609,69 @@ class ContinuousCollisionTest(parameterized.TestCase):
       self.assertEqual(int(ws.ncand.numpy()[1]), 0)
       self.assertEqual(int(d.overflow.numpy()[1]), 0)
 
+  @parameterized.parameters(1, 2)
+  def test_multi_instance_mesh_features_and_overflow(self, nworld):
+    """Verifies per-geom-instance mesh feature capacity and overflow reporting."""
+    angles = np.linspace(0.0, 2.0 * np.pi, 16, endpoint=False)
+    verts = []
+    for z in (-0.02, 0.02):
+      for a in angles:
+        verts.append(f"{0.1 * np.cos(a):.6f} {0.1 * np.sin(a):.6f} {z:.6f}")
+    vert_str = "  ".join(verts)
+
+    _, _, m, d = test_data.fixture(
+      xml=f"""
+      <mujoco>
+        <option integrator="discrete" solver="CG">
+          <flag ipc="enable"/>
+        </option>
+        <asset>
+          <mesh name="prism" vertex="{vert_str}"/>
+        </asset>
+        <worldbody>
+          <geom name="p0" type="mesh" mesh="prism" pos="-0.3 0 0"/>
+          <geom name="p1" type="mesh" mesh="prism" pos="0 0 0"/>
+          <geom name="p2" type="mesh" mesh="prism" pos="0.3 0 0"/>
+          <flexcomp name="cloth" type="grid" dim="2" count="2 2 1"
+                    spacing="0.05 0.05 1" radius="0.005" mass="0.05" pos="0 0 0.05">
+            <contact selfcollide="none"/>
+          </flexcomp>
+        </worldbody>
+      </mujoco>
+      """,
+      nworld=nworld,
+    )
+    ws = ipc.get_ipc_workspace(m, d)
+    d.overflow.zero_()
+    cc.ipc_update_geom_features(m, d, ws)
+
+    for w in range(nworld):
+      self.assertEqual(int(ws.ngv.numpy()[w]), 96)
+      self.assertEqual(int(ws.nge.numpy()[w]), 144)
+      self.assertEqual(int(d.overflow.numpy()[w]), 0)
+      corner_geoms = ws.corner_geom.numpy()[w, :96]
+      edge_geoms = ws.edge_geom.numpy()[w, :144]
+      self.assertEqual([int((corner_geoms == gi).sum()) for gi in range(3)], [32, 32, 32])
+      self.assertEqual([int((edge_geoms == gi).sum()) for gi in range(3)], [48, 48, 48])
+
+    # Undersized feature buffers report OverflowType.BROADPHASE and preserve unclamped counts
+    ws.max_ngv = 56
+    ws.max_nge = 132
+    ws.geom_corner_loc = wp.empty((nworld, 56), dtype=wp.vec3, device=d.qpos.device)
+    ws.geom_corners = wp.empty((nworld, 56), dtype=wp.vec3, device=d.qpos.device)
+    ws.corner_geom = wp.empty((nworld, 56), dtype=int, device=d.qpos.device)
+    ws.geom_edge_loc = wp.empty((nworld, 132, 2), dtype=wp.vec3, device=d.qpos.device)
+    ws.geom_edges = wp.empty((nworld, 132, 2), dtype=wp.vec3, device=d.qpos.device)
+    ws.edge_geom = wp.empty((nworld, 132), dtype=int, device=d.qpos.device)
+
+    d.overflow.zero_()
+    ipc.ipc_init_topology(m, ws)
+    cc.ipc_update_geom_features(m, d, ws)
+    for w in range(nworld):
+      self.assertEqual(int(ws.ngv.numpy()[w]), 96)
+      self.assertEqual(int(ws.nge.numpy()[w]), 144)
+      self.assertTrue(bool(int(d.overflow.numpy()[w]) & int(OverflowType.BROADPHASE)))
+
 
 if __name__ == "__main__":
   absltest.main()

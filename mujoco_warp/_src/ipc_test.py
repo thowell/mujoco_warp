@@ -121,19 +121,33 @@ class IpcTest(parameterized.TestCase):
       """,
       nworld=nworld,
     )
+    qpos0 = d.qpos.numpy().copy()
     if nworld == 2:
-      qpos = d.qpos.numpy()
-      qpos[1] += 0.01
-      d.qpos = wp.array(qpos, dtype=float, device=d.qpos.device)
+      qpos0[1] += 0.01
 
     # Drive vertices straight down at 50 m/s
-    qvel = d.qvel.numpy()
+    qvel0 = d.qvel.numpy().copy()
     for w in range(nworld):
       for i in range(2, m.nv, 3):
-        qvel[w, i] = -50.0
-    d.qvel = wp.array(qvel, dtype=float, device=d.qvel.device)
+        qvel0[w, i] = -50.0
 
+    # Negative control: with contact disabled, cloth tunnels below z = 0 at step endpoint
+    m.opt.disableflags |= mjw.DisableBit.CONTACT
+    wp.copy(d.qpos, wp.array(qpos0, dtype=float, device=d.qpos.device))
+    wp.copy(d.qvel, wp.array(qvel0, dtype=float, device=d.qvel.device))
     mjw.step(m, d)
+    mjw.kinematics(m, d)
+    mjw.flex(m, d)
+    for w in range(nworld):
+      self.assertLess(float(np.min(d.flexvert_xpos.numpy()[w, :, 2])), 0.0)
+
+    # With IPC contact enabled, cloth is stopped above z = 0 at committed step endpoint
+    m.opt.disableflags &= ~mjw.DisableBit.CONTACT
+    wp.copy(d.qpos, wp.array(qpos0, dtype=float, device=d.qpos.device))
+    wp.copy(d.qvel, wp.array(qvel0, dtype=float, device=d.qvel.device))
+    mjw.step(m, d)
+    mjw.kinematics(m, d)
+    mjw.flex(m, d)
 
     for w in range(nworld):
       flexvert_xpos = d.flexvert_xpos.numpy()[w]
@@ -166,18 +180,32 @@ class IpcTest(parameterized.TestCase):
       """,
       nworld=nworld,
     )
+    qpos0 = d.qpos.numpy().copy()
     if nworld == 2:
-      qpos = d.qpos.numpy()
-      qpos[1] += 0.01
-      d.qpos = wp.array(qpos, dtype=float, device=d.qpos.device)
+      qpos0[1] += 0.01
 
-    qvel = d.qvel.numpy()
+    qvel0 = d.qvel.numpy().copy()
     for w in range(nworld):
       for i in range(2, m.nv, 3):
-        qvel[w, i] = -50.0
-    d.qvel = wp.array(qvel, dtype=float, device=d.qvel.device)
+        qvel0[w, i] = -50.0
 
+    # Negative control: with contact disabled, cloth tunnels below z = 0.02 at step endpoint
+    m.opt.disableflags |= mjw.DisableBit.CONTACT
+    wp.copy(d.qpos, wp.array(qpos0, dtype=float, device=d.qpos.device))
+    wp.copy(d.qvel, wp.array(qvel0, dtype=float, device=d.qvel.device))
     mjw.step(m, d)
+    mjw.kinematics(m, d)
+    mjw.flex(m, d)
+    for w in range(nworld):
+      self.assertLess(float(np.min(d.flexvert_xpos.numpy()[w, :, 2])), 0.02)
+
+    # With IPC contact enabled, cloth is stopped above z = 0.02 at committed step endpoint
+    m.opt.disableflags &= ~mjw.DisableBit.CONTACT
+    wp.copy(d.qpos, wp.array(qpos0, dtype=float, device=d.qpos.device))
+    wp.copy(d.qvel, wp.array(qvel0, dtype=float, device=d.qvel.device))
+    mjw.step(m, d)
+    mjw.kinematics(m, d)
+    mjw.flex(m, d)
 
     for w in range(nworld):
       flexvert_xpos = d.flexvert_xpos.numpy()[w]
