@@ -1110,6 +1110,108 @@ class DerivativeTest(parameterized.TestCase):
       err_msg="stateful should converge to stateless as te->0",
     )
 
+  @parameterized.parameters(1, 2)
+  def test_dcmotor_thermal_derivative(self, nworld):
+    """Verify hot winding resistance is used for stateless and stateful DC motor derivatives."""
+    mjm, mjd, m, d = test_data.fixture(
+      xml="""
+      <mujoco>
+        <option integrator="implicitfast"/>
+        <worldbody>
+          <body>
+            <joint name="sl_bemf" type="slide"/>
+            <geom size="0.1" mass="1"/>
+          </body>
+          <body>
+            <joint name="sf_bemf" type="slide"/>
+            <geom size="0.1" mass="1"/>
+          </body>
+          <body>
+            <joint name="sl_ctrl" type="slide"/>
+            <geom size="0.1" mass="1"/>
+          </body>
+          <body>
+            <joint name="sf_ctrl" type="slide"/>
+            <geom size="0.1" mass="1"/>
+          </body>
+        </worldbody>
+        <actuator>
+          <dcmotor joint="sl_bemf" motorconst="1" resistance="1"
+                   thermal="1 1 0 0.004 25 25"/>
+          <dcmotor joint="sf_bemf" motorconst="1" resistance="1"
+                   inductance="0 0.01" thermal="1 1 0 0.004 25 25"/>
+          <dcmotor joint="sl_ctrl" motorconst="1" resistance="1"
+                   input="vel" controller="0 0 5"
+                   thermal="1 1 0 0.004 25 25"/>
+          <dcmotor joint="sf_ctrl" motorconst="1" resistance="1"
+                   input="vel" controller="0 0 5"
+                   inductance="0 0.01" thermal="1 1 0 0.004 25 25"/>
+        </actuator>
+      </mujoco>
+      """,
+      nworld=nworld,
+    )
+
+    # World 0: 250-degree rise -> R = 2.0; World 1: 500-degree rise -> R = 3.0.
+    temp_rises = [250.0, 500.0]
+    mjds = []
+    act_np = d.act.numpy()
+    qvel_np = d.qvel.numpy()
+    for w in range(nworld):
+      mjd_w = mjd if w == 0 else mujoco.MjData(mjm)
+      for i in range(4):
+        mjd_w.act[mjm.actuator_actadr[i]] = temp_rises[w]
+        mjd_w.qvel[i] = 0.5
+      mujoco.mj_forward(mjm, mjd_w)
+      act_np[w] = mjd_w.act
+      qvel_np[w] = mjd_w.qvel
+      mjds.append(mjd_w)
+
+    d.act.assign(act_np)
+    d.qvel.assign(qvel_np)
+
+    out = wp.empty((nworld, m.nC), dtype=float)
+    out.fill_(wp.inf)
+
+    forward.fwd_position(m, d, factorize=False)
+    forward.fwd_velocity(m, d)
+    derivative.deriv_smooth_vel(m, d, out)
+
+    dt = mjm.opt.timestep
+    te = 0.01
+    s = 1.0 - np.exp(-dt / te)
+    out_np = out.numpy()
+
+    for w in range(nworld):
+      R = 1.0 * (1.0 + 0.004 * temp_rises[w])
+      expected_qderiv = np.array(
+        [
+          -1.0 / R,  # stateless back-EMF: -K^2 / R
+          -1.0 * s / R,  # stateful back-EMF: -K^2 * s / R
+          -5.0 * (1.0 / R),  # stateless ctrl: -kd * (R0 / R)
+          -5.0 * (1.0 / R) * s,  # stateful ctrl: -kd * (R0 / R) * s
+        ]
+      )
+      actual_qderiv = (1.0 - out_np[w, :4]) / dt
+
+      np.testing.assert_allclose(
+        actual_qderiv,
+        expected_qderiv,
+        atol=1e-4,
+        err_msg=f"thermal DCMotor velocity derivative vs expected (world {w})",
+      )
+
+      mujoco.mj_step(mjm, mjds[w])
+      np.testing.assert_allclose(
+        actual_qderiv,
+        mjds[w].qDeriv[:4],
+        atol=1e-4,
+        err_msg=f"thermal DCMotor velocity derivative vs mjd.qDeriv (world {w})",
+      )
+
+    if nworld == 2:
+      self.assertFalse(np.allclose(out_np[0], out_np[1]))
+
   _FLUID_SCENARIOS = {
     "basic": """
       <mujoco>
