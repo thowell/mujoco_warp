@@ -1507,6 +1507,7 @@ def _linesearch_jv_fused_kernel(is_sparse: bool, nv: int, dofs_per_thread: int, 
   module_options = {"enable_backward": False}
   if deterministic:
     module_options["deterministic"] = wp.DeterministicMode.RUN_TO_RUN
+    module_options["deterministic_max_records"] = 1
 
   @wp.kernel(module="unique", module_options=module_options, grid_stride=False)
   def kernel(
@@ -1687,6 +1688,7 @@ def _solve_init_jaref_kernel(is_sparse: bool, nv: int, dofs_per_thread: int, com
   module_options = {"enable_backward": False}
   if deterministic:
     module_options["deterministic"] = wp.DeterministicMode.RUN_TO_RUN
+    module_options["deterministic_max_records"] = 1
 
   @wp.kernel(module="unique", module_options=module_options, grid_stride=True)
   def kernel(
@@ -1938,11 +1940,12 @@ def _zero_qfrc_constraint_sparse(
 
 
 @cache_kernel
-def _update_constraint_init_qfrc_constraint_sparse(compact: bool, deterministic: bool = False):
+def _update_constraint_init_qfrc_constraint_sparse(compact: bool, nv: int, deterministic: bool = False):
   COMPACT = compact
   module_options = {"enable_backward": False}
   if deterministic:
     module_options["deterministic"] = wp.DeterministicMode.RUN_TO_RUN
+    module_options["deterministic_max_records"] = max(nv, 1)
 
   @wp.kernel(module="unique", enable_backward=False, grid_stride=True, module_options=module_options)
   def kernel(
@@ -2093,11 +2096,12 @@ def _update_gradient_h_incremental(
 
 
 @cache_kernel
-def _update_gradient_h_incremental_sparse(compact: bool, deterministic: bool = False):
+def _update_gradient_h_incremental_sparse(compact: bool, max_records: int, deterministic: bool = False):
   COMPACT = compact
   module_options = {"enable_backward": False}
   if deterministic:
     module_options["deterministic"] = wp.DeterministicMode.RUN_TO_RUN
+    module_options["deterministic_max_records"] = max(max_records, 1)
 
   @wp.kernel(module="unique", module_options=module_options, grid_stride=False)
   def kernel(
@@ -2202,8 +2206,9 @@ def _update_constraint(
       inputs=[changed, ctx.done],
       outputs=[d.qfrc_constraint],
     )
+    det = bool(m.opt.deterministic & types.DeterminismType.ATOMICS)
     wp.launch(
-      _update_constraint_init_qfrc_constraint_sparse(sc, bool(m.opt.deterministic & types.DeterminismType.ATOMICS)),
+      _update_constraint_init_qfrc_constraint_sparse(sc, m.nv if det else 0, det),
       dim=(d.nworld, d.njmax),
       inputs=[d.nefc, dj.efc.J_rownnz, dj.efc.J_rowadr, dj.efc.J_colind, dj.efc.J, d.efc.force, dj.dof_cdof, changed, ctx.done],
       outputs=[d.qfrc_constraint],
@@ -2279,6 +2284,7 @@ def _update_gradient_grad(stable_fast: bool, deterministic: bool = False):
   module_options = {"enable_backward": False}
   if deterministic:
     module_options["deterministic"] = wp.DeterministicMode.RUN_TO_RUN
+    module_options["deterministic_max_records"] = 1
 
   @wp.kernel(module="unique", module_options=module_options, grid_stride=False)
   def kernel(
@@ -2408,10 +2414,11 @@ def _update_gradient_init_h_sparse(compact: bool):
 
 
 @cache_kernel
-def _add_tendon_metric_dense(deterministic: bool = False):
+def _add_tendon_metric_dense(nv: int, deterministic: bool = False):
   module_options = {"enable_backward": False}
   if deterministic:
     module_options["deterministic"] = wp.DeterministicMode.RUN_TO_RUN
+    module_options["deterministic_max_records"] = max(nv * (nv - 1) // 2, 1)
 
   @wp.kernel(module="unique", module_options=module_options)
   def kernel(
@@ -2448,10 +2455,11 @@ def _add_tendon_metric_dense(deterministic: bool = False):
 
 
 @cache_kernel
-def _add_actuator_metric_dense(deterministic: bool = False):
+def _add_actuator_metric_dense(nv: int, deterministic: bool = False):
   module_options = {"enable_backward": False}
   if deterministic:
     module_options["deterministic"] = wp.DeterministicMode.RUN_TO_RUN
+    module_options["deterministic_max_records"] = max(nv * (nv - 1) // 2, 1)
 
   @wp.kernel(module="unique", module_options=module_options)
   def kernel(
@@ -2487,10 +2495,11 @@ def _add_actuator_metric_dense(deterministic: bool = False):
 
 
 @cache_kernel
-def _add_efmK_metric_dense(deterministic: bool = False):
+def _add_efmK_metric_dense(nv: int, deterministic: bool = False):
   module_options = {"enable_backward": False}
   if deterministic:
     module_options["deterministic"] = wp.DeterministicMode.RUN_TO_RUN
+    module_options["deterministic_max_records"] = max(nv, 1)
 
   @wp.kernel(module="unique", module_options=module_options)
   def kernel(
@@ -2523,6 +2532,7 @@ def _add_flexcon_metric_dense(deterministic: bool = False):
   module_options = {"enable_backward": False}
   if deterministic:
     module_options["deterministic"] = wp.DeterministicMode.RUN_TO_RUN
+    module_options["deterministic_max_records"] = types.EFM_CON_MAX_DOF * (types.EFM_CON_MAX_DOF + 1) // 2
 
   @wp.kernel(module="unique", module_options=module_options)
   def kernel(
@@ -3071,6 +3081,7 @@ def _JTDACJ_sparse(
   cone_type: types.ConeType,
   max_condim: int,
   block_dim: int = types.BlockDim.update_gradient_JTDAJ_sparse,
+  max_records: int = 0,
   deterministic: bool = False,
 ):
   COMPACT = compact
@@ -3079,6 +3090,7 @@ def _JTDACJ_sparse(
   module_options = {"enable_backward": False, "block_dim": block_dim}
   if deterministic:
     module_options["deterministic"] = wp.DeterministicMode.RUN_TO_RUN
+    module_options["deterministic_max_records"] = max(max_records, 1)
 
   def make_curvature_terms(condim: int):
     @wp.func
@@ -3390,10 +3402,13 @@ def _update_gradient(m: types.Model, d: types.Data, ctx: SolverContext, compact:
       elliptic = m.opt.cone == types.ConeType.ELLIPTIC
       threads_per_group = 1 if elliptic and wp.get_device().is_cpu else _JTDAJ_THREADS_PER_GROUP
       block_dim = threads_per_group if elliptic else mj.block_dim.update_gradient_JTDAJ_sparse
-      jtdaj_kernel = _JTDACJ_sparse(
-        sc, m.opt.cone, max_condim, block_dim, bool(m.opt.deterministic & types.DeterminismType.ATOMICS)
-      )
+      jtdaj_kernel = _JTDACJ_sparse(sc, m.opt.cone, max_condim, block_dim)
       groups_per_world = _jtdaj_groups_per_world(d.nworld, d.njmax, jtdaj_kernel)
+      det = bool(m.opt.deterministic & types.DeterminismType.ATOMICS)
+      if det:
+        entries_per_lane = ceil((mj.nv * (mj.nv + 1) // 2) / threads_per_group)
+        max_records = ceil(max(d.njmax, 1) / groups_per_world) * entries_per_lane
+        jtdaj_kernel = _JTDACJ_sparse(sc, m.opt.cone, max_condim, block_dim, max_records, True)
       jtdaj_inputs = [
         m.opt.impratio_invsqrt,
         d.contact.friction,
@@ -3460,21 +3475,22 @@ def _update_gradient(m: types.Model, d: types.Data, ctx: SolverContext, compact:
         wp.launch(_padding_h, dim=(d.nworld, m.nv_pad - m.nv), inputs=[m.nv, ctx.done], outputs=[ctx.h])
 
     if is_discrete:
+      det = bool(m.opt.deterministic & types.DeterminismType.ATOMICS)
       wp.launch(
-        _add_tendon_metric_dense(bool(m.opt.deterministic & types.DeterminismType.ATOMICS)),
+        _add_tendon_metric_dense(m.nv if det else 0, det),
         dim=(d.nworld, m.ntendon),
         inputs=[m.ten_J_rownnz, m.ten_J_rowadr, m.ten_J_colind, d.ten_J, d.efm_ts, ctx.done],
         outputs=[ctx.h],
       )
       wp.launch(
-        _add_actuator_metric_dense(bool(m.opt.deterministic & types.DeterminismType.ATOMICS)),
+        _add_actuator_metric_dense(m.nv if det else 0, det),
         dim=(d.nworld, m.nactuator),
         inputs=[d.moment_rownnz, d.moment_rowadr, d.moment_colind, d.actuator_moment, d.efm_as, ctx.done],
         outputs=[ctx.h],
       )
       if m.nefmK > 0:
         wp.launch(
-          _add_efmK_metric_dense(bool(m.opt.deterministic & types.DeterminismType.ATOMICS)),
+          _add_efmK_metric_dense(m.nv if det else 0, det),
           dim=(d.nworld, m.nv),
           inputs=[m.efm_K_rownnz, m.efm_K_rowadr, m.efm_K_colind, d.efm_K_val, ctx.done],
           outputs=[ctx.h],
@@ -3483,7 +3499,7 @@ def _update_gradient(m: types.Model, d: types.Data, ctx: SolverContext, compact:
         efm_con = ctx.efm_con if ctx.efm_con is not None else derivative.build_efm_contact(m, d)
         efm_con_dof, efm_con_val, efm_con_scale, _, efm_con_nnz = efm_con
         wp.launch(
-          _add_flexcon_metric_dense(bool(m.opt.deterministic & types.DeterminismType.ATOMICS)),
+          _add_flexcon_metric_dense(det),
           dim=d.naconmax,
           inputs=[
             d.contact.worldid,
@@ -3589,9 +3605,15 @@ def _update_gradient_incremental(m: types.Model, d: types.Data, ctx: SolverConte
   # Update upper triangle of H with delta from changed constraints.
   sc = _sparse_compact(ctx)
   if m.is_sparse or sc:
+    mj = ctx.compact_m_full if sc else m
     dj = ctx.compact_d_full if sc else d
-    inc_kernel = _update_gradient_h_incremental_sparse(sc, bool(m.opt.deterministic & types.DeterminismType.ATOMICS))
+    inc_kernel = _update_gradient_h_incremental_sparse(sc)
     slots = _jtdaj_groups_per_world(d.nworld, ctx.quad_changed_ids.shape[1], inc_kernel)
+    det = bool(m.opt.deterministic & types.DeterminismType.ATOMICS)
+    if det:
+      entries_per_lane = ceil((mj.nv * (mj.nv + 1) // 2) / _JTDAJ_THREADS_PER_GROUP)
+      max_records = ceil(max(ctx.quad_changed_ids.shape[1], 1) / slots) * entries_per_lane
+      inc_kernel = _update_gradient_h_incremental_sparse(sc, max_records, True)
     wp.launch(
       inc_kernel,
       dim=(d.nworld, slots, _JTDAJ_THREADS_PER_GROUP),
@@ -3933,7 +3955,7 @@ def _solver_iteration(
 
 def init_context(m: types.Model, d: types.Data, ctx: SolverContext | InverseContext, grad: bool = True, compact: bool = False):
   if m.opt.integrator == types.IntegratorType.DISCRETE:
-    if m.nefmdof > 0 and m.opt.solver == types.SolverType.CG:
+    if m.nefmdof > 0 and not m.efm0_active and m.opt.solver == types.SolverType.CG:
       derivative.eff_prec_fold(m, d, out=d.efm_L)
     if grad:
       qfrc_smooth_eff = wp.zeros((d.nworld, m.nv_pad), dtype=float, device=d.qacc.device)

@@ -47,19 +47,21 @@ def _accumulate_subtreemass(deterministic: bool = False):
   module_options = {"enable_backward": False}
   if deterministic:
     module_options["deterministic"] = wp.DeterministicMode.RUN_TO_RUN
+    module_options["deterministic_max_records"] = 1
 
   @wp.kernel(module="unique", module_options=module_options)
   def kernel(
     body_parentid: wp.array[int],
-    body_subtreemass_io: wp.array2d[float],
+    body_subtreemass_in: wp.array2d[float],
     body_tree_: wp.array[int],
+    body_subtreemass_out: wp.array2d[float],
   ):
     worldid, nodeid = wp.tid()
-    body_subtreemass_id = worldid % body_subtreemass_io.shape[0]
+    body_subtreemass_id = worldid % body_subtreemass_in.shape[0]
     bodyid = body_tree_[nodeid]
     parentid = body_parentid[bodyid]
     if bodyid != 0:
-      wp.atomic_add(body_subtreemass_io, body_subtreemass_id, parentid, body_subtreemass_io[body_subtreemass_id, bodyid])
+      wp.atomic_add(body_subtreemass_out, body_subtreemass_id, parentid, body_subtreemass_in[body_subtreemass_id, bodyid])
 
   return kernel
 
@@ -684,6 +686,7 @@ def set_const_fixed(m: types.Model, d: types.Data):
       _accumulate_subtreemass(bool(m.opt.deterministic & types.DeterminismType.ATOMICS)),
       dim=(nworld_subtreemass, body_tree.size),
       inputs=[m.body_parentid, m.body_subtreemass, body_tree],
+      outputs=[m.body_subtreemass],  # kernel_analyzer: ignore[atomic]
     )
 
   nworld_geom = np.max([m.geom_dataid.shape[0], m.geom_size.shape[0], m.geom_aabb.shape[0], m.geom_rbound.shape[0]])

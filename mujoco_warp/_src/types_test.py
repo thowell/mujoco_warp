@@ -215,46 +215,83 @@ class TypesTest(parameterized.TestCase):
   @parameterized.parameters(1, 2)
   def test_determinism_pipeline_hooks(self, nworld):
     """Tests that sort hooks and atomic determinism modes execute cleanly across the pipeline."""
-    _, _, m, d = test_data.fixture(
-      xml="""
-      <mujoco>
-        <worldbody>
-          <body pos="0 0 0.05">
-            <freejoint/>
-            <geom type="sphere" size=".1"/>
-          </body>
-          <body>
-            <joint name="j" type="slide" axis="1 0 0" stiffness="10" damping="1"/>
-            <geom type="sphere" size=".05" pos="0.5 0 0.5"/>
-          </body>
-          <geom type="plane" size="1 1 .1"/>
-        </worldbody>
-        <tendon>
-          <fixed name="t">
-            <joint joint="j" coef="1"/>
-          </fixed>
-        </tendon>
-        <actuator>
-          <position tendon="t" kp="10"/>
-        </actuator>
-      </mujoco>
-      """,
-      nworld=nworld,
-    )
+    with mock.patch.multiple("mujoco_warp._src.types", M_BLOCK_SCALAR_MAX=0, M_BLOCK_DENSE_MAX=0):
+      _, _, m, d = test_data.fixture(
+        xml="""
+        <mujoco>
+          <worldbody>
+            <body name="b" pos="0 0 0.05">
+              <freejoint/>
+              <geom size=".1"/>
+              <body pos="0.1 0 0">
+                <joint name="j" type="slide" axis="1 0 0" stiffness="10" damping="1"/>
+                <geom size=".05" pos="0.5 0 0.5"/>
+              </body>
+            </body>
+            <geom type="plane" size="1 1 .1"/>
+          </worldbody>
+          <tendon>
+            <fixed name="t">
+              <joint joint="j" coef="1"/>
+            </fixed>
+          </tendon>
+          <actuator>
+            <position tendon="t" kp="10"/>
+          </actuator>
+          <sensor>
+            <subtreeangmom body="b"/>
+          </sensor>
+        </mujoco>
+        """,
+        qvel_noise=0.01,
+        nworld=nworld,
+      )
 
     if nworld == 2:
       qpos = d.qpos.numpy()
       qpos[1, 2] += 0.5
       d.qpos.assign(qpos)
 
-    # Step with atomics modes
+    qpos0 = d.qpos.numpy().copy()
+    qvel0 = d.qvel.numpy().copy()
+
+    # Step with atomics modes and verify parity across sparse LDL, subtree_vel, and actuation
     for integrator in (IntegratorType.EULER, IntegratorType.DISCRETE):
       m.opt.integrator = integrator
+      ref_qacc, ref_linvel, ref_angmom = None, None, None
       for flag in (DeterminismType.NONE, DeterminismType.ATOMICS, DeterminismType.ALL):
         m.opt.deterministic = flag
+        d.qpos.assign(qpos0)
+        d.qvel.assign(qvel0)
         d.qacc.fill_(wp.inf)
+        d.subtree_linvel.fill_(wp.inf)
+        d.subtree_angmom.fill_(wp.inf)
         step(m, d)
-        self.assertFalse(np.any(np.isinf(d.qacc.numpy())))
+        qacc = d.qacc.numpy().copy()
+        linvel = d.subtree_linvel.numpy().copy()
+        angmom = d.subtree_angmom.numpy().copy()
+        self.assertFalse(np.any(np.isinf(qacc)))
+        self.assertFalse(np.any(np.isinf(linvel)))
+        self.assertFalse(np.any(np.isinf(angmom)))
+        if ref_qacc is None:
+          ref_qacc, ref_linvel, ref_angmom = qacc, linvel, angmom
+        else:
+          np.testing.assert_allclose(qacc, ref_qacc, atol=1e-5, rtol=1e-5)
+          np.testing.assert_allclose(linvel, ref_linvel, atol=1e-5, rtol=1e-5)
+          np.testing.assert_allclose(angmom, ref_angmom, atol=1e-5, rtol=1e-5)
+
+      if wp.get_device().is_cuda:
+        m.opt.deterministic = DeterminismType.ATOMICS
+        d.qpos.assign(qpos0)
+        d.qvel.assign(qvel0)
+        d.qacc.fill_(wp.inf)
+        with wp.ScopedCapture() as capture:
+          step(m, d)
+        d.qpos.assign(qpos0)
+        d.qvel.assign(qvel0)
+        d.qacc.fill_(wp.inf)
+        wp.capture_launch(capture.graph)
+        np.testing.assert_allclose(d.qacc.numpy(), ref_qacc, atol=1e-5, rtol=1e-5)
 
     # Test sort hooks
     with mock.patch("mujoco_warp._src.collision_driver._sort_contacts") as mock_sort_contacts:

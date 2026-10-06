@@ -51,6 +51,9 @@ Q_LD_BLOCK_SPARSE = -1
 # maximum number of plugin attributes
 _NPLUGINATTR = 128
 
+# maximum number of DOFs per passive flex contact (2 sides x 4 tet vertices x 3 DOFs)
+EFM_CON_MAX_DOF = 24
+
 
 # TODO(team): add check that all wp.launch_tiled 'block_dim' settings are configurable
 @dataclasses.dataclass

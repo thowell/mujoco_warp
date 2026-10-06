@@ -1919,6 +1919,7 @@ def _sensor_touch(deterministic: bool = False):
   module_options = {"enable_backward": False}
   if deterministic:
     module_options["deterministic"] = wp.DeterministicMode.RUN_TO_RUN
+    module_options["deterministic_max_records"] = 1
 
   @wp.kernel(module="unique", module_options=module_options)
   def kernel(
@@ -2904,6 +2905,7 @@ def _energy_pos_gravity(deterministic: bool = False):
   module_options = {"enable_backward": False}
   if deterministic:
     module_options["deterministic"] = wp.DeterministicMode.RUN_TO_RUN
+    module_options["deterministic_max_records"] = 1
 
   @wp.kernel(module="unique", module_options=module_options)
   def kernel(
@@ -2934,6 +2936,7 @@ def _energy_pos_passive_joint(deterministic: bool = False):
   module_options = {"enable_backward": False}
   if deterministic:
     module_options["deterministic"] = wp.DeterministicMode.RUN_TO_RUN
+    module_options["deterministic_max_records"] = 1
 
   @wp.kernel(module="unique", module_options=module_options)
   def kernel(
@@ -3034,6 +3037,7 @@ def _energy_pos_passive_tendon(deterministic: bool = False):
   module_options = {"enable_backward": False}
   if deterministic:
     module_options["deterministic"] = wp.DeterministicMode.RUN_TO_RUN
+    module_options["deterministic_max_records"] = 1
 
   @wp.kernel(module="unique", module_options=module_options)
   def kernel(
@@ -3081,6 +3085,7 @@ def _energy_pos_passive_flex(deterministic: bool = False):
   module_options = {"enable_backward": False}
   if deterministic:
     module_options["deterministic"] = wp.DeterministicMode.RUN_TO_RUN
+    module_options["deterministic_max_records"] = 1
 
   @wp.kernel(module="unique", module_options=module_options)
   def kernel(
