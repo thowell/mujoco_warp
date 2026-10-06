@@ -672,6 +672,7 @@ def _subtree_com_acc(deterministic: bool = False):
   module_options = {"enable_backward": False}
   if deterministic:
     module_options["deterministic"] = wp.DeterministicMode.RUN_TO_RUN
+    module_options["deterministic_max_records"] = 1
 
   @wp.kernel(module="unique", module_options=module_options)
   def kernel(
@@ -816,7 +817,7 @@ def com_pos(m: Model, d: Data):
       _subtree_com_acc(bool(m.opt.deterministic & DeterminismType.ATOMICS)),
       dim=(d.nworld, body_tree.size),
       inputs=[m.body_parentid, d.subtree_com, body_tree],
-      outputs=[d.subtree_com],
+      outputs=[d.subtree_com],  # kernel_analyzer: ignore[atomic]
     )
 
   wp.launch(_subtree_div, dim=(d.nworld, m.nbody), inputs=[m.body_subtreemass, d.subtree_com], outputs=[d.subtree_com])
@@ -1010,6 +1011,7 @@ def _crb_accumulate(deterministic: bool = False):
   module_options = {"enable_backward": False}
   if deterministic:
     module_options["deterministic"] = wp.DeterministicMode.RUN_TO_RUN
+    module_options["deterministic_max_records"] = 1
 
   @wp.kernel(module="unique", module_options=module_options)
   def kernel(
@@ -1078,7 +1080,7 @@ def crb(m: Model, d: Data):
       _crb_accumulate(bool(m.opt.deterministic & DeterminismType.ATOMICS)),
       dim=(d.nworld, body_tree.size),
       inputs=[m.body_parentid, d.crb, body_tree],
-      outputs=[d.crb],
+      outputs=[d.crb],  # kernel_analyzer: ignore[atomic]
     )
 
   d.M.zero_()
@@ -1091,10 +1093,11 @@ def crb(m: Model, d: Data):
 
 
 @cache_kernel
-def _tendon_armature(deterministic: bool = False):
+def _tendon_armature(nv: int, deterministic: bool = False):
   module_options = {"enable_backward": False}
   if deterministic:
     module_options["deterministic"] = wp.DeterministicMode.RUN_TO_RUN
+    module_options["deterministic_max_records"] = max(nv, 1)
 
   @wp.kernel(module="unique", module_options=module_options)
   def kernel(
@@ -1164,8 +1167,9 @@ def _tendon_armature(deterministic: bool = False):
 @event_scope
 def tendon_armature(m: Model, d: Data):
   """Add tendon armature to M."""
+  det = bool(m.opt.deterministic & DeterminismType.ATOMICS)
   wp.launch(
-    _tendon_armature(bool(m.opt.deterministic & DeterminismType.ATOMICS)),
+    _tendon_armature(m.nv if det else 0, det),
     dim=(d.nworld, m.ntendon, m.max_ten_J_rownnz),
     inputs=[
       m.dof_parentid,
@@ -1182,10 +1186,11 @@ def tendon_armature(m: Model, d: Data):
 
 
 @cache_kernel
-def _qLD_acc(deterministic: bool = False):
+def _qLD_acc(nv: int, deterministic: bool = False):
   module_options = {"enable_backward": False}
   if deterministic:
     module_options["deterministic"] = wp.DeterministicMode.RUN_TO_RUN
+    module_options["deterministic_max_records"] = max(nv, 1)
 
   @wp.kernel(module="unique", module_options=module_options)
   def kernel(
@@ -1204,12 +1209,12 @@ def _qLD_acc(deterministic: bool = False):
     Madr_i = M_rowadr[i]  # Address of row being updated
     diag_k = M_rowadr[k] + M_rownnz[k] - 1  # Address of diagonal element of k
     # tmp = M(k,i) / M(k,k)
-    tmp = L_out[worldid, Madr_ki] / L_out[worldid, diag_k]
+    tmp = L_in[worldid, Madr_ki] / L_in[worldid, diag_k]
     for j in range(M_rownnz[i]):
       # M(i,j) -= M(k,j) * tmp
       wp.atomic_sub(L_out[worldid], Madr_i + j, L_in[worldid, M_rowadr[k] + j] * tmp)
     # M(k,i) = tmp
-    L_out[worldid, Madr_ki] = tmp
+    L_out[worldid, Madr_ki] = tmp  # kernel_analyzer: ignore[atomic]
 
   return kernel
 
@@ -1233,13 +1238,14 @@ def _factor_i_sparse(m: Model, d: Data, M: wp.array2d[float], L: wp.array2d[floa
   """Sparse L'*D*L factorization of inertia-like matrix M, assumed spd."""
   wp.copy(L, M)
 
+  det = bool(m.opt.deterministic & DeterminismType.ATOMICS)
   for i in reversed(range(len(m.qLD_updates))):
     qLD_updates = m.qLD_updates[i]
     wp.launch(
-      _qLD_acc(bool(m.opt.deterministic & DeterminismType.ATOMICS)),
+      _qLD_acc(m.nv if det else 0, det),
       dim=(d.nworld, qLD_updates.size),
       inputs=[m.M_rownnz, m.M_rowadr, qLD_updates, L],
-      outputs=[L],
+      outputs=[L],  # kernel_analyzer: ignore[atomic]
     )
 
   wp.launch(_qLDiag_div, dim=(d.nworld, m.nv), inputs=[m.M_rownnz, m.M_rowadr, L], outputs=[D])
@@ -1474,6 +1480,7 @@ def _cfrc_backward(deterministic: bool = False):
   module_options = {"enable_backward": False}
   if deterministic:
     module_options["deterministic"] = wp.DeterministicMode.RUN_TO_RUN
+    module_options["deterministic_max_records"] = 1
 
   @wp.kernel(module="unique", module_options=module_options)
   def kernel(
@@ -1501,7 +1508,7 @@ def _rne_cfrc_backward(m: Model, d: Data):
       _cfrc_backward(bool(m.opt.deterministic & DeterminismType.ATOMICS)),
       dim=[d.nworld, body_tree.size],
       inputs=[m.body_parentid, d.cfrc_int, body_tree],
-      outputs=[d.cfrc_int],
+      outputs=[d.cfrc_int],  # kernel_analyzer: ignore[atomic]
     )
 
 
@@ -1595,6 +1602,7 @@ def _cfrc_ext_equality(deterministic: bool = False):
   module_options = {"enable_backward": False}
   if deterministic:
     module_options["deterministic"] = wp.DeterministicMode.RUN_TO_RUN
+    module_options["deterministic_max_records"] = 2
 
   @wp.kernel(module="unique", module_options=module_options)
   def kernel(
@@ -1733,6 +1741,7 @@ def _cfrc_ext_contact(deterministic: bool = False):
   module_options = {"enable_backward": False}
   if deterministic:
     module_options["deterministic"] = wp.DeterministicMode.RUN_TO_RUN
+    module_options["deterministic_max_records"] = 2
 
   @wp.kernel(module="unique", module_options=module_options)
   def kernel(
@@ -1805,6 +1814,7 @@ def _cfrc_ext_tendon_constraint(deterministic: bool = False):
   module_options = {"enable_backward": False}
   if deterministic:
     module_options["deterministic"] = wp.DeterministicMode.RUN_TO_RUN
+    module_options["deterministic_max_records"] = 2
 
   @wp.kernel(module="unique", module_options=module_options)
   def kernel(
@@ -1870,6 +1880,7 @@ def _cfrc_ext_tendon_actuator(deterministic: bool = False):
   module_options = {"enable_backward": False}
   if deterministic:
     module_options["deterministic"] = wp.DeterministicMode.RUN_TO_RUN
+    module_options["deterministic_max_records"] = 1
 
   @wp.kernel(module="unique", module_options=module_options)
   def kernel(
@@ -1898,10 +1909,11 @@ def _cfrc_ext_tendon_actuator(deterministic: bool = False):
 
 
 @cache_kernel
-def _cfrc_ext_spatial_tendon(deterministic: bool = False):
+def _cfrc_ext_spatial_tendon(nwrap: int, deterministic: bool = False):
   module_options = {"enable_backward": False}
   if deterministic:
     module_options["deterministic"] = wp.DeterministicMode.RUN_TO_RUN
+    module_options["deterministic_max_records"] = max(4 * nwrap, 1)
 
   @wp.kernel(module="unique", module_options=module_options)
   def kernel(
@@ -2199,8 +2211,9 @@ def rne_postconstraint(m: Model, d: Data):
     dsbl_spring = bool(m.opt.disableflags & DisableBit.SPRING)
     dsbl_damper = bool(m.opt.disableflags & DisableBit.DAMPER)
 
+    det = bool(m.opt.deterministic & DeterminismType.ATOMICS)
     wp.launch(
-      _cfrc_ext_spatial_tendon(bool(m.opt.deterministic & DeterminismType.ATOMICS)),
+      _cfrc_ext_spatial_tendon(m.nwrap if det else 0, det),
       dim=(d.nworld, m.ntendon),
       inputs=[
         m.body_rootid,
@@ -2478,6 +2491,7 @@ def _tendon_bias_coef(deterministic: bool = False):
   module_options = {"enable_backward": False}
   if deterministic:
     module_options["deterministic"] = wp.DeterministicMode.RUN_TO_RUN
+    module_options["deterministic_max_records"] = 1
 
   @wp.kernel(module="unique", module_options=module_options)
   def kernel(
@@ -2519,6 +2533,7 @@ def _tendon_bias_qfrc(deterministic: bool = False):
   module_options = {"enable_backward": False}
   if deterministic:
     module_options["deterministic"] = wp.DeterministicMode.RUN_TO_RUN
+    module_options["deterministic_max_records"] = 1
 
   @wp.kernel(module="unique", module_options=module_options)
   def kernel(
@@ -3173,6 +3188,7 @@ def _transmission_body_moment(deterministic: bool = False):
   module_options = {"enable_backward": False}
   if deterministic:
     module_options["deterministic"] = wp.DeterministicMode.RUN_TO_RUN
+    module_options["deterministic_max_records"] = 10
 
   @wp.kernel(module="unique", module_options=module_options)
   def kernel(
@@ -3428,18 +3444,113 @@ def transmission(m: Model, d: Data):
     )
 
 
+@wp.func
+def _solve_LD_sparse_copy_fn(
+  # Model:
+  qLD_block_adr: wp.array[int],
+  # In:
+  y_in: wp.array2d[float],
+  worldid: int,
+  dofid: int,
+  # Out:
+  x_out: wp.array2d[float],
+):
+  if qLD_block_adr[dofid] == Q_LD_BLOCK_SPARSE:
+    x_out[worldid, dofid] = y_in[worldid, dofid]
+
+
+@wp.func
+def _solve_LD_sparse_diag_fn(
+  # Model:
+  qLD_block_adr: wp.array[int],
+  # In:
+  D_in: wp.array2d[float],
+  x_in: wp.array2d[float],
+  worldid: int,
+  dofid: int,
+  # Out:
+  x_out: wp.array2d[float],
+):
+  if qLD_block_adr[dofid] == Q_LD_BLOCK_SPARSE:
+    x_out[worldid, dofid] = x_in[worldid, dofid] * D_in[worldid, dofid]
+
+
+@wp.func
+def _solve_LD_sparse_update_fn(
+  # In:
+  L_in: wp.array2d[float],
+  x_in: wp.array2d[float],
+  update: wp.vec3i,
+  worldid: int,
+  up: bool,
+  # Out:
+  x_out: wp.array2d[float],
+):
+  i, k, Madr_ki = update[0], update[1], update[2]
+  if up:
+    wp.atomic_sub(x_out[worldid], i, L_in[worldid, Madr_ki] * x_in[worldid, k])
+  else:
+    wp.atomic_sub(x_out[worldid], k, L_in[worldid, Madr_ki] * x_in[worldid, i])
+
+
+@wp.kernel
+def _solve_LD_sparse_copy(
+  # Model:
+  qLD_block_adr: wp.array[int],
+  # In:
+  y_in: wp.array2d[float],
+  # Out:
+  x_out: wp.array2d[float],
+):
+  worldid, dofid = wp.tid()
+  _solve_LD_sparse_copy_fn(qLD_block_adr, y_in, worldid, dofid, x_out)
+
+
+@wp.kernel
+def _solve_LD_sparse_diag(
+  # Model:
+  qLD_block_adr: wp.array[int],
+  # In:
+  D_in: wp.array2d[float],
+  x_in: wp.array2d[float],
+  # Out:
+  x_out: wp.array2d[float],
+):
+  worldid, dofid = wp.tid()
+  _solve_LD_sparse_diag_fn(qLD_block_adr, D_in, x_in, worldid, dofid, x_out)
+
+
 @cache_kernel
-def _solve_LD_sparse_fused(nv: int, nlevels: int, deterministic: bool = False):
-  """Fused sparse backsubstitution: UP + diag + DOWN in one kernel."""
+def _solve_LD_sparse_level(up: bool, deterministic: bool = False):
   module_options = {"enable_backward": False}
   if deterministic:
     module_options["deterministic"] = wp.DeterministicMode.RUN_TO_RUN
+    module_options["deterministic_max_records"] = 1
+
+  @wp.kernel(module="unique", module_options=module_options)
+  def kernel(
+    # In:
+    L_in: wp.array2d[float],
+    qLD_updates_: wp.array[wp.vec3i],
+    x_in: wp.array2d[float],
+    # Out:
+    x_out: wp.array2d[float],
+  ):
+    worldid, nodeid = wp.tid()
+    _solve_LD_sparse_update_fn(L_in, x_in, qLD_updates_[nodeid], worldid, wp.static(up), x_out)
+
+  return kernel
+
+
+@cache_kernel
+def _solve_LD_sparse_fused(nv: int, nlevels: int):
+  """Fused sparse backsubstitution: UP + diag + DOWN in one kernel."""
 
   @wp.func_native(snippet="WP_TILE_SYNC();")
   def _syncthreads():
     pass
 
-  @wp.kernel(module="unique", module_options=module_options)
+  @wp.kernel(module="unique", enable_backward=False)
   def kernel(
     # Model:
     qLD_block_adr: wp.array[int],
@@ -3459,8 +3570,7 @@ def _solve_LD_sparse_fused(nv: int, nlevels: int, deterministic: bool = False):
 
     # Copy y to x_out for sparse-block dofs only.
     for dofid in range(tid, NV, BLOCK_DIM):
-      if qLD_block_adr[dofid] == Q_LD_BLOCK_SPARSE:
-        x_out[worldid, dofid] = y[worldid, dofid]
+      _solve_LD_sparse_copy_fn(qLD_block_adr, y, worldid, dofid, x_out)
     _syncthreads()
 
     # Forward substitution (all_updates only references sparse-block dofs)
@@ -3470,15 +3580,14 @@ def _solve_LD_sparse_fused(nv: int, nlevels: int, deterministic: bool = False):
       level_size = level_offsets[level_idx + 1] - level_offset
 
       for u in range(tid, level_size, BLOCK_DIM):
-        update = all_updates[level_offset + u]
-        i, k, Madr_ki = update[0], update[1], update[2]
-        wp.atomic_sub(x_out[worldid], i, L[worldid, Madr_ki] * x_out[worldid, k])
+        _solve_LD_sparse_update_fn(
+          L, x_out, all_updates[level_offset + u], worldid, True, x_out
+        )  # kernel_analyzer: ignore[atomic]
       _syncthreads()
 
     # Diagonal multiply (sparse-block dofs only)
     for dofid in range(tid, NV, BLOCK_DIM):
-      if qLD_block_adr[dofid] == Q_LD_BLOCK_SPARSE:
-        x_out[worldid, dofid] *= D[worldid, dofid]
+      _solve_LD_sparse_diag_fn(qLD_block_adr, D, x_out, worldid, dofid, x_out)
     _syncthreads()
 
     # Backward substitution
@@ -3488,9 +3597,9 @@ def _solve_LD_sparse_fused(nv: int, nlevels: int, deterministic: bool = False):
       level_size = level_offsets[level_idx + 1] - level_offset
 
       for u in range(tid, level_size, BLOCK_DIM):
-        update = all_updates[level_offset + u]
-        i, k, Madr_ki = update[0], update[1], update[2]
-        wp.atomic_sub(x_out[worldid], k, L[worldid, Madr_ki] * x_out[worldid, i])
+        _solve_LD_sparse_update_fn(
+          L, x_out, all_updates[level_offset + u], worldid, False, x_out
+        )  # kernel_analyzer: ignore[atomic]
       _syncthreads()
 
   return kernel
@@ -3505,6 +3614,26 @@ def _solve_LD_sparse(
   y: wp.array2d[float],
 ):
   """Computes sparse backsubstitution: x = inv(L'*D*L)*y."""
+  deterministic = bool(m.opt.deterministic & DeterminismType.ATOMICS)
+  if deterministic:
+    wp.launch(_solve_LD_sparse_copy, dim=(d.nworld, m.nv), inputs=[m.qLD_block_adr, y], outputs=[x])
+    for qLD_updates in reversed(m.qLD_updates):
+      wp.launch(
+        _solve_LD_sparse_level(True, True),
+        dim=(d.nworld, qLD_updates.size),
+        inputs=[L, qLD_updates, x],
+        outputs=[x],  # kernel_analyzer: ignore[atomic]
+      )
+    wp.launch(_solve_LD_sparse_diag, dim=(d.nworld, m.nv), inputs=[m.qLD_block_adr, D, x], outputs=[x])
+    for qLD_updates in m.qLD_updates:
+      wp.launch(
+        _solve_LD_sparse_level(False, True),
+        dim=(d.nworld, qLD_updates.size),
+        inputs=[L, qLD_updates, x],
+        outputs=[x],  # kernel_analyzer: ignore[atomic]
+      )
+    return
+
   nlevels = len(m.qLD_updates)
   if wp.get_device().is_cuda:
     dim_block = m.block_dim.solve_LD_sparse_fused
@@ -3513,7 +3642,7 @@ def _solve_LD_sparse(
     dim_block = 1
 
   wp.launch(
-    _solve_LD_sparse_fused(m.nv, nlevels, bool(m.opt.deterministic & DeterminismType.ATOMICS)),
+    _solve_LD_sparse_fused(m.nv, nlevels),
     dim=(d.nworld, dim_block),
     inputs=[m.qLD_block_adr, L, D, m.qLD_all_updates, m.qLD_level_offsets, y],
     outputs=[x],
@@ -3993,6 +4122,7 @@ def _linear_momentum(deterministic: bool = False):
   module_options = {"enable_backward": False}
   if deterministic:
     module_options["deterministic"] = wp.DeterministicMode.RUN_TO_RUN
+    module_options["deterministic_max_records"] = 1
 
   @wp.kernel(module="unique", module_options=module_options)
   def kernel(
@@ -4008,10 +4138,13 @@ def _linear_momentum(deterministic: bool = False):
   ):
     worldid, nodeid = wp.tid()
     bodyid = body_tree_[nodeid]
+    linvel = subtree_linvel_in[worldid, bodyid]
     if bodyid:
       pid = body_parentid[bodyid]
-      wp.atomic_add(subtree_linvel_out[worldid], pid, subtree_linvel_in[worldid, bodyid])
-    subtree_linvel_out[worldid, bodyid] /= wp.max(MJ_MINVAL, body_subtreemass[worldid % body_subtreemass.shape[0], bodyid])
+      wp.atomic_add(subtree_linvel_out[worldid], pid, linvel)
+    subtree_linvel_out[worldid, bodyid] = linvel / wp.max(  # kernel_analyzer: ignore[atomic]
+      MJ_MINVAL, body_subtreemass[worldid % body_subtreemass.shape[0], bodyid]
+    )
 
   return kernel
 
@@ -4021,6 +4154,7 @@ def _angular_momentum(deterministic: bool = False):
   module_options = {"enable_backward": False}
   if deterministic:
     module_options["deterministic"] = wp.DeterministicMode.RUN_TO_RUN
+    module_options["deterministic_max_records"] = 1
 
   @wp.kernel(module="unique", module_options=module_options)
   def kernel(
@@ -4032,6 +4166,7 @@ def _angular_momentum(deterministic: bool = False):
     xipos_in: wp.array2d[wp.vec3],
     subtree_com_in: wp.array2d[wp.vec3],
     subtree_linvel_in: wp.array2d[wp.vec3],
+    subtree_angmom_in: wp.array2d[wp.vec3],
     # In:
     subtree_bodyvel_in: wp.array2d[wp.spatial_vector],
     body_tree_: wp.array[int],
@@ -4062,17 +4197,17 @@ def _angular_momentum(deterministic: bool = False):
     dL = wp.cross(dx, dp)
 
     # add to subtree i
-    subtree_angmom_out[worldid, bodyid] += dL
-
-    # add to parent
-    wp.atomic_add(subtree_angmom_out[worldid], pid, subtree_angmom_out[worldid, bodyid])
+    angmom = subtree_angmom_in[worldid, bodyid] + dL
+    subtree_angmom_out[worldid, bodyid] = angmom  # kernel_analyzer: ignore[atomic]
 
     # momentum wrt parent
     dx = com - com_parent
     dv = linvel - linvel_parent
     dv *= subtreemass
-    dL = wp.cross(dx, dv)
-    wp.atomic_add(subtree_angmom_out[worldid], pid, dL)
+    dL_parent = wp.cross(dx, dv)
+
+    # add to parent
+    wp.atomic_add(subtree_angmom_out[worldid], pid, angmom + dL_parent)
 
   return kernel
 
@@ -4099,7 +4234,7 @@ def subtree_vel(m: Model, d: Data):
       _linear_momentum(bool(m.opt.deterministic & DeterminismType.ATOMICS)),
       dim=[d.nworld, body_tree.size],
       inputs=[m.body_parentid, m.body_subtreemass, d.subtree_linvel, body_tree],
-      outputs=[d.subtree_linvel],
+      outputs=[d.subtree_linvel],  # kernel_analyzer: ignore[atomic]
     )
 
   for body_tree in reversed(m.body_tree):
@@ -4113,10 +4248,11 @@ def subtree_vel(m: Model, d: Data):
         d.xipos,
         d.subtree_com,
         d.subtree_linvel,
+        d.subtree_angmom,
         subtree_bodyvel,
         body_tree,
       ],
-      outputs=[d.subtree_angmom],
+      outputs=[d.subtree_angmom],  # kernel_analyzer: ignore[atomic]
     )
 
 
@@ -4125,6 +4261,7 @@ def _joint_tendon(deterministic: bool = False):
   module_options = {"enable_backward": False}
   if deterministic:
     module_options["deterministic"] = wp.DeterministicMode.RUN_TO_RUN
+    module_options["deterministic_max_records"] = 1
 
   @wp.kernel(module="unique", module_options=module_options)
   def kernel(
@@ -4209,15 +4346,16 @@ def _accumulate_jac_chain(
         jacp = cdof_lin + wp.cross(cdof_ang, offset)
         J = wp.dot(jacp, vec) * scale
         if J != 0.0:
-          wp.atomic_add(ten_J_out[worldid], sparseid, J)  # kernel_analyzer: ignore[atomic]
+          wp.atomic_add(ten_J_out[worldid], sparseid, J)
     bid = body_parentid[bid]
 
 
 @cache_kernel
-def _spatial_site_tendon(deterministic: bool = False):
+def _spatial_site_tendon(nv: int, deterministic: bool = False):
   module_options = {"enable_backward": False}
   if deterministic:
     module_options["deterministic"] = wp.DeterministicMode.RUN_TO_RUN
+    module_options["deterministic_max_records"] = max(2 * nv, 1)
 
   @wp.kernel(module="unique", module_options=module_options)
   def kernel(
@@ -4305,10 +4443,11 @@ def _spatial_site_tendon(deterministic: bool = False):
 
 
 @cache_kernel
-def _spatial_geom_tendon(deterministic: bool = False):
+def _spatial_geom_tendon(nv: int, deterministic: bool = False):
   module_options = {"enable_backward": False}
   if deterministic:
     module_options["deterministic"] = wp.DeterministicMode.RUN_TO_RUN
+    module_options["deterministic_max_records"] = max(4 * nv, 1)
 
   @wp.kernel(module="unique", module_options=module_options)
   def kernel(
@@ -4702,8 +4841,9 @@ def tendon(m: Model, d: Data):
   wrap_geom_xpos = wp.empty((d.nworld, m.nwrap), dtype=wp.spatial_vector)
 
   # process joint tendons
+  det = bool(m.opt.deterministic & DeterminismType.ATOMICS)
   wp.launch(
-    _joint_tendon(bool(m.opt.deterministic & DeterminismType.ATOMICS)),
+    _joint_tendon(det),
     dim=(d.nworld, m.wrap_jnt_adr.size),
     inputs=[
       m.jnt_qposadr,
@@ -4729,7 +4869,7 @@ def tendon(m: Model, d: Data):
 
   # process spatial site tendons
   wp.launch(
-    _spatial_site_tendon(bool(m.opt.deterministic & DeterminismType.ATOMICS)),
+    _spatial_site_tendon(m.nv if det else 0, det),
     dim=(d.nworld, m.wrap_site_pair_adr.size),
     inputs=[
       m.body_parentid,
@@ -4753,7 +4893,7 @@ def tendon(m: Model, d: Data):
 
   # process spatial geom tendons
   wp.launch(
-    _spatial_geom_tendon(bool(m.opt.deterministic & DeterminismType.ATOMICS)),
+    _spatial_geom_tendon(m.nv if det else 0, det),
     dim=(d.nworld, m.wrap_geom_adr.size),
     inputs=[
       m.body_parentid,

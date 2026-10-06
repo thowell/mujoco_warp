@@ -20,6 +20,7 @@ import warp as wp
 from mujoco_warp._src import math
 from mujoco_warp._src import support
 from mujoco_warp._src import util_misc
+from mujoco_warp._src.types import EFM_CON_MAX_DOF
 from mujoco_warp._src.types import FLEX_STIFFNESS_3D
 from mujoco_warp._src.types import MJ_MINVAL
 from mujoco_warp._src.types import ContactType
@@ -198,6 +199,7 @@ def _spring_damper_tendon_passive(deterministic: bool = False):
   module_options = {"enable_backward": False}
   if deterministic:
     module_options["deterministic"] = wp.DeterministicMode.RUN_TO_RUN
+    module_options["deterministic_max_records"] = 1
 
   @wp.kernel(module="unique", module_options=module_options)
   def kernel(
@@ -267,10 +269,11 @@ def _spring_damper_tendon_passive(deterministic: bool = False):
 
 
 @cache_kernel
-def _spring_damper_flexedge_passive(deterministic: bool = False):
+def _spring_damper_flexedge_passive(nv: int, deterministic: bool = False):
   module_options = {"enable_backward": False}
   if deterministic:
     module_options["deterministic"] = wp.DeterministicMode.RUN_TO_RUN
+    module_options["deterministic_max_records"] = max(nv, 1)
 
   @wp.kernel(module="unique", module_options=module_options)
   def kernel(
@@ -345,6 +348,7 @@ def _gravity_force(deterministic: bool = False):
   module_options = {"enable_backward": False}
   if deterministic:
     module_options["deterministic"] = wp.DeterministicMode.RUN_TO_RUN
+    module_options["deterministic_max_records"] = 1
 
   @wp.kernel(module="unique", module_options=module_options)
   def kernel(
@@ -641,10 +645,11 @@ def _fluid(m: Model, d: Data):
 
 
 @cache_kernel
-def _qfrc_adhesion(deterministic: bool = False):
+def _qfrc_adhesion(nv: int, deterministic: bool = False):
   module_options = {"enable_backward": False}
   if deterministic:
     module_options["deterministic"] = wp.DeterministicMode.RUN_TO_RUN
+    module_options["deterministic_max_records"] = max(2 * nv, 1)
 
   @wp.kernel(module="unique", module_options=module_options)
   def kernel(
@@ -1537,10 +1542,11 @@ def _flex_gather_kernel(check_skip: bool):
 
 
 @cache_kernel
-def _flex_scatter_kernel(check_skip: bool, deterministic: bool = False):
+def _flex_scatter_kernel(check_skip: bool, nv: int, deterministic: bool = False):
   module_options = {"enable_backward": False}
   if deterministic:
     module_options["deterministic"] = wp.DeterministicMode.RUN_TO_RUN
+    module_options["deterministic_max_records"] = max(nv, 1)
 
   @wp.kernel(module="unique", module_options=module_options, grid_stride=False)
   def kernel(
@@ -1634,8 +1640,9 @@ def flex_scatter(
     return
   check_skip = skip is not None
   skip_arr = skip if check_skip else m.body_is_free
+  det = bool(m.opt.deterministic & DeterminismType.ATOMICS)
   wp.launch(
-    _flex_scatter_kernel(check_skip, bool(m.opt.deterministic & DeterminismType.ATOMICS)),
+    _flex_scatter_kernel(check_skip, m.nv if det else 0, det),
     dim=(d.nworld, m.nflexvert),
     inputs=[
       m.body_rootid,
@@ -1706,6 +1713,7 @@ def _flex_hessian_elem(deterministic: bool = False):
   module_options = {"enable_backward": False}
   if deterministic:
     module_options["deterministic"] = wp.DeterministicMode.RUN_TO_RUN
+    module_options["deterministic_max_records"] = 6
 
   @wp.kernel(module="unique", module_options=module_options)
   def kernel(
@@ -1819,6 +1827,7 @@ def _flex_hessian_diag(deterministic: bool = False):
   module_options = {"enable_backward": False}
   if deterministic:
     module_options["deterministic"] = wp.DeterministicMode.RUN_TO_RUN
+    module_options["deterministic_max_records"] = 2
 
   @wp.kernel(module="unique", module_options=module_options)
   def kernel(
@@ -2046,6 +2055,7 @@ def _flex_hessian_mul_edge(check_skip: bool, deterministic: bool = False):
   module_options = {"enable_backward": False}
   if deterministic:
     module_options["deterministic"] = wp.DeterministicMode.RUN_TO_RUN
+    module_options["deterministic_max_records"] = 2
 
   @wp.kernel(module="unique", module_options=module_options, grid_stride=False)
   def kernel(
@@ -2229,10 +2239,11 @@ def flex_stretch_mul(
 
 
 @cache_kernel
-def _flex_bend_mul(check_skip: bool, deterministic: bool = False):
+def _flex_bend_mul(check_skip: bool, nv: int, deterministic: bool = False):
   module_options = {"enable_backward": False}
   if deterministic:
     module_options["deterministic"] = wp.DeterministicMode.RUN_TO_RUN
+    module_options["deterministic_max_records"] = max(4 * nv, 1)
 
   @wp.kernel(module="unique", module_options=module_options, grid_stride=False)
   def kernel(
@@ -2369,8 +2380,9 @@ def flex_bend_mul(
     return
   check_skip = skip is not None
   skip_arr = skip if check_skip else m.body_is_free
+  det = bool(m.opt.deterministic & DeterminismType.ATOMICS)
   wp.launch(
-    _flex_bend_mul(check_skip, bool(m.opt.deterministic & DeterminismType.ATOMICS)),
+    _flex_bend_mul(check_skip, m.nv if det else 0, det),
     dim=(d.nworld, m.nflexedge),
     inputs=[
       m.opt.timestep,
@@ -2413,6 +2425,7 @@ def _flex_elasticity(deterministic: bool = False):
   module_options = {"enable_backward": False}
   if deterministic:
     module_options["deterministic"] = wp.DeterministicMode.RUN_TO_RUN
+    module_options["deterministic_max_records"] = 4
 
   @wp.kernel(module="unique", module_options=module_options)
   def kernel(
@@ -2564,6 +2577,7 @@ def _flex_bending(deterministic: bool = False):
   module_options = {"enable_backward": False}
   if deterministic:
     module_options["deterministic"] = wp.DeterministicMode.RUN_TO_RUN
+    module_options["deterministic_max_records"] = 4
 
   @wp.kernel(module="unique", module_options=module_options)
   def kernel(
@@ -2697,6 +2711,7 @@ def _flex_passive_interp(deterministic: bool = False):
   module_options = {"enable_backward": False}
   if deterministic:
     module_options["deterministic"] = wp.DeterministicMode.RUN_TO_RUN
+    module_options["deterministic_max_records"] = 27
 
   @wp.kernel(module="unique", module_options=module_options)
   def kernel(
@@ -2864,6 +2879,7 @@ def _flex_passive_bend_interp(deterministic: bool = False):
   module_options = {"enable_backward": False}
   if deterministic:
     module_options["deterministic"] = wp.DeterministicMode.RUN_TO_RUN
+    module_options["deterministic_max_records"] = 18
 
   @wp.func
   def _apply_face_forces(
@@ -2965,7 +2981,7 @@ def _flex_passive_bend_interp(deterministic: bool = False):
     quat_A = face_quat_in[worldid, face_id_A]
     quat_B = face_quat_in[worldid, face_id_B]
 
-    # 1. Compute deformed normals at edge midpoint
+    # Compute deformed normals at edge midpoint
     t1_A = wp.vec3(0.0)
     t2_A = wp.vec3(0.0)
     t1_B = wp.vec3(0.0)
@@ -3008,7 +3024,7 @@ def _flex_passive_bend_interp(deterministic: bool = False):
     n_A_norm = n_A * inv_A
     n_B_norm = n_B * inv_B
 
-    # 2. Average face quaternions
+    # Average face quaternions
     if wp.dot(quat_A, quat_B) < 0.0:
       quat_B = -quat_B
     quat_avg = quat_A + quat_B
@@ -3020,7 +3036,7 @@ def _flex_passive_bend_interp(deterministic: bool = False):
     # residual: r = (n_A - n_B) - dn0_rot
     r = n_A_norm - n_B_norm - dn0_rot
 
-    # 3. Compute projection and cross products
+    # Compute projection and cross products
     dot_A = wp.dot(n_A_norm, r)
     w_A = (r - n_A_norm * dot_A) * inv_A
 
@@ -3032,7 +3048,7 @@ def _flex_passive_bend_interp(deterministic: bool = False):
     wBt2 = wp.cross(w_B, t2_B)
     wBt1 = wp.cross(w_B, t1_B)
 
-    # 4. Apply forces for Face A
+    # Apply forces for Face A
     _apply_face_forces(
       flex_nodebodyid,
       flex_face,
@@ -3048,7 +3064,7 @@ def _flex_passive_bend_interp(deterministic: bool = False):
       flex_spring_body_force_out,
     )
 
-    # 5. Apply forces for Face B (negative stiffness)
+    # Apply forces for Face B (negative stiffness)
     _apply_face_forces(
       flex_nodebodyid,
       flex_face,
@@ -3411,8 +3427,8 @@ def build_efm_contact(
   m: Model, d: Data, rebuild: bool = True
 ) -> tuple[wp.array2d[int], wp.array2d[float], wp.array[float], wp.array[float], wp.array[int]]:
   """Allocates and builds rank-1 passive flex contact metric terms."""
-  efm_con_dof = wp.zeros((d.naconmax, 24), dtype=int)
-  efm_con_val = wp.zeros((d.naconmax, 24), dtype=float)
+  efm_con_dof = wp.zeros((d.naconmax, EFM_CON_MAX_DOF), dtype=int)
+  efm_con_val = wp.zeros((d.naconmax, EFM_CON_MAX_DOF), dtype=float)
   efm_con_scale = wp.zeros(d.naconmax, dtype=float)
   efm_con_force = wp.zeros(d.naconmax, dtype=float)
   efm_con_nnz = wp.zeros(d.naconmax, dtype=int)
@@ -3468,6 +3484,7 @@ def _eff_contact_force(deterministic: bool = False):
   module_options = {"enable_backward": False}
   if deterministic:
     module_options["deterministic"] = wp.DeterministicMode.RUN_TO_RUN
+    module_options["deterministic_max_records"] = EFM_CON_MAX_DOF
 
   @wp.kernel(module="unique", module_options=module_options)
   def kernel(
@@ -3511,6 +3528,8 @@ def passive(m: Model, d: Data):
     d.qfrc_passive.zero_()
     return
 
+  det = bool(m.opt.deterministic & DeterminismType.ATOMICS)
+
   wp.launch(
     _spring_damper_dof_passive,
     dim=(d.nworld, m.njnt),
@@ -3532,7 +3551,7 @@ def passive(m: Model, d: Data):
 
   if m.ntendon:
     wp.launch(
-      _spring_damper_tendon_passive(bool(m.opt.deterministic & DeterminismType.ATOMICS)),
+      _spring_damper_tendon_passive(det),
       dim=(d.nworld, m.ntendon, m.max_ten_J_rownnz),
       inputs=[
         m.ten_J_rownnz,
@@ -3557,7 +3576,7 @@ def passive(m: Model, d: Data):
 
   if not (dsbl_spring and dsbl_damper):
     wp.launch(
-      _spring_damper_flexedge_passive(bool(m.opt.deterministic & DeterminismType.ATOMICS)),
+      _spring_damper_flexedge_passive(m.nv if det else 0, det),
       dim=(d.nworld, m.nflexedge),
       inputs=[
         m.flexedge_length0,
@@ -3588,7 +3607,7 @@ def passive(m: Model, d: Data):
 
   if not dsbl_spring or not dsbl_damper:
     wp.launch(
-      _flex_elasticity(bool(m.opt.deterministic & DeterminismType.ATOMICS)),
+      _flex_elasticity(det),
       dim=(d.nworld, m.nflexelem),
       inputs=[
         m.opt.timestep,
@@ -3620,7 +3639,7 @@ def passive(m: Model, d: Data):
     )
 
     wp.launch(
-      _flex_bending(bool(m.opt.deterministic & DeterminismType.ATOMICS)),
+      _flex_bending(det),
       dim=(d.nworld, m.nflexedge),
       inputs=[
         m.body_rootid,
@@ -3650,7 +3669,7 @@ def passive(m: Model, d: Data):
       ],
     )
     wp.launch(
-      _flex_passive_bend_interp(bool(m.opt.deterministic & DeterminismType.ATOMICS)),
+      _flex_passive_bend_interp(det),
       dim=(d.nworld, m.nflexbend_interp),
       inputs=[
         m.nflex,
@@ -3678,7 +3697,7 @@ def passive(m: Model, d: Data):
   d.qfrc_gravcomp.zero_()
   if gravity_enabled:
     wp.launch(
-      _gravity_force(bool(m.opt.deterministic & DeterminismType.ATOMICS)),
+      _gravity_force(det),
       dim=(d.nworld, m.nbody - 1, m.nv),
       inputs=[
         m.opt.gravity,
@@ -3700,7 +3719,7 @@ def passive(m: Model, d: Data):
     displ_scratch = wp.empty((d.nworld, m.nflexintcell, 27), dtype=wp.vec3)
     vel_corot_scratch = wp.empty((d.nworld, m.nflexintcell, 27), dtype=wp.vec3)
     wp.launch(
-      _flex_passive_interp(bool(m.opt.deterministic & DeterminismType.ATOMICS)),
+      _flex_passive_interp(det),
       dim=(d.nworld, m.nflexintcell),
       inputs=[
         m.nflex,
@@ -3743,7 +3762,7 @@ def passive(m: Model, d: Data):
     if m.opt.integrator == IntegratorType.DISCRETE and m.has_flex_passive:
       efm_con_dof, efm_con_val, _, efm_con_force, efm_con_nnz = build_efm_contact(m, d, rebuild=True)
       wp.launch(
-        _eff_contact_force(bool(m.opt.deterministic & DeterminismType.ATOMICS)),
+        _eff_contact_force(det),
         dim=d.naconmax,
         inputs=[
           d.contact.worldid,
@@ -3761,7 +3780,7 @@ def passive(m: Model, d: Data):
   d.qfrc_adhesion.zero_()
   if m.flg_adhesion and (not (m.opt.disableflags & DisableBit.CONTACT)) and m.nv > 0:
     wp.launch(
-      _qfrc_adhesion(bool(m.opt.deterministic & DeterminismType.ATOMICS)),
+      _qfrc_adhesion(m.nv if det else 0, det),
       dim=d.naconmax,
       inputs=[
         m.body_parentid,

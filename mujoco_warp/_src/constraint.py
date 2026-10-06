@@ -3577,12 +3577,13 @@ def _efc_contact_jac_sparse_flex(cone_type: types.ConeType):
 
 
 @cache_kernel
-def _efc_contact_jac_dense(tile_size: int, cone_type: types.ConeType, deterministic: bool = False):
+def _efc_contact_jac_dense(tile_size: int, cone_type: types.ConeType, njmax: int, deterministic: bool = False):
   TILE_SIZE = tile_size
   IS_ELLIPTIC = cone_type == types.ConeType.ELLIPTIC
   module_options = {"enable_backward": False}
   if deterministic:
     module_options["deterministic"] = wp.DeterministicMode.RUN_TO_RUN
+    module_options["deterministic_max_records"] = max(njmax, 1)
 
   @wp.kernel(module="unique", module_options=module_options, grid_stride=False)
   def kernel(
@@ -3709,12 +3710,13 @@ def _efc_contact_jac_dense(tile_size: int, cone_type: types.ConeType, determinis
 
 
 @cache_kernel
-def _efc_contact_jac_dense_flex(tile_size: int, cone_type: types.ConeType, deterministic: bool = False):
+def _efc_contact_jac_dense_flex(tile_size: int, cone_type: types.ConeType, njmax: int, deterministic: bool = False):
   TILE_SIZE = tile_size
   IS_ELLIPTIC = cone_type == types.ConeType.ELLIPTIC
   module_options = {"enable_backward": False}
   if deterministic:
     module_options["deterministic"] = wp.DeterministicMode.RUN_TO_RUN
+    module_options["deterministic_max_records"] = max(njmax, 1)
 
   @wp.kernel(module="unique", module_options=module_options, grid_stride=False)
   def kernel(
@@ -5510,10 +5512,11 @@ def make_constraint(m: types.Model, d: types.Data):
         d.efc.Jqvel.zero_()
         tile_size = m.block_dim.contact_jac_tiled
         n_dof_blocks = (m.nv_pad + tile_size - 1) // tile_size
+        det = bool(m.opt.deterministic & types.DeterminismType.ATOMICS)
 
         if has_flex:
           wp.launch_tiled(
-            _efc_contact_jac_dense_flex(tile_size, m.opt.cone, bool(m.opt.deterministic & types.DeterminismType.ATOMICS)),
+            _efc_contact_jac_dense_flex(tile_size, m.opt.cone, d.njmax if det else 0, det),
             dim=(d.nworld, n_dof_blocks),
             inputs=[
               m.body_rootid,
@@ -5559,7 +5562,7 @@ def make_constraint(m: types.Model, d: types.Data):
           )
         else:
           wp.launch_tiled(
-            _efc_contact_jac_dense(tile_size, m.opt.cone, bool(m.opt.deterministic & types.DeterminismType.ATOMICS)),
+            _efc_contact_jac_dense(tile_size, m.opt.cone, d.njmax if det else 0, det),
             dim=(d.nworld, n_dof_blocks),
             inputs=[
               m.body_rootid,

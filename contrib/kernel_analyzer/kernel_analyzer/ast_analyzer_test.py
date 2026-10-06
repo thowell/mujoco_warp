@@ -741,12 +741,17 @@ def scatter_helper(arr_out: wp.array[float]):
   wp.atomic_add(arr_out, 0, 1.0)
 
 def factory_a(deterministic: bool = False):
-  @wp.kernel(module="unique")
+  module_options = {"enable_backward": False, "deterministic_max_records": 1}
+  @wp.kernel(module="unique", module_options=module_options)
   def kernel(arr_out: wp.array[float]):
     scatter_helper(arr_out)
 """
     issues = ast_analyzer.analyze(good_code, "test.py", "", check_atomic=True)
-    det_issues = [i for i in issues if isinstance(i, ast_analyzer.MissingDeterministicFactory)]
+    det_issues = [
+      i
+      for i in issues
+      if isinstance(i, (ast_analyzer.MissingDeterministicFactory, ast_analyzer.MissingDeterministicMaxRecords))
+    ]
     self.assertEqual(len(det_issues), 0)
 
     bad_code = """
@@ -765,6 +770,183 @@ def factory_a(n: int):
     det_issues = [i for i in issues if isinstance(i, ast_analyzer.MissingDeterministicFactory)]
     self.assertEqual(len(det_issues), 1)
     self.assertEqual(det_issues[0].kernel, "kernel")
+
+  def test_inline_ignore_inside_body_does_not_suppress_function_level_issues(self):
+    code = """
+import warp as wp
+
+def factory(n: int):
+  @wp.kernel
+  def kernel(arr_out: wp.array[int]):
+    wp.atomic_add(arr_out, 0, 1)  # kernel_analyzer: ignore
+"""
+    issues = ast_analyzer.analyze(code, "test.py", "", check_atomic=True)
+    unique_issues = [i for i in issues if isinstance(i, ast_analyzer.MissingModuleUnique)]
+    self.assertEqual(len(unique_issues), 1)
+    det_issues = [i for i in issues if isinstance(i, ast_analyzer.MissingDeterministicFactory)]
+    self.assertEqual(len(det_issues), 0)
+
+  def test_deterministic_max_records_enforced(self):
+    missing_code = """
+import warp as wp
+
+def factory(deterministic: bool = False):
+  module_options = {"enable_backward": False}
+  @wp.kernel(module="unique", module_options=module_options)
+  def kernel(arr_out: wp.array[float]):
+    wp.atomic_add(arr_out, 0, 1.0)
+"""
+    issues = ast_analyzer.analyze(missing_code, "test.py", "", check_atomic=True)
+    max_rec_issues = [i for i in issues if isinstance(i, ast_analyzer.MissingDeterministicMaxRecords)]
+    self.assertEqual(len(max_rec_issues), 1)
+
+    dynamic_loop_bad_code = """
+import warp as wp
+
+def factory(deterministic: bool = False):
+  module_options = {"enable_backward": False, "deterministic_max_records": 1}
+  @wp.kernel(module="unique", module_options=module_options)
+  def kernel(n: int, arr_out: wp.array[float]):
+    for i in range(n):
+      wp.atomic_add(arr_out, i, 1.0)
+"""
+    issues = ast_analyzer.analyze(dynamic_loop_bad_code, "test.py", "", check_atomic=True)
+    max_rec_issues = [i for i in issues if isinstance(i, ast_analyzer.MissingDeterministicMaxRecords)]
+    self.assertEqual(len(max_rec_issues), 1)
+
+    dynamic_loop_good_code = """
+import warp as wp
+
+def factory(max_records: int, deterministic: bool = False):
+  module_options = {"enable_backward": False}
+  if deterministic:
+    module_options["deterministic_max_records"] = max(max_records, 1)
+  @wp.kernel(module="unique", module_options=module_options)
+  def kernel(n: int, arr_out: wp.array[float]):
+    for i in range(n):
+      wp.atomic_add(arr_out, i, 1.0)
+"""
+    issues = ast_analyzer.analyze(dynamic_loop_good_code, "test.py", "", check_atomic=True)
+    max_rec_issues = [i for i in issues if isinstance(i, ast_analyzer.MissingDeterministicMaxRecords)]
+    self.assertEqual(len(max_rec_issues), 0)
+
+  def test_atomic_target_conflict_detected(self):
+    conflict_code = """
+import warp as wp
+
+def factory(deterministic: bool = False):
+  module_options = {"enable_backward": False, "deterministic_max_records": 1}
+  @wp.func_native(snippet="WP_TILE_SYNC();")
+  def _syncthreads():
+    pass
+
+  @wp.kernel(module="unique", module_options=module_options)
+  def kernel(arr_out: wp.array[float]):
+    arr_out[0] += 1.0
+    wp.atomic_add(arr_out, 1, arr_out[0])
+    _syncthreads()
+"""
+    issues = ast_analyzer.analyze(conflict_code, "test.py", "", check_atomic=True)
+    conflict_issues = [i for i in issues if isinstance(i, ast_analyzer.AtomicTargetConflict)]
+    self.assertEqual(len(conflict_issues), 3)
+
+  def test_inline_dict_module_options_and_unroll_ranges(self):
+    inline_dict_code = """
+import warp as wp
+
+def factory(deterministic: bool = False):
+  @wp.kernel(module="unique", module_options={"enable_backward": False, "deterministic_max_records": 16})
+  def kernel(arr_out: wp.array[float]):
+    for i in range(10, 0, -1):
+      for j in range(2):
+        break
+      wp.atomic_add(arr_out, i, 1.0)
+"""
+    issues = ast_analyzer.analyze(inline_dict_code, "test.py", "", check_atomic=True)
+    max_rec_issues = [i for i in issues if isinstance(i, ast_analyzer.MissingDeterministicMaxRecords)]
+    self.assertEqual(len(max_rec_issues), 0)
+
+    unroll_exceeded_code = """
+import warp as wp
+
+def factory(n: int, deterministic: bool = False):
+  @wp.kernel(module="unique", module_options={"enable_backward": False, "deterministic_max_records": 1})
+  def kernel(arr_out: wp.array[float]):
+    for i in range(20, 0, -1):
+      wp.atomic_add(arr_out, i, 1.0)
+    for j in range(wp.static(n)):
+      break
+      wp.atomic_add(arr_out, j, 1.0)
+"""
+    issues = ast_analyzer.analyze(unroll_exceeded_code, "test.py", "", check_atomic=True)
+    max_rec_issues = [i for i in issues if isinstance(i, ast_analyzer.MissingDeterministicMaxRecords)]
+    self.assertEqual(len(max_rec_issues), 2)
+
+    multiline_def_ignore_code = """
+import warp as wp
+
+def factory(n: int):
+  @wp.kernel
+  def kernel(
+    arr_out: wp.array[int],
+  ):  # kernel_analyzer: ignore
+    arr_out[0] = 1
+"""
+    issues = ast_analyzer.analyze(multiline_def_ignore_code, "test.py", "", check_atomic=True)
+    unique_issues = [i for i in issues if isinstance(i, ast_analyzer.MissingModuleUnique)]
+    self.assertEqual(len(unique_issues), 0)
+
+  def test_func_conflict_and_wp_static_branches(self):
+    func_conflict_code = """
+import warp as wp
+
+@wp.func
+def read_and_store(x: wp.array[float]) -> float:
+  x[0] = 2.0
+  return x[1]
+
+def factory(flag: bool, deterministic: bool = False):
+  module_options = {"enable_backward": False, "deterministic_max_records": 1}
+
+  @wp.func
+  def nested_helper(y: wp.array[float]):
+    v = read_and_store(y)
+    wp.atomic_add(y, 0, v)
+
+  @wp.kernel(module="unique", module_options=module_options)
+  def kernel(arr_out: wp.array[float], other_out: wp.array[float]):
+    nested_helper(arr_out)
+    if wp.static(flag):
+      other_out[0] = 1.0
+    else:
+      wp.atomic_add(other_out, 0, 1.0)
+"""
+    issues = ast_analyzer.analyze(func_conflict_code, "test.py", "", check_atomic=True)
+    conflict_issues = [i for i in issues if isinstance(i, ast_analyzer.AtomicTargetConflict)]
+    # read_and_store(y) conflicts with atomic_add(y), while wp.static(flag) branches do not
+    self.assertEqual(len(conflict_issues), 1)
+    self.assertIn("arr_out", conflict_issues[0].reason)
+
+  def test_launch_input_output_aliasing_conflict(self):
+    launch_conflict_code = """
+import warp as wp
+
+def _tree_acc(deterministic: bool = False):
+  module_options = {"enable_backward": False, "deterministic_max_records": 1}
+  @wp.kernel(module="unique", module_options=module_options)
+  def kernel(val_in: wp.array[float], val_out: wp.array[float]):
+    v = val_in[0]
+    wp.atomic_add(val_out, 1, v)
+  return kernel
+
+def caller(buf: wp.array[float]):
+  wp.launch(_tree_acc(True), dim=1, inputs=[buf], outputs=[buf])
+  wp.launch(_tree_acc(True), dim=1, inputs=[buf], outputs=[buf])  # kernel_analyzer: ignore[atomic]
+"""
+    issues = ast_analyzer.analyze(launch_conflict_code, "test.py", "", check_atomic=True)
+    conflict_issues = [i for i in issues if isinstance(i, ast_analyzer.AtomicTargetConflict)]
+    self.assertEqual(len(conflict_issues), 1)
+    self.assertIn("buf", conflict_issues[0].reason)
 
 
 if __name__ == "__main__":
