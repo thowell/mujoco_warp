@@ -265,7 +265,7 @@ def wrap_inside(
 
   # init: Newton on phi = asin(z) instead of z
   z = zinit
-  phi = wp.asin(zinit)
+  phi = float(wp.static(wp.asin(wp.float64(1.0 - 1.0e-7))))
   asin_Az = wp.asin(A * z)
   asin_Bz = wp.asin(B * z)
   f = asin_Az + asin_Bz - 2.0 * phi + G
