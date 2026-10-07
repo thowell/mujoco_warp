@@ -516,6 +516,31 @@ def foo(a: int):
     inv_issues = [i for i in issues if isinstance(i, ast_analyzer.BitwiseInversionInBoolean)]
     self.assertEqual(len(inv_issues), 0)
 
+  def test_warp_call_in_static(self):
+    bad_code = """
+import warp as wp
+
+def foo():
+  x = wp.static(wp.asin(wp.float64(0.5)))
+"""
+    issues = ast_analyzer.analyze(bad_code, "test.py", "")
+    static_issues = [i for i in issues if isinstance(i, ast_analyzer.WarpCallInStatic)]
+    self.assertEqual(len(static_issues), 2)
+    self.assertEqual({i.node.func.attr for i in static_issues}, {"asin", "float64"})
+
+    good_code = """
+import math
+import warp as wp
+
+def foo():
+  x = wp.static(0.5 * wp.pi)
+  y = wp.static(math.cos(0.1))
+  z = wp.static(wp.asin(0.5))  # kernel_analyzer: ignore
+"""
+    issues = ast_analyzer.analyze(good_code, "test.py", "")
+    static_issues = [i for i in issues if isinstance(i, ast_analyzer.WarpCallInStatic)]
+    self.assertEqual(len(static_issues), 0)
+
 
 if __name__ == "__main__":
   absltest.main()
