@@ -18,7 +18,7 @@ import dataclasses
 import functools
 import inspect
 import weakref
-from typing import Any, Callable, Sequence
+from typing import Any, Callable, Collection, Sequence
 
 import warp as wp
 from warp._src import context as wp_context
@@ -29,10 +29,14 @@ from mujoco_warp._src import warp_util
 
 
 class _Untaped:
-  """Context manager that pauses and restores the active Warp tape."""
+  """Context manager that swaps and restores the active Warp tape."""
+
+  def __init__(self, tape: wp.Tape | None = None):
+    self.tape = tape
 
   def __enter__(self):
-    self._tape, wp_context.runtime.tape = wp_context.runtime.tape, None
+    self._tape, wp_context.runtime.tape = wp_context.runtime.tape, self.tape
+    return self.tape
 
   def __exit__(self, *exc):
     wp_context.runtime.tape = self._tape
@@ -45,6 +49,16 @@ def _call_untaped(fn: Callable, *args, **kwargs):
 
 def _is_float(arr: wp.array) -> bool:
   return wp.types.type_is_float(wp_types.type_scalar_type(arr.dtype))
+
+
+def _inputs(launches: Sequence[Any]) -> set[int]:
+  """Returns `id(arr)` for arrays read by a kernel launch before being written."""
+  read, written = set(), set()
+  for l in launches:
+    if isinstance(l, list) and all(l[1]):
+      read.update(id(a) for a in l[3] if isinstance(a, wp.array) and id(a) not in written)
+      written.update(id(a) for a in l[4] if isinstance(a, wp.array))
+  return read
 
 
 def _fields(cls: type, prefix: str = "") -> tuple[str, ...]:
@@ -94,21 +108,22 @@ _PARAMS: dict[str, tuple[str, ...]] = {}
 _PROMOTED: dict[str, weakref.WeakSet] = {}
 
 
-def _unsupported(arr: Any, supported: bool) -> bool:
-  """Returns whether `arr` requires grad without support; arrays enabled by `_wrap` are exempt."""
+def _unsupported(arr: Any, supported: bool, exempt: bool = False) -> bool:
+  """Returns whether `arr` requires grad without support; unused promoted arrays are exempt."""
   return (
     isinstance(arr, wp.array)
     and arr.requires_grad
-    and not any(arr in s for k, s in _PROMOTED.items() if RULES[k] is not None)
+    and not (exempt and any(arr in s for k, s in _PROMOTED.items() if RULES[k] is not None))
     and (not _is_float(arr) or not supported)
   )
 
 
-def _validate(obj: Any, rule: AdjointRule) -> None:
+def _validate(obj: Any, rule: AdjointRule, used: Collection[int]) -> None:
   cls = type(obj)
   allowed = rule.fields[cls]
   for path in _FIELDS[cls]:
-    if _unsupported(get(obj, path), path in allowed):
+    arr = get(obj, path)
+    if _unsupported(arr, path in allowed, id(arr) not in used):
       raise NotImplementedError(f"Differentiation of {cls.__name__} field '{path}' is not supported.")
 
 
@@ -185,16 +200,19 @@ def _wrap(fn: Callable) -> Callable:
       raise NotImplementedError(f"Differentiation of '{name}' is not supported.")
 
     bound = {**dict(zip(params, args)), **kwargs}
-
-    for k, obj in bound.items():
-      if type(obj) in _FIELDS:
-        _validate(obj, rule)
-      elif _unsupported(obj, k in rule.array_args):
-        raise NotImplementedError(f"Differentiation of '{name}' with array argument is not supported.")
-
     reasons = () if rule.supported is None or _device(bound).is_capturing else rule.supported(*args, **kwargs)
     if reasons:
       raise NotImplementedError(f"Differentiation of '{name}' is not supported: {', '.join(reasons)}.")
+
+    with _Untaped(wp.Tape()) as fwd_tape:
+      result = fn(*args, **kwargs)
+
+    used = _inputs(fwd_tape.launches)
+    for k, obj in bound.items():
+      if type(obj) in _FIELDS:
+        _validate(obj, rule, used)
+      elif _unsupported(obj, k in rule.array_args):
+        raise NotImplementedError(f"Differentiation of '{name}' with array argument is not supported.")
 
     # Containers by type in signature order; the first Data is the input, the last is the output:
     objs: dict[type, list[Any]] = {cls: [] for cls in _FIELDS}
@@ -210,11 +228,11 @@ def _wrap(fn: Callable) -> Callable:
         _PROMOTED[name].add(arr)
 
     if rule.backward is None:
-      return fn(*args, **kwargs)
+      tape.launches.extend(fwd_tape.launches)
+      return result
 
     tracked = (*(get(c, p) for c in m for p in rule.model_fields), *auto)
     arrays = list({id(a): a for a in tracked if isinstance(a, wp.array) and a.size > 0 and a.requires_grad}.values())
-    result = _call_untaped(fn, *args, **kwargs)
     tape.record_func(backward=lambda: _call_untaped(rule.backward, *args, **kwargs), arrays=arrays)
     return result
 
