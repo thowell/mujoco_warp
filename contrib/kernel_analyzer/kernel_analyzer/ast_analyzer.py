@@ -143,6 +143,12 @@ class BitwiseInversionInBoolean(Issue):
     return 'bitwise NOT (~) used as boolean condition; use "not (...)", "!= 0", or explicit flag checks'
 
 
+@dataclasses.dataclass
+class WarpCallInStatic(Issue):
+  def __str__(self):
+    return f'"wp.{self.node.func.attr}" not allowed inside wp.static(); use pure Python or math.*'
+
+
 # TODO(team): add argument order analyzer.
 # this one is tricky because just verifying order does not tell you if the arguments
 # match the parameter signature.
@@ -243,6 +249,15 @@ def _is_parenthesized(source_lines: List[str], node: ast.AST) -> bool:
     end_c = 0
 
   return has_open and has_close
+
+
+def _is_wp_call(node: ast.AST) -> bool:
+  return (
+    isinstance(node, ast.Call)
+    and isinstance(node.func, ast.Attribute)
+    and isinstance(node.func.value, ast.Name)
+    and node.func.value.id == "wp"
+  )
 
 
 def analyze(source: str, filename: str, type_source: str) -> List[Issue]:
@@ -573,6 +588,12 @@ def analyze(source: str, filename: str, type_source: str) -> List[Issue]:
       for t in tests:
         if isinstance(t, ast.UnaryOp) and isinstance(t.op, ast.Invert):
           issues.append(BitwiseInversionInBoolean(t, ""))
+
+    # wp.* calls inside wp.static(...)
+    elif _is_wp_call(sub_node) and sub_node.func.attr == "static":
+      for inner in ast.walk(sub_node):
+        if inner is not sub_node and _is_wp_call(inner):
+          issues.append(WarpCallInStatic(inner, ""))
 
   # skip issues in ignored lines
   ignore_lines = set()
