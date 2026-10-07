@@ -251,6 +251,11 @@ class DiffApiTest(parameterized.TestCase):
     with wp.Tape(), self.assertRaisesRegex(NotImplementedError, "'sensor_pos'"):
       mjw.sensor_pos(m, d)
 
+    # Reusing a promoted output field (d.qvel from step) as an unsupported input dependency raises:
+    diff.register_adjoint("com_vel", lambda *args: None, model_fields=("body_mass",))
+    with wp.Tape(), self.assertRaisesRegex(NotImplementedError, "field 'qvel'"):
+      mjw.com_vel(m, d)
+
     scales = np.arange(1, nworld + 1, dtype=np.float32).reshape(nworld, 1)
     qpos_seed = wp.array(scales)
     site_seed = wp.array(np.repeat(scales[:, None], 3, axis=-1), dtype=wp.vec3)
@@ -413,6 +418,10 @@ class DiffApiTest(parameterized.TestCase):
       self.assertFalse(np.allclose(res.numpy()[0], res.numpy()[1]))
     self.assertTrue(res.requires_grad)
     self.assertTrue(vec.requires_grad)
+
+    # Reusing a promoted array argument (res) in an unsupported role (M) raises:
+    with wp.Tape(), self.assertRaisesRegex(NotImplementedError, "with array argument is not supported"):
+      mjw.mul_m(m, d, wp.zeros_like(res), vec, M=res)
 
     scales = np.arange(1, nworld + 1, dtype=np.float32).reshape(nworld, 1)
     res.grad.assign(wp.array(2.0 * scales))
