@@ -1,7 +1,8 @@
 # Agent Guidelines
 
-See [README.md](README.md#tips-for-developers) for development setup and [CONTRIBUTING.md](CONTRIBUTING.md) for code style,
-testing, benchmark, and PR conventions.
+See [README.md](README.md#tips-for-developers) for development setup.
+
+@CONTRIBUTING.md
 
 ## Commits and PRs
 
