@@ -1727,7 +1727,7 @@ def _solve_init_jaref_kernel(is_sparse: bool, nv: int, dofs_per_thread: int, com
   return kernel
 
 
-@wp.kernel
+@wp.kernel(module="unique")
 def _solve_init_search_cg_tiled(
   # Model:
   nv: int,
@@ -2288,7 +2288,7 @@ def _update_gradient_grad(stable_fast: bool):
   return kernel
 
 
-@wp.kernel
+@wp.kernel(module="unique")
 def _update_gradient_grad_tiled(
   # Model:
   nv: int,
@@ -3006,7 +3006,12 @@ _JTDAJ_OVERSUBSCRIBE_WAVES = 6
 
 
 @cache_kernel
-def _JTDACJ_sparse(compact: bool, cone_type: types.ConeType, max_condim: int):
+def _JTDACJ_sparse(
+  compact: bool,
+  cone_type: types.ConeType,
+  max_condim: int,
+  block_dim: int = types.BlockDim.update_gradient_JTDAJ_sparse,
+):
   COMPACT = compact
   ELLIPTIC = cone_type == types.ConeType.ELLIPTIC
   MAX_CONDIM = max_condim
@@ -3154,7 +3159,12 @@ def _JTDACJ_sparse(compact: bool, cone_type: types.ConeType, max_condim: int):
       return hessian_entry4(efc_J_in, terms, rowadr, worldid, pos1, pos2)
     return hessian_entry6(efc_J_in, terms, rowadr, worldid, pos1, pos2)
 
-  @wp.kernel(module="unique", enable_backward=False, grid_stride=True)
+  @wp.kernel(
+    module="unique",
+    module_options={"block_dim": block_dim},
+    enable_backward=False,
+    grid_stride=True,
+  )
   def kernel(
     # Model:
     opt_impratio_invsqrt: wp.array[float],
@@ -3261,9 +3271,9 @@ def _JTDACJ_sparse(compact: bool, cone_type: types.ConeType, max_condim: int):
   return kernel
 
 
-def _jtdaj_groups_per_world(nworld: int, njmax: int) -> int:
+def _jtdaj_groups_per_world(nworld: int, njmax: int, kernel: wp.Kernel) -> int:
   # njmax is capacity and often mostly empty, so cap slots at a few resident waves.
-  block_size, min_grid_size = wp.get_suggested_block_size(_JTDACJ_sparse(False, types.ConeType.PYRAMIDAL, 3))
+  block_size, min_grid_size = wp.get_suggested_block_size(kernel)
   device_warps = max(1, block_size * min_grid_size // _JTDAJ_THREADS_PER_GROUP)
   return max(1, min(njmax, _JTDAJ_OVERSUBSCRIBE_WAVES * device_warps // nworld))
 
@@ -3315,11 +3325,14 @@ def _update_gradient(m: types.Model, d: types.Data, ctx: SolverContext, compact:
         outputs=[ctx.h],
       )
 
-      groups_per_world = _jtdaj_groups_per_world(d.nworld, d.njmax)
       max_condim = 3
       if m.opt.cone == types.ConeType.ELLIPTIC and m.nmaxcondim > 3:
         max_condim = int(m.nmaxcondim)
-      jtdaj_kernel = _JTDACJ_sparse(sc, m.opt.cone, max_condim)
+      elliptic = m.opt.cone == types.ConeType.ELLIPTIC
+      threads_per_group = 1 if elliptic and wp.get_device().is_cpu else _JTDAJ_THREADS_PER_GROUP
+      block_dim = threads_per_group if elliptic else mj.block_dim.update_gradient_JTDAJ_sparse
+      jtdaj_kernel = _JTDACJ_sparse(sc, m.opt.cone, max_condim, block_dim)
+      groups_per_world = _jtdaj_groups_per_world(d.nworld, d.njmax, jtdaj_kernel)
       jtdaj_inputs = [
         m.opt.impratio_invsqrt,
         d.contact.friction,
@@ -3339,9 +3352,6 @@ def _update_gradient(m: types.Model, d: types.Data, ctx: SolverContext, compact:
         ctx.done,
         groups_per_world,
       ]
-      elliptic = m.opt.cone == types.ConeType.ELLIPTIC
-      threads_per_group = 1 if elliptic and wp.get_device().is_cpu else _JTDAJ_THREADS_PER_GROUP
-      block_dim = threads_per_group if elliptic else mj.block_dim.update_gradient_JTDAJ_sparse
       wp.launch(
         jtdaj_kernel,
         dim=(d.nworld, groups_per_world, threads_per_group),
@@ -3514,9 +3524,10 @@ def _update_gradient_incremental(m: types.Model, d: types.Data, ctx: SolverConte
   sc = _sparse_compact(ctx)
   if m.is_sparse or sc:
     dj = ctx.compact_d_full if sc else d
-    slots = _jtdaj_groups_per_world(d.nworld, ctx.quad_changed_ids.shape[1])
+    inc_kernel = _update_gradient_h_incremental_sparse(sc)
+    slots = _jtdaj_groups_per_world(d.nworld, ctx.quad_changed_ids.shape[1], inc_kernel)
     wp.launch(
-      _update_gradient_h_incremental_sparse(sc),
+      inc_kernel,
       dim=(d.nworld, slots, _JTDAJ_THREADS_PER_GROUP),
       inputs=[
         dj.efc.J_rownnz,
@@ -3563,7 +3574,7 @@ def _update_gradient_incremental(m: types.Model, d: types.Data, ctx: SolverConte
     )
 
 
-@wp.kernel
+@wp.kernel(module="unique")
 def _solve_search_update_cg_tiled(
   # Model:
   nv: int,

@@ -888,9 +888,10 @@ class SolverTest(parameterized.TestCase):
       inputs=[m.nv, m.M_elemid, d.M, d.cdof_dof, ctx.done],
       outputs=[ctx.h],
     )
-    groups_per_world = solver._jtdaj_groups_per_world(d.nworld, d.njmax)
+    jtdaj_kernel = solver._JTDACJ_sparse(False, ConeType.PYRAMIDAL, 3, m.block_dim.update_gradient_JTDAJ_sparse)
+    groups_per_world = solver._jtdaj_groups_per_world(d.nworld, d.njmax, jtdaj_kernel)
     wp.launch(
-      solver._JTDACJ_sparse(False, ConeType.PYRAMIDAL, 3),
+      jtdaj_kernel,
       dim=(d.nworld, groups_per_world, solver._JTDAJ_THREADS_PER_GROUP),
       inputs=[
         m.opt.impratio_invsqrt,
@@ -925,6 +926,37 @@ class SolverTest(parameterized.TestCase):
     qacc = d.qacc.numpy()[0]
     self.assertTrue(np.all(np.isfinite(qacc)), "Newton solve produced non-finite qacc")
     _assert_eq(qacc, mjd.qacc, "qacc")
+
+  @absltest.skipIf(not wp.get_device().is_cuda, "CUDA occupancy queries are not used on CPU")
+  @parameterized.parameters(
+    (True, ConeType.ELLIPTIC, 6, 32),
+    (False, ConeType.PYRAMIDAL, 3, 128),
+  )
+  def test_jtdaj_occupancy_reuses_launch_module(self, compact, cone, max_condim, block_dim):
+    """The occupancy query and JTDAJ launch must share one compiled module."""
+    device = wp.get_device()
+
+    kernel = solver._JTDACJ_sparse(compact, cone, max_condim, block_dim)
+    solver._jtdaj_groups_per_world(1, 100, kernel)
+    self.assertIn((device.context, block_dim), kernel.module.execs)
+    occupancy_module = kernel.module.load(device)
+    launch_module = kernel.module.load(device, block_dim=block_dim)
+    self.assertIs(occupancy_module, launch_module)
+    self.assertEqual(len(kernel.module.execs), 1)
+
+    inc_kernel = solver._update_gradient_h_incremental_sparse(compact)
+    solver._jtdaj_groups_per_world(1, 100, inc_kernel)
+    occupancy_inc_module = inc_kernel.module.load(device)
+    launch_inc_module = inc_kernel.module.load(device, block_dim=inc_kernel.module.options["block_dim"])
+    self.assertIs(occupancy_inc_module, launch_inc_module)
+    self.assertEqual(len(inc_kernel.module.execs), 1)
+
+  def test_cg_tiled_kernels_are_unique(self):
+    """Ensure CG tiled kernels with custom block_dim do not share solver.py's module."""
+    shared_module = solver._solve_init_efc.module
+    self.assertNotEqual(solver._solve_init_search_cg_tiled.module, shared_module)
+    self.assertNotEqual(solver._update_gradient_grad_tiled.module, shared_module)
+    self.assertNotEqual(solver._solve_search_update_cg_tiled.module, shared_module)
 
   def test_elliptic_dense_hessian(self):
     """Structured dense cone contraction matches the reference Hessian."""
