@@ -94,6 +94,9 @@ def create_solver_context(
     and m.opt.solver == types.SolverType.CG
     and m.opt.cone != types.ConeType.ELLIPTIC
   )
+  n_u = nv - 3 * m.nefmdof
+  eff_fold_dense = eff_fold_wanted and 0 < n_u <= 600
+  n_u_pad = n_u if n_u <= _BLOCK_CHOLESKY_DIM else ((n_u + 31) // 32) * 32
 
   return SolverContext(
     Jaref=wp.empty((nworld, njmax), dtype=float),
@@ -124,6 +127,12 @@ def create_solver_context(
     qfrc_smooth_eff=wp.zeros((nworld, nv_pad), dtype=float) if m.opt.integrator == types.IntegratorType.DISCRETE else None,
     epB=wp.empty_like(d.efm_L) if eff_fold_wanted else None,
     epL=wp.empty_like(d.efm_L) if eff_fold_wanted else None,
+    epS=wp.empty((nworld, n_u_pad, n_u_pad), dtype=float) if eff_fold_dense else None,
+    epS_factor=(wp.empty((nworld, n_u_pad, n_u_pad), dtype=float) if (eff_fold_dense and n_u > _BLOCK_CHOLESKY_DIM) else None),
+    epS_rhs=wp.empty((nworld, n_u_pad), dtype=float) if eff_fold_dense else None,
+    epS_sol=wp.empty((nworld, n_u_pad), dtype=float) if eff_fold_dense else None,
+    epU=wp.empty((n_u,), dtype=int) if eff_fold_dense else None,
+    ep_loc=wp.empty((nv,), dtype=int) if eff_fold_dense else None,
   )
 
 
@@ -3396,8 +3405,19 @@ def _update_gradient(m: types.Model, d: types.Data, ctx: SolverContext, compact:
   is_discrete = m.opt.integrator == types.IntegratorType.DISCRETE
   if m.opt.solver == types.SolverType.CG:
     if is_discrete:
-      if m.nefmK > 0 or m.efm0_active or (m.opt.enableflags & types.EnableBit.SLEEP):
-        derivative.eff_prec(m, d, ctx.Mgrad, ctx.grad, epL=ctx.epL)
+      if m.nefmK > 0 or m.efm0_active or (ctx.epL is not None and not compact) or (m.opt.enableflags & types.EnableBit.SLEEP):
+        derivative.eff_prec(
+          m,
+          d,
+          ctx.Mgrad,
+          ctx.grad,
+          epL=ctx.epL if not compact else None,
+          epS=ctx.epS if not compact else None,
+          epS_factor=ctx.epS_factor if not compact else None,
+          epS_rhs=ctx.epS_rhs if not compact else None,
+          epS_sol=ctx.epS_sol if not compact else None,
+          epU=ctx.epU if not compact else None,
+        )
       else:
         smooth.solve_LD(m, d, d.qHLD, d.qHDiagInv, ctx.Mgrad, ctx.grad)
     else:
@@ -4031,14 +4051,26 @@ def init_context(
       if m.has_flex_passive and ctx.efm_con is None:
         ctx.efm_con = derivative.build_efm_contact(m, d)
       if not compact and ctx.epL is not None:
-        derivative.eff_prec_fold(m, d, out=ctx.epL, epB=ctx.epB)
+        derivative.eff_prec_fold(
+          m,
+          d,
+          out=ctx.epL,
+          epB=ctx.epB,
+          efm_con=ctx.efm_con,
+          epS=ctx.epS,
+          epS_factor=ctx.epS_factor,
+          epS_rhs=ctx.epS_rhs,
+          epS_sol=ctx.epS_sol,
+          epU=ctx.epU,
+          ep_loc=ctx.ep_loc,
+        )
       elif (
         not compact
         and m.nefmdof > 0
         and m.opt.solver == types.SolverType.CG
         and not bool(m.opt.enableflags & types.EnableBit.IPC)
       ):
-        derivative.eff_prec_fold(m, d, out=d.efm_L)
+        derivative.eff_prec_fold(m, d, out=d.efm_L, efm_con=ctx.efm_con)
     elif m.nefmdof > 0 and m.opt.solver == types.SolverType.CG and not bool(m.opt.enableflags & types.EnableBit.IPC):
       derivative.eff_prec_fold(m, d, out=d.efm_L)
     if grad:

@@ -63,6 +63,8 @@ def check_discrete(m: Model):
       raise ValueError("Flag IPC requires solver='CG'")
     if m.opt.enableflags & EnableBit.SLEEP:
       raise ValueError("Flag IPC does not support flag sleep")
+    if m.opt.enableflags & EnableBit.INVDISCRETE:
+      raise ValueError("discrete inverse dynamics is not supported with flag ipc")
   if m.opt.integrator != IntegratorType.DISCRETE:
     if m.has_flex_snh:
       raise ValueError("stable Neo-Hookean elasticity requires integrator='discrete'")

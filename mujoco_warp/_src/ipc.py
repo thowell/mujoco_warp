@@ -1545,7 +1545,7 @@ def _points(
   )
 
 
-@wp.kernel
+@wp.kernel(module="unique")
 def _ipc_check_convergence_kernel(
   # Model:
   nv: int,
@@ -1611,7 +1611,6 @@ def _ipc_linesearch_eval_trial_kernel(
   world_done: wp.array[int],
   ls_done: wp.array[int],
   ls_iter: wp.array[int],
-  beta: wp.array[float],
   merit_energy: wp.array[float],
   merit_energy_trial: wp.array[float],
   newton_converged: wp.array[int],
@@ -1632,12 +1631,8 @@ def _ipc_linesearch_eval_trial_kernel(
     ls_accept_out[worldid] = 1
   elif it >= 7:
     ls_done_out[worldid] = 1
-    if beta[worldid] >= 1.0 - 1e-6:
-      last_ls_alpha_out[worldid] = 0.0
-      ls_accept_out[worldid] = 0
-    else:
-      last_ls_alpha_out[worldid] = alpha
-      ls_accept_out[worldid] = 1
+    last_ls_alpha_out[worldid] = 0.5 * alpha
+    ls_accept_out[worldid] = 2
   else:
     ls_accept_out[worldid] = 0
 
@@ -1662,11 +1657,17 @@ def _ipc_linesearch_commit_wx_kernel(
   ls_cond_out: wp.array[int],
 ):
   worldid, tid = wp.tid()
-  if accept[worldid] != 0:
+  acc = accept[worldid]
+  if acc == 1:
     if tid < nv:
       w_out[worldid, tid] = wn[worldid, tid]
     if tid < nfv:
       x_out[worldid, tid] = xn[worldid, tid]
+  elif acc == 2:
+    if tid < nv:
+      w_out[worldid, tid] = 0.5 * (w_out[worldid, tid] + wn[worldid, tid])
+    if tid < nfv:
+      x_out[worldid, tid] = 0.5 * (x_out[worldid, tid] + xn[worldid, tid])
   if worldid == 0 and tid == 0:
     it = ls_iter_out[0] + 1
     ls_iter_out[0] = it
@@ -1678,7 +1679,7 @@ def _ipc_linesearch_commit_wx_kernel(
     ls_cond_out[0] = 0 if (all_done == 1 or it >= 8) else 1
 
 
-@wp.kernel
+@wp.kernel(module="unique")
 def _ipc_eval_merit_contact_kernel(
   # In:
   naset: wp.array[int],
@@ -1760,7 +1761,7 @@ def _ipc_tangent_da_kernel(
     da_out[worldid, dofid] = 0.0
 
 
-@wp.kernel
+@wp.kernel(module="unique")
 def _ipc_eval_gauss_energy_kernel(
   # Model:
   nv: int,
@@ -3044,34 +3045,48 @@ def ipc_advance_world_state_kernel(
       world_done_out[worldid] = 1
 
 
-@wp.kernel
-def _ipc_prepare_commit_kernel(
-  # Data in:
-  qvel_in: wp.array2d[float],
-  qacc_smooth_in: wp.array2d[float],
-  # In:
-  own: wp.array[bool],
-  timestep: wp.array[float],
-  total_solver_niter: wp.array[int],
-  # Data out:
-  solver_niter_out: wp.array[int],
-  qacc_out: wp.array2d[float],
-  # Out:
-  wfree_out: wp.array2d[float],
-  qvel_old_out: wp.array2d[float],
-):
-  worldid, dofid = wp.tid()
-  h = timestep[worldid % timestep.shape[0]]
-  if dofid == 0:
-    solver_niter_out[worldid] = total_solver_niter[worldid]
-  if own[dofid]:
-    wf = wfree_out[worldid, dofid]
-    qvel_old_out[worldid, dofid] = wf
-    qacc_out[worldid, dofid] = (wf - qvel_in[worldid, dofid]) / h
-  else:
-    wfree_out[worldid, dofid] = 0.0
-    qvel_old_out[worldid, dofid] = qvel_in[worldid, dofid]
-    qacc_out[worldid, dofid] = qacc_smooth_in[worldid, dofid]
+@cache_kernel
+def _ipc_prepare_commit_kernel(warn_overflow: int):
+  @wp.kernel(module="unique", enable_backward=False)
+  def kernel(
+    # Data in:
+    qvel_in: wp.array2d[float],
+    qacc_smooth_in: wp.array2d[float],
+    # In:
+    own: wp.array[bool],
+    timestep: wp.array[float],
+    total_solver_niter: wp.array[int],
+    beta: wp.array[float],
+    stall: wp.array[int],
+    # Data out:
+    solver_niter_out: wp.array[int],
+    qacc_out: wp.array2d[float],
+    overflow_out: wp.array[int],
+    # Out:
+    wfree_out: wp.array2d[float],
+    qvel_old_out: wp.array2d[float],
+  ):
+    worldid, dofid = wp.tid()
+    h = timestep[worldid % timestep.shape[0]]
+    if dofid == 0:
+      solver_niter_out[worldid] = total_solver_niter[worldid]
+      if beta[worldid] < 1.0 - 1e-6:
+        overflow_out[worldid] = overflow_out[worldid] | wp.static(OverflowType.ITERATIONS)
+        if wp.static(bool(warn_overflow & OverflowType.ITERATIONS)):
+          if stall[worldid] >= IPC_STALL_MAX:
+            wp.printf("Warning: IPC stalled at beta=%.4f (world %d)\n", beta[worldid], worldid)
+          else:
+            wp.printf("Warning: IPC outer-iteration limit reached at beta=%.4f (world %d)\n", beta[worldid], worldid)
+    if own[dofid]:
+      wf = wfree_out[worldid, dofid]
+      qvel_old_out[worldid, dofid] = wf
+      qacc_out[worldid, dofid] = (wf - qvel_in[worldid, dofid]) / h
+    else:
+      wfree_out[worldid, dofid] = 0.0
+      qvel_old_out[worldid, dofid] = qvel_in[worldid, dofid]
+      qacc_out[worldid, dofid] = qacc_smooth_in[worldid, dofid]
+
+  return kernel
 
 
 @wp.kernel
@@ -3500,7 +3515,6 @@ def ipc(m: Model, d: Data, ws: Optional[IpcWorkspace] = None):
           ws.world_done,
           ws.ls_done,
           ws.ls_iter,
-          ws.beta,
           ws.merit_energy,
           ws.merit_energy_trial,
           ws.newton_converged,
@@ -3603,7 +3617,7 @@ def ipc(m: Model, d: Data, ws: Optional[IpcWorkspace] = None):
 
   # Prepare committed accelerations and velocities
   wp.launch(
-    _ipc_prepare_commit_kernel,
+    _ipc_prepare_commit_kernel(int(m.opt.warn_overflow)),
     dim=(nworld, nv),
     inputs=[
       d.qvel,
@@ -3611,10 +3625,13 @@ def ipc(m: Model, d: Data, ws: Optional[IpcWorkspace] = None):
       ws.own,
       m.opt.timestep,
       ws.total_solver_niter,
+      ws.beta,
+      ws.stall,
     ],
     outputs=[
       d.solver_niter,
       d.qacc,
+      d.overflow,
       ws.wfree,
       ws.qvel_old,
     ],

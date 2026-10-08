@@ -2628,6 +2628,12 @@ class SolverContext:
   qfrc_smooth_eff_ready: bool = False
   epB: Optional[wp.array] = None
   epL: Optional[wp.array] = None
+  epS: Optional[wp.array] = None
+  epS_factor: Optional[wp.array] = None
+  epS_rhs: Optional[wp.array] = None
+  epS_sol: Optional[wp.array] = None
+  epU: Optional[wp.array] = None
+  ep_loc: Optional[wp.array] = None
   efm_con: Optional[tuple] = None
 
 

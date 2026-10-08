@@ -672,6 +672,58 @@ class ContinuousCollisionTest(parameterized.TestCase):
       self.assertEqual(int(ws.nge.numpy()[w]), 144)
       self.assertTrue(bool(int(d.overflow.numpy()[w]) & int(OverflowType.BROADPHASE)))
 
+  @parameterized.parameters(1, 2)
+  def test_ipc_discover_candidates_same_body(self, nworld):
+    """Verifies cross-flex candidates sharing a rigid body (sameBody) are filtered out."""
+    _, _, m, d = test_data.fixture(
+      xml="""
+      <mujoco>
+        <option integrator="discrete" solver="CG">
+          <flag ipc="enable"/>
+        </option>
+        <worldbody>
+          <flexcomp name="c1" type="grid" dim="2" count="2 2 1" spacing="0.05 0.05 1"
+                    radius="0.001" mass="0.05">
+            <contact selfcollide="none"/>
+            <pin id="0"/>
+          </flexcomp>
+          <flexcomp name="c2" type="grid" dim="2" count="2 2 1" spacing="0.05 0.05 1"
+                    radius="0.002" mass="0.05" pos="0 0 0.0031">
+            <contact selfcollide="none"/>
+            <pin id="0"/>
+          </flexcomp>
+        </worldbody>
+      </mujoco>
+      """,
+      nworld=nworld,
+    )
+    if nworld == 2:
+      fv = d.flexvert_xpos.numpy()
+      fv[1, 4:, 2] += 1.0
+      d.flexvert_xpos = wp.array(fv, dtype=wp.vec3, device=d.flexvert_xpos.device)
+    ws = ipc.get_ipc_workspace(m, d)
+    ws.ncand.fill_(-1)
+    cc.ipc_update_geom_features(m, d, ws)
+    cc.ipc_discover_candidates(m, d, ws, d.flexvert_xpos, d.flexvert_xpos, d.flexvert_xpos, -1e30, -1e30)
+
+    ncand0 = int(ws.ncand.numpy()[0])
+    self.assertGreater(ncand0, 0)
+    cand_types = ws.cand_type.numpy()[0, :ncand0]
+    cand_idxs = ws.cand_idx.numpy()[0, :ncand0]
+    vbody = m.flex_vertbodyid.numpy()
+    for t, idx in zip(cand_types, cand_idxs):
+      if t == int(cc.FlexPairType.FLEX_VERT_TRI):
+        v, v0, v1, v2 = idx
+        if vbody[v] >= 0:
+          self.assertNotIn(vbody[v], (vbody[v0], vbody[v1], vbody[v2]))
+      elif t == int(cc.FlexPairType.FLEX_EDGE_EDGE):
+        a1, b1, a2, b2 = idx
+        for va in (a1, b1):
+          if vbody[va] >= 0:
+            self.assertNotIn(vbody[va], (vbody[a2], vbody[b2]))
+    if nworld == 2:
+      self.assertEqual(int(ws.ncand.numpy()[1]), 0)
+
 
 if __name__ == "__main__":
   absltest.main()
