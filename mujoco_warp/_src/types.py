@@ -2647,10 +2647,15 @@ class SolverContext:
   qfrc_smooth_eff_ready: bool = False
   epB: Optional[wp.array] = None
   epL: Optional[wp.array] = None
-  # discrete integrator effective-metric scratch built before the solver loop, which may run
-  # inside wp.capture_while where memory cannot be allocated (None otherwise)
+  epS: Optional[wp.array] = None
+  epS_factor: Optional[wp.array] = None
+  epS_rhs: Optional[wp.array] = None
+  epS_sol: Optional[wp.array] = None
+  epU: Optional[wp.array] = None
+  ep_loc: Optional[wp.array] = None
   efm_con: Optional[tuple] = None
-  flex_scratch: Optional[tuple] = None
+  flex_wvec: Optional[wp.array] = None
+  flex_wres: Optional[wp.array] = None
 
 
 @dataclasses.dataclass

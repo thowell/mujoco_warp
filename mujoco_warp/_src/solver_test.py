@@ -824,7 +824,7 @@ class SolverTest(parameterized.TestCase):
       </mujoco>
       """
     )
-    ctx = solver._create_solver_context(m, d)
+    ctx = solver.create_solver_context(m, d)
 
     efc_J = [
       [0.0, 1.0, 1.0, -5.3886324e-05, 0.05, -0.05],
@@ -912,7 +912,7 @@ class SolverTest(parameterized.TestCase):
       """,
       njmax=5,
     )
-    ctx = solver._create_solver_context(m, d)
+    ctx = solver.create_solver_context(m, d)
     d.ne.zero_()
     d.nf.fill_(5)
     d.nefc.fill_(5)
