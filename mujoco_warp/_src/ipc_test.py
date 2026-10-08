@@ -1750,6 +1750,79 @@ class IpcTest(parameterized.TestCase):
     if nworld == 2:
       self.assertEqual(int(d_nnz.overflow.numpy()[1]), 0)
 
+  @parameterized.parameters(1, 2)
+  def test_ipc_linesearch_final_trial_accept(self, nworld):
+    """Verifies exhausted IPC line search unconditionally accepts 1/256 step."""
+    _, _, m, d = test_data.fixture(
+      xml="""
+      <mujoco>
+        <option timestep="0.01" gravity="0 0 -100" integrator="discrete" solver="CG" iterations="0">
+          <flag warmstart="disable" ipc="enable"/>
+        </option>
+        <worldbody>
+          <geom name="floor" type="plane" size="1 1 0.1"/>
+          <flexcomp name="cloth" type="grid" dim="2" count="2 2 1"
+                    spacing="0.05 0.05 1" radius="0.005" mass="0.05" pos="0 0 0.0008">
+            <contact selfcollide="none"/>
+          </flexcomp>
+        </worldbody>
+      </mujoco>
+      """,
+      nworld=nworld,
+    )
+    if nworld == 2:
+      qpos = d.qpos.numpy()
+      qpos[1, 2::3] = 1.0
+      d.qpos.assign(qpos)
+
+    mjw.fwd_position(m, d)
+    mjw.fwd_velocity(m, d)
+    mjw.fwd_actuation(m, d)
+    mjw.fwd_acceleration(m, d)
+
+    ws = ipc.get_ipc_workspace(m, d)
+    ws.last_ls_alpha.fill_(wp.inf)
+    ipc.ipc(m, d, ws)
+
+    np.testing.assert_allclose(ws.last_ls_alpha.numpy()[0], 1.0 / 256.0, atol=1e-7)
+    if nworld == 2:
+      np.testing.assert_allclose(ws.last_ls_alpha.numpy()[1], 1.0, atol=1e-7)
+
+  @parameterized.parameters(1, 2)
+  def test_ipc_incomplete_step_overflow(self, nworld):
+    """Verifies incomplete IPC outer loop sets OverflowType.ITERATIONS."""
+    _, _, m, d = test_data.fixture(
+      xml="""
+      <mujoco>
+        <option timestep="0.01" gravity="0 0 0" integrator="discrete" solver="CG" iterations="0">
+          <flag ipc="enable"/>
+        </option>
+        <worldbody>
+          <geom name="floor" type="plane" size="1 1 0.1"/>
+          <flexcomp name="cloth" type="grid" dim="2" count="2 2 1"
+                    spacing="0.05 0.05 1" radius="0.005" mass="0.05" pos="0 0 0.0031">
+            <contact selfcollide="none"/>
+          </flexcomp>
+        </worldbody>
+      </mujoco>
+      """,
+      nworld=nworld,
+    )
+    qvel = d.qvel.numpy()
+    qvel[0, 2::3] = -1000.0
+    if nworld == 2:
+      qpos = d.qpos.numpy()
+      qpos[1, 2::3] = 1.0
+      d.qpos = wp.array(qpos, dtype=float, device=d.qpos.device)
+    d.qvel = wp.array(qvel, dtype=float, device=d.qvel.device)
+    d.overflow.zero_()
+
+    mjw.step(m, d)
+
+    self.assertTrue(bool(int(d.overflow.numpy()[0]) & int(OverflowType.ITERATIONS)))
+    if nworld == 2:
+      self.assertEqual(int(d.overflow.numpy()[1]), 0)
+
 
 if __name__ == "__main__":
   absltest.main()

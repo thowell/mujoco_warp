@@ -1486,6 +1486,12 @@ def ipc_cand_geom_edge_edge_kernel(warn_overflow: int):
   return kernel
 
 
+@wp.func
+def _same_body(flex_vertbodyid: wp.array[int], a: int, b: int) -> bool:
+  ba = flex_vertbodyid[a]
+  return ba >= 0 and ba == flex_vertbodyid[b]
+
+
 @cache_kernel
 def ipc_cand_vert_tri_kernel(warn_overflow: int):
   @wp.kernel(module="unique", enable_backward=False)
@@ -1498,6 +1504,7 @@ def ipc_cand_vert_tri_kernel(warn_overflow: int):
     flex_vertadr: wp.array[int],
     flex_elemadr: wp.array[int],
     flex_elemdataadr: wp.array[int],
+    flex_vertbodyid: wp.array[int],
     flex_elem: wp.array[int],
     flex_elemflexid: wp.array[int],
     flex_vertflexid: wp.array[int],
@@ -1540,7 +1547,14 @@ def ipc_cand_vert_tri_kernel(warn_overflow: int):
     v0 = va2 + flex_elem[eadr]
     v1 = va2 + flex_elem[eadr + 1]
     v2 = va2 + flex_elem[eadr + 2]
-    if v == v0 or v == v1 or v == v2:
+    if (
+      v == v0
+      or v == v1
+      or v == v2
+      or _same_body(flex_vertbodyid, v, v0)
+      or _same_body(flex_vertbodyid, v, v1)
+      or _same_body(flex_vertbodyid, v, v2)
+    ):
       return
 
     idx = wp.vec4i(v, v0, v1, v2)
@@ -1592,6 +1606,7 @@ def ipc_cand_flex_edge_edge_kernel(warn_overflow: int):
     flex_selfcollide: wp.array[int],
     flex_dim: wp.array[int],
     flex_vertadr: wp.array[int],
+    flex_vertbodyid: wp.array[int],
     flex_edge: wp.array[wp.vec2i],
     flex_edgeflexid: wp.array[int],
     # In:
@@ -1644,7 +1659,16 @@ def ipc_cand_flex_edge_edge_kernel(warn_overflow: int):
     a2 = va2 + ev2[0]
     b2 = va2 + ev2[1]
 
-    if a1 == a2 or a1 == b2 or b1 == a2 or b1 == b2:
+    if (
+      a1 == a2
+      or a1 == b2
+      or b1 == a2
+      or b1 == b2
+      or _same_body(flex_vertbodyid, a1, a2)
+      or _same_body(flex_vertbodyid, a1, b2)
+      or _same_body(flex_vertbodyid, b1, a2)
+      or _same_body(flex_vertbodyid, b1, b2)
+    ):
       return
 
     idx = wp.vec4i(a1, b1, a2, b2)
@@ -1848,6 +1872,7 @@ def ipc_discover_candidates(
         m.flex_vertadr,
         m.flex_elemadr,
         m.flex_elemdataadr,
+        m.flex_vertbodyid,
         m.flex_elem,
         m.flex_elemflexid,
         m.flex_vertflexid,
@@ -1871,6 +1896,7 @@ def ipc_discover_candidates(
         m.flex_selfcollide,
         m.flex_dim,
         m.flex_vertadr,
+        m.flex_vertbodyid,
         m.flex_edge,
         m.flex_edgeflexid,
         ws.rad,
