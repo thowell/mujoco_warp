@@ -1004,6 +1004,7 @@ def _implicit_free_body_solve(
             lin_vel,
             density,
             viscosity,
+            False,
           )
 
           # 3x3 block projection of J^T @ B @ J
@@ -1044,7 +1045,6 @@ def _implicit_free_body_solve(
           lvel,
           density,
           viscosity,
-          False,
         )
         B00 = wp.diag(wp.vec3(B_box[0, 0], B_box[1, 1], B_box[2, 2]))
         B11 = wp.diag(wp.vec3(B_box[3, 3], B_box[4, 4], B_box[5, 5]))
@@ -1127,8 +1127,6 @@ def _discrete_free_gyro_kernel(has_fluid: bool, has_flex_passive: bool, is_inver
     opt_timestep: wp.array[float],
     opt_enableflags: int,
     body_dofadr: wp.array[int],
-    body_mass: wp.array2d[float],
-    body_inertia: wp.array2d[wp.vec3],
     dof_treeid: wp.array[int],
     ten_J_rownnz: wp.array[int],
     ten_J_rowadr: wp.array[int],
@@ -1144,11 +1142,11 @@ def _discrete_free_gyro_kernel(has_fluid: bool, has_flex_passive: bool, is_inver
     qacc_in: wp.array2d[float],
     xpos_in: wp.array2d[wp.vec3],
     xmat_in: wp.array2d[wp.mat33],
-    xipos_in: wp.array2d[wp.vec3],
-    ximat_in: wp.array2d[wp.mat33],
+    subtree_com_in: wp.array2d[wp.vec3],
     moment_rownnz_in: wp.array2d[int],
     moment_rowadr_in: wp.array2d[int],
     moment_colind_in: wp.array2d[int],
+    crb_in: wp.array2d[vec10],
     M_in: wp.array2d[float],
     tree_awake_in: wp.array2d[int],
     qfrc_smooth_in: wp.array2d[float],
@@ -1223,8 +1221,19 @@ def _discrete_free_gyro_kernel(has_fluid: bool, has_flex_passive: bool, is_inver
               return
 
     timestep = opt_timestep[worldid % opt_timestep.shape[0]]
-    mass = body_mass[worldid % body_mass.shape[0], bodyid]
-    inertia = body_inertia[worldid % body_inertia.shape[0], bodyid]
+    crb = crb_in[worldid, bodyid]
+    subtree_mass = crb[9]
+    Iw = wp.mat33(
+      crb[0],
+      crb[3],
+      crb[4],
+      crb[3],
+      crb[1],
+      crb[5],
+      crb[4],
+      crb[5],
+      crb[2],
+    )
     qvel_rot = wp.vec3(
       qvel_in[worldid, dof_adr + 3],
       qvel_in[worldid, dof_adr + 4],
@@ -1255,9 +1264,9 @@ def _discrete_free_gyro_kernel(has_fluid: bool, has_flex_passive: bool, is_inver
           if c != r:
             A[c, r] += val
 
-    s = xipos_in[worldid, bodyid] - xpos_in[worldid, bodyid]
-    lin, rot = math.free_bias_vel_blocks(mass, xmat_in[worldid, bodyid], ximat_in[worldid, bodyid], inertia, s, qvel_rot)
-    h_mass = -timestep * mass
+    s = subtree_com_in[worldid, bodyid] - xpos_in[worldid, bodyid]
+    lin, rot = math.free_bias_vel_blocks(subtree_mass, xmat_in[worldid, bodyid], Iw, s, qvel_rot)
+    h_mass = -timestep * subtree_mass
     for r in range(3):
       for c in range(3):
         A[r, 3 + c] += h_mass * lin[r, c]
@@ -1302,8 +1311,6 @@ def _launch_discrete_free_gyro(m: Model, d: Data, out: wp.array2d[float], qacc: 
       m.opt.timestep,
       m.opt.enableflags,
       m.body_dofadr,
-      m.body_mass,
-      m.body_inertia,
       m.dof_treeid,
       m.ten_J_rownnz,
       m.ten_J_rowadr,
@@ -1318,11 +1325,11 @@ def _launch_discrete_free_gyro(m: Model, d: Data, out: wp.array2d[float], qacc: 
       qacc,
       d.xpos,
       d.xmat,
-      d.xipos,
-      d.ximat,
+      d.subtree_com,
       d.moment_rownnz,
       d.moment_rowadr,
       d.moment_colind,
+      d.crb,
       d.M,
       d.tree_awake,
       d.qfrc_smooth,
