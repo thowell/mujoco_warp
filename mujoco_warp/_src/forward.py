@@ -910,7 +910,6 @@ def _implicit_free_body_solve(
       A[r, r] += timestep * util_misc._poly_force_deriv(damp, dpoly, v, 1)
 
   # 3. Add gyroscopic bias velocity derivative
-  mass = body_mass[worldid % body_mass.shape[0], bodyid]
   crb = crb_in[worldid, bodyid]
   subtree_mass = crb[9]
   R = xmat_in[worldid, bodyid]
