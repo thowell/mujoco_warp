@@ -868,6 +868,10 @@ class mat63f(wp.types.matrix(shape=(6, 3), dtype=float)):
   pass
 
 
+class mat55f(wp.types.matrix(shape=(5, 5), dtype=float)):
+  pass
+
+
 class mat66f(wp.types.matrix(shape=(6, 6), dtype=float)):
   pass
 
@@ -887,6 +891,7 @@ mat23 = mat23f
 mat43 = mat43f
 mat53 = mat53f
 mat63 = mat63f
+mat55 = mat55f
 mat66 = mat66f
 mat113 = mat113f
 
@@ -913,6 +918,7 @@ class Option:
     timestep: simulation timestep
     tolerance: main solver tolerance
     ls_tolerance: CG/Newton linesearch tolerance
+    noslip_tolerance: noslip solver tolerance
     ccd_tolerance: convex collision detection tolerance
     sleep_tolerance: sleep velocity tolerance
     gravity: gravitational acceleration
@@ -925,6 +931,7 @@ class Option:
     solver: solver algorithm (SolverType)
     iterations: number of main solver iterations
     ls_iterations: maximum number of CG/Newton linesearch iterations
+    noslip_iterations: maximum number of noslip solver iterations
     ccd_iterations: number of iterations in convex collision detection
     disableflags: bit flags for disabling standard features
     enableflags: bit flags for enabling optional features
@@ -949,6 +956,7 @@ class Option:
   timestep: array("*", float)
   tolerance: array("*", float)
   ls_tolerance: array("*", float)
+  noslip_tolerance: array("*", float)
   ccd_tolerance: array("*", float)
   sleep_tolerance: array("*", float)
   gravity: array("*", wp.vec3)
@@ -961,6 +969,7 @@ class Option:
   solver: int
   iterations: int
   ls_iterations: int
+  noslip_iterations: int
   ccd_iterations: int
   disableflags: int
   enableflags: int
@@ -1479,6 +1488,7 @@ class Model:
     has_fluid: True if wind, density, or viscosity are non-zero at put_model time
     flg_surfacevel: whether model has non-zero surfacevel
     has_sdf_geom: whether the model contains SDF geoms
+    has_boxbox_margin: whether any box-box contact pair has a non-zero margin
     has_flex_selfcollide: whether any flex has self-collision enabled
     has_flex_passive: whether any flex has passive contact enabled
     has_flex_snh: whether any flex uses 3D SNH elasticity
@@ -2008,6 +2018,7 @@ class Model:
   has_fluid: bool
   flg_surfacevel: bool
   has_sdf_geom: bool
+  has_boxbox_margin: bool
   has_flex_selfcollide: bool
   has_flex_passive: bool
   has_flex_snh: bool
@@ -2581,6 +2592,9 @@ class InverseContext:
   # the full-coordinate Data, set by solve_compact (None natively)
   compact_m_full: Optional["Model"] = None
   compact_d_full: Optional["Data"] = None
+  # discrete integrator effective-metric scratch (see SolverContext)
+  efm_con: Optional[tuple] = None
+  flex_scratch: Optional[tuple] = None
 
 
 @dataclasses.dataclass
@@ -2614,6 +2628,10 @@ class SolverContext:
   # the full-coordinate Data, set by solve_compact (None natively)
   compact_m_full: Optional["Model"] = None
   compact_d_full: Optional["Data"] = None
+  # discrete integrator effective-metric scratch built before the solver loop, which may run
+  # inside wp.capture_while where memory cannot be allocated (None otherwise)
+  efm_con: Optional[tuple] = None
+  flex_scratch: Optional[tuple] = None
 
 
 @dataclasses.dataclass

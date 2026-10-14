@@ -1215,24 +1215,28 @@ def box_box_wrapper(
   nacon_out: wp.array[int],
 ):
   """Calculates contacts between two boxes."""
-  # Call the core function to get contact geometry
-  dist, pos, normal = box_box(
+  # Call the core function to get contact geometry; as in MuJoCo, the collider's acceptance
+  # band is margin + gap
+  ncon, dist, pos, normal = box_box(
     box1.pos,
     box1.rot,
     box1.size,
     box2.pos,
     box2.rot,
     box2.size,
-    margin,
+    margin + gap,
   )
+  if ncon == 0:
+    return
+  frame = make_frame(normal)
 
-  for i in range(8):
+  for i in range(ncon):
     write_contact(
       naconmax_in,
       i,
       dist[i],
       pos[i],
-      make_frame(normal[i]),
+      frame,
       margin,
       gap,
       condim,

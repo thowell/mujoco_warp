@@ -28,7 +28,6 @@ from mujoco_warp._src import support
 from mujoco_warp._src import types
 from mujoco_warp._src import util_pkg
 from mujoco_warp._src import warp_util
-from mujoco_warp._src.collision_driver import MJ_COLLISION_TABLE
 from mujoco_warp._src.set_const import set_const as set_const
 from mujoco_warp._src.set_const import set_const_0 as set_const_0
 from mujoco_warp._src.set_const import set_const_fixed as set_const_fixed
@@ -349,7 +348,8 @@ def put_model(mjm: mujoco.MjModel, batch_sizes: dict[str, int] | None = None) ->
     raise NotImplementedError("Flex equality constraints are not supported with sleeping enabled.")
 
   if mjm.opt.noslip_iterations > 0:
-    raise NotImplementedError(f"noslip solver not implemented.")
+    if mjm.opt.integrator == mujoco.mjtIntegrator.mjINT_DISCRETE:
+      raise NotImplementedError("noslip solver not implemented for the discrete integrator.")
 
   if (mjm.body_plugin != -1).any():
     raise NotImplementedError("Body plugins not supported.")
@@ -633,7 +633,7 @@ def put_model(mjm: mujoco.MjModel, batch_sizes: dict[str, int] | None = None) ->
             flex_interp_assemblable = False
             break
   m.flex_interp_assemblable = flex_interp_assemblable
-  m.has_unsupported_flex_interp = bool(any(int(x) < 0 or int(x) >= 2 for x in mjm.flex_interp))
+  m.has_unsupported_flex_interp = bool(any(int(x) < -1 or int(x) >= 2 for x in mjm.flex_interp))
 
   # Precompute flex_cell_map
   flex_cell_map = []
@@ -843,71 +843,46 @@ def put_model(mjm: mujoco.MjModel, batch_sizes: dict[str, int] | None = None) ->
 
   # check for unsupported margin + multicontact / box-box CCD combinations
   use_multiccd = (mjm.opt.disableflags & types.DisableBit.MULTICCD) == 0
-  nativeccd_disabled = mjm.opt.disableflags & types.DisableBit.NATIVECCD
   BOX = int(mujoco.mjtGeom.mjGEOM_BOX)
   MESH = int(mujoco.mjtGeom.mjGEOM_MESH)
+  geom_name = lambda g: mujoco.mj_id2name(mjm, mujoco.mjtObj.mjOBJ_GEOM, g) or str(g)
 
-  # TODO(team): remove after implementing multicontact support for CCD pairs.
-  if use_multiccd:
-    unsupported_multiccd_pairs = []
-    for (g1, g2), col_type in MJ_COLLISION_TABLE.items():
-      if g1 == types.GeomType.BOX and g2 == types.GeomType.BOX and nativeccd_disabled:
-        continue
-      if col_type == types.CollisionType.CONVEX:
-        if g1 in (types.GeomType.SPHERE, types.GeomType.ELLIPSOID) or g2 in (
-          types.GeomType.SPHERE,
-          types.GeomType.ELLIPSOID,
-        ):
-          continue
-        if (g1, g2) not in (
-          (types.GeomType.BOX, types.GeomType.BOX),
-          (types.GeomType.BOX, types.GeomType.MESH),
-          (types.GeomType.MESH, types.GeomType.MESH),
-          (types.GeomType.CYLINDER, types.GeomType.CYLINDER),
-          (types.GeomType.CYLINDER, types.GeomType.BOX),
-          (types.GeomType.CYLINDER, types.GeomType.MESH),
-        ):
-          if m.geom_pair_type_count[geom_trid_index(int(g1), int(g2))] > 0:
-            unsupported_multiccd_pairs.append((g1.name, g2.name))
-    if unsupported_multiccd_pairs:
-      warnings.warn(
-        "MULTICCD is enabled, but the scene contains CCD pairs without multicontact support:"
-        f" {unsupported_multiccd_pairs}. At most 1 contact will be generated for these pairs."
-      )
-
-  has_boxbox = m.geom_pair_type_count[geom_trid_index(BOX, BOX)] > 0
-  has_multiccd_pairs = has_boxbox or (
-    use_multiccd
-    and (m.geom_pair_type_count[geom_trid_index(BOX, MESH)] > 0 or m.geom_pair_type_count[geom_trid_index(MESH, MESH)] > 0)
+  # (name, type1, type2, margin) for box/mesh contact pairs with non-zero margin
+  box_mesh_margin_pairs = []
+  has_box_mesh_pairs = any(
+    m.geom_pair_type_count[geom_trid_index(t1, t2)] > 0 for t1, t2 in ((BOX, BOX), (BOX, MESH), (MESH, MESH))
   )
-
-  if has_multiccd_pairs:
-
-    def _check_margin(name, t1, t2, margin):
-      if use_multiccd:
-        raise NotImplementedError(
-          f"{name} has non-zero margin ({margin}) with MULTICCD enabled. Set margin to 0 or disable MULTICCD."
-        )
-      if t1 == BOX and t2 == BOX and not nativeccd_disabled:
-        raise NotImplementedError(
-          f"{name} has non-zero margin ({margin}) with NATIVECCD enabled. Set margin to 0 or disable NATIVECCD."
-        )
-
-    geom_name = lambda g: mujoco.mj_id2name(mjm, mujoco.mjtObj.mjOBJ_GEOM, g) or str(g)
-
+  if has_box_mesh_pairs:
     for idx in np.nonzero(nxn_include & (nxn_pairid_contact == -1))[0]:
       g1, g2 = int(geom1[idx]), int(geom2[idx])
       t1, t2 = int(mjm.geom_type[g1]), int(mjm.geom_type[g2])
-      m1, m2 = float(mjm.geom_margin[g1]), float(mjm.geom_margin[g2])
-      if (m1 or m2) and t1 in (BOX, MESH) and t2 in (BOX, MESH):
-        _check_margin(f"geom pair ({geom_name(g1)}, {geom_name(g2)})", t1, t2, (m1, m2))
-
+      if t1 not in (BOX, MESH) or t2 not in (BOX, MESH):
+        continue
+      margin = (float(mjm.geom_margin[g1]), float(mjm.geom_margin[g2]))
+      if any(margin):
+        box_mesh_margin_pairs.append((f"geom pair ({geom_name(g1)}, {geom_name(g2)})", t1, t2, margin))
     for pid in range(mjm.npair):
       g1, g2 = int(mjm.pair_geom1[pid]), int(mjm.pair_geom2[pid])
       t1, t2 = int(mjm.geom_type[g1]), int(mjm.geom_type[g2])
-      pm = float(mjm.pair_margin[pid])
-      if pm and t1 in (BOX, MESH) and t2 in (BOX, MESH):
-        _check_margin(f"pair {pid} ({geom_name(g1)}, {geom_name(g2)})", t1, t2, pm)
+      if t1 not in (BOX, MESH) or t2 not in (BOX, MESH):
+        continue
+      margin = float(mjm.pair_margin[pid])
+      if margin:
+        box_mesh_margin_pairs.append((f"pair {pid} ({geom_name(g1)}, {geom_name(g2)})", t1, t2, margin))
+
+  # MuJoCo always collides box-box pairs with the primitive collider (mjc_BoxBox), which supports
+  # margin. MJWarp uses the convex (CCD) collider by default, which does not support margin, so fall
+  # back to the primitive collider if NATIVECCD is disabled or any box-box pair has a margin.
+  m.has_boxbox_margin = any(t1 == BOX and t2 == BOX for _, t1, t2, _ in box_mesh_margin_pairs)
+
+  # CCD multicontact (box-mesh and mesh-mesh with MULTICCD) does not support margin
+  if use_multiccd:
+    for name, t1, t2, margin in box_mesh_margin_pairs:
+      if t1 == BOX and t2 == BOX:
+        continue  # handled by the primitive collider
+      raise NotImplementedError(
+        f"{name} has non-zero margin ({margin}) with MULTICCD enabled. Set margin to 0 or disable MULTICCD."
+      )
 
   # filter plugins for only geom plugins, drop the rest
   m.plugin, m.plugin_attr = [], []
@@ -1738,8 +1713,12 @@ def _allocate_island_arrays(
     setattr(d, name, wp.array(arr, dtype=int))
 
   # DOF mapping arrays sized by nv
-  map_dof2idof = np.tile(mjd.map_dof2idof[:nv], (nworld, 1))
-  map_idof2dof = np.tile(mjd.map_idof2dof[:nv], (nworld, 1))
+  if nisland > 0:
+    map_dof2idof = np.tile(mjd.map_dof2idof[:nv], (nworld, 1))
+    map_idof2dof = np.tile(mjd.map_idof2dof[:nv], (nworld, 1))
+  else:
+    map_dof2idof = np.zeros((nworld, nv), dtype=np.int32)
+    map_idof2dof = np.zeros((nworld, nv), dtype=np.int32)
   dof_islandid = np.full((nworld, nv), -1, dtype=np.int32)
   if nisland > 0 and nidof > 0:
     dof_islandid[:, :nidof] = mjd.dof_island[mjd.map_idof2dof[:nidof]]
