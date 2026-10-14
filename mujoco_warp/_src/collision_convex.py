@@ -289,7 +289,7 @@ def ccd_hfield_kernel_builder(
     if no_hf_collision:
       return
 
-    ccdid = wp.atomic_add(nccd_in, wp.static(geomgeomid), 1)
+    ccdid = wp.atomic_add(nccd_in, wp.static(geomgeomid), 1)  # kernel_analyzer: ignore[atomic]
     if ccdid >= naccdmax_in:
       if wp.static(bool(warn_overflow & OverflowType.CCD)):
         wp.printf(
@@ -859,7 +859,7 @@ def ccd_kernel_builder(
     multiccd_idx = int(-1)
 
     if needs_epa:
-      ccdid = wp.atomic_add(nccd_in, geomgeomid, 1)
+      ccdid = wp.atomic_add(nccd_in, geomgeomid, 1)  # kernel_analyzer: ignore[atomic]
       if ccdid >= naccdmax_in:
         if wp.static(bool(warn_overflow & OverflowType.CCD)):
           wp.printf(
