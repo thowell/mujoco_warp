@@ -2942,9 +2942,13 @@ def _update_gradient_cholesky(tile_size: int, skip_noflip: bool = False):
 
 
 @cache_kernel
-def _update_gradient_cholesky_blocked(tile_size: int, matrix_size: int, vector_size: int):
+def _update_gradient_cholesky_blocked(tile_size: int, matrix_size: int, vector_size: int, compact: bool = False):
+  COMPACT = compact
+
   @wp.kernel(module="unique", enable_backward=False, grid_stride=False, module_options={"enable_mathdx_gemm": False})
   def kernel(
+    # Data in:
+    ncdof_in: wp.array[int],
     # In:
     ctx_done_in: wp.array[bool],
     ctx_grad_in: wp.array3d[float],
@@ -2965,11 +2969,15 @@ def _update_gradient_cholesky_blocked(tile_size: int, matrix_size: int, vector_s
     # static input is needed to specify the tile sizes for the compiler
     # runtime input is needed for the loop bounds, otherwise warp will unroll
     # unconditionally leading to shared memory capacity issues.
+    active_size = matrix_size
+    if wp.static(COMPACT):
+      ncdof = ncdof_in[worldid]
+      active_size = wp.min(matrix_size, ((ncdof + TILE_SIZE) // TILE_SIZE) * TILE_SIZE)
 
     sums = wp.static(create_blocked_cholesky_augmented_factorize_solve_newton_func(TILE_SIZE, matrix_size, vector_size))(
       ctx_h_in[worldid],
       ctx_grad_in[worldid],
-      matrix_size,
+      active_size,
       ctx_hfactor[worldid],
       ctx_search_out[worldid],
     )
@@ -3006,13 +3014,16 @@ def _cholesky_factorize_solve_blocked(tile_size: int, matrix_size: int):
 
 @cache_kernel
 def _update_gradient_cholesky_blocked_skip_unchanged(
-  tile_size: int, matrix_size: int, vector_size: int, skip_noflip: bool = False
+  tile_size: int, matrix_size: int, vector_size: int, skip_noflip: bool = False, compact: bool = False
 ):
   """Blocked Cholesky that skips factorization when no constraints changed."""
   SKIP_NOFLIP = skip_noflip
+  COMPACT = compact
 
   @wp.kernel(module="unique", enable_backward=False, grid_stride=False, module_options={"enable_mathdx_gemm": False})
   def kernel(
+    # Data in:
+    ncdof_in: wp.array[int],
     # In:
     ctx_done_in: wp.array[bool],
     ctx_grad_in: wp.array3d[float],
@@ -3037,11 +3048,16 @@ def _update_gradient_cholesky_blocked_skip_unchanged(
       if state_changed_count_in[worldid] == 0:
         return
 
+    active_size = matrix_size
+    if wp.static(COMPACT):
+      ncdof = ncdof_in[worldid]
+      active_size = wp.min(matrix_size, ((ncdof + TILE_SIZE) // TILE_SIZE) * TILE_SIZE)
+
     if quad_changed_count_in[worldid] > 0:
       sums = wp.static(create_blocked_cholesky_augmented_factorize_solve_newton_func(TILE_SIZE, matrix_size, vector_size))(
         ctx_h_in[worldid],
         ctx_grad_in[worldid],
-        matrix_size,
+        active_size,
         ctx_hfactor[worldid],
         ctx_search_out[worldid],
       )
@@ -3049,7 +3065,7 @@ def _update_gradient_cholesky_blocked_skip_unchanged(
       sums = wp.static(create_blocked_cholesky_solve_newton_func(TILE_SIZE, matrix_size, vector_size))(
         ctx_hfactor[worldid],
         ctx_grad_in[worldid],
-        matrix_size,
+        active_size,
         ctx_search_out[worldid],
       )
 
@@ -3071,7 +3087,12 @@ def _padding_h(nv: int, ctx_done_in: wp.array[bool], ctx_h_out: wp.array3d[float
 
 
 def _cholesky_factorize_solve(
-  m: types.Model, d: types.Data, ctx: SolverContext, skip_unchanged: bool = False, skip_noflip: bool = False
+  m: types.Model,
+  d: types.Data,
+  ctx: SolverContext,
+  skip_unchanged: bool = False,
+  skip_noflip: bool = False,
+  compact: bool = False,
 ):
   """Cholesky factorize ctx.h and form the Newton search direction.
 
@@ -3089,9 +3110,10 @@ def _cholesky_factorize_solve(
   else:
     if skip_unchanged:
       wp.launch_tiled(
-        _update_gradient_cholesky_blocked_skip_unchanged(types.TILE_SIZE_JTDAJ_DENSE, m.nv_pad, m.nv, skip_noflip),
+        _update_gradient_cholesky_blocked_skip_unchanged(types.TILE_SIZE_JTDAJ_DENSE, m.nv_pad, m.nv, skip_noflip, compact),
         dim=d.nworld,
         inputs=[
+          d.ncdof,
           ctx.done,
           ctx.grad.reshape(shape=(d.nworld, ctx.grad.shape[1], 1)),
           ctx.h,
@@ -3108,9 +3130,9 @@ def _cholesky_factorize_solve(
       )
     else:
       wp.launch_tiled(
-        _update_gradient_cholesky_blocked(types.TILE_SIZE_JTDAJ_DENSE, m.nv_pad, m.nv),
+        _update_gradient_cholesky_blocked(types.TILE_SIZE_JTDAJ_DENSE, m.nv_pad, m.nv, compact),
         dim=d.nworld,
-        inputs=[ctx.done, ctx.grad.reshape(shape=(d.nworld, ctx.grad.shape[1], 1)), ctx.h, ctx.hfactor],
+        inputs=[d.ncdof, ctx.done, ctx.grad.reshape(shape=(d.nworld, ctx.grad.shape[1], 1)), ctx.h, ctx.hfactor],
         outputs=[
           ctx.search.reshape(shape=(d.nworld, m.nv, 1)),
           ctx.search_dot,
@@ -3522,7 +3544,7 @@ def _update_gradient(m: types.Model, d: types.Data, ctx: SolverContext, compact:
           outputs=[ctx.h],
           block_dim=m.block_dim.update_gradient_JTDAJ_dense,
         )
-      if m.nv > _BLOCK_CHOLESKY_DIM:
+      if m.nv > _BLOCK_CHOLESKY_DIM and not compact:
         # the dense tile zeros padded dofs; the blocked Cholesky needs an identity there
         wp.launch(_padding_h, dim=(d.nworld, m.nv_pad - m.nv), inputs=[m.nv, ctx.done], outputs=[ctx.h])
 
@@ -3614,7 +3636,7 @@ def _update_gradient(m: types.Model, d: types.Data, ctx: SolverContext, compact:
         outputs=[ctx.h],
       )
 
-    _cholesky_factorize_solve(m, d, ctx)
+    _cholesky_factorize_solve(m, d, ctx, compact=compact)
   else:
     raise ValueError(f"Unknown solver type: {m.opt.solver}")
 
@@ -3633,7 +3655,9 @@ def _update_gradient(m: types.Model, d: types.Data, ctx: SolverContext, compact:
     )
 
 
-def _update_gradient_incremental(m: types.Model, d: types.Data, ctx: SolverContext, stable_fast: bool = False):
+def _update_gradient_incremental(
+  m: types.Model, d: types.Data, ctx: SolverContext, stable_fast: bool = False, compact: bool = False
+):
   """Incremental gradient update: update H for changed constraints + re-factorize.
 
   Skips the full J^T*D*J rebuild by applying only the delta from constraints
@@ -3698,7 +3722,7 @@ def _update_gradient_incremental(m: types.Model, d: types.Data, ctx: SolverConte
       outputs=[ctx.h],
     )
 
-  _cholesky_factorize_solve(m, d, ctx, skip_unchanged=True, skip_noflip=stable_fast)
+  _cholesky_factorize_solve(m, d, ctx, skip_unchanged=True, skip_noflip=stable_fast, compact=compact)
   if m.opt.integrator == types.IntegratorType.DISCRETE and (m.opt.enableflags & types.EnableBit.SLEEP):
     wp.launch(
       derivative._zero_sleeping_dofs,
@@ -3945,7 +3969,7 @@ def _solver_iteration(
   _update_constraint(m, d, ctx, track_changes=incremental, stable_fast=incremental)
 
   if incremental:
-    _update_gradient_incremental(m, d, ctx, stable_fast=incremental)
+    _update_gradient_incremental(m, d, ctx, stable_fast=incremental, compact=compact)
   else:
     _update_gradient(m, d, ctx, compact=compact)
 
@@ -4073,9 +4097,10 @@ def init_context(m: types.Model, d: types.Data, ctx: SolverContext | InverseCont
 
 
 @event_scope
-def solve(m: types.Model, d: types.Data):
+def solve(m: types.Model, d: types.Data, update_active_dofs: bool = True):
   if m.opt.enableflags & types.EnableBit.SLEEP:
-    island.update_active_dofs(m, d)
+    if update_active_dofs:
+      island.update_active_dofs(m, d)
     if m.opt.integrator != types.IntegratorType.DISCRETE:
       solve_compact(m, d)
       if m.opt.noslip_iterations > 0:
@@ -4405,21 +4430,25 @@ def _gather_dof_vecs_compact(
 def _scatter_dof_vecs(
   # Data in:
   dof_cdof_in: wp.array2d[int],
+  cMa_in: wp.array2d[float],
   # In:
   qacc_c_in: wp.array2d[float],
   qfrc_constraint_c_in: wp.array2d[float],
   # Data out:
   qacc_out: wp.array2d[float],
   qfrc_constraint_out: wp.array2d[float],
+  efc_Ma_out: wp.array2d[float],
 ):
   worldid, i = wp.tid()
   ci = dof_cdof_in[worldid, i]
   if ci >= 0:
     qacc_out[worldid, i] = qacc_c_in[worldid, ci]
     qfrc_constraint_out[worldid, i] = qfrc_constraint_c_in[worldid, ci]
+    efc_Ma_out[worldid, i] = cMa_in[worldid, ci]
   else:
     qacc_out[worldid, i] = 0.0
     qfrc_constraint_out[worldid, i] = 0.0
+    efc_Ma_out[worldid, i] = 0.0
 
 
 @wp.kernel
@@ -4558,14 +4587,9 @@ def _compact_scatter(m: types.Model, d: types.Data):
   wp.launch(
     _scatter_dof_vecs,
     dim=(d.nworld, m.nv),
-    inputs=[d.dof_cdof, d.cqacc, d.cqfrc_constraint],
-    outputs=[d.qacc, d.qfrc_constraint],
+    inputs=[d.dof_cdof, d.cMa, d.cqacc, d.cqfrc_constraint],
+    outputs=[d.qacc, d.qfrc_constraint, d.efc.Ma],
   )
-
-  # Refresh full d.efc.Ma = M @ qacc. The integrators (Euler/implicit damping) use Ma as
-  # the RHS; the compact solve only populated the compacted Ma, so recompute it in full
-  # space. Inactive DOFs have qacc=0 so their Ma is 0 and they stay frozen.
-  support.mul_m(m, d, d.efc.Ma, d.qacc)
 
 
 @cache_kernel
