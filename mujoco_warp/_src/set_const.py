@@ -44,10 +44,7 @@ def _init_subtreemass(
 
 @cache_kernel
 def _accumulate_subtreemass(deterministic: bool = False):
-  module_options = {"enable_backward": False}
-  if deterministic:
-    module_options["deterministic"] = wp.DeterministicMode.RUN_TO_RUN
-    module_options["deterministic_max_records"] = 1
+  module_options = {"enable_backward": False, "deterministic": wp.DeterministicMode.RUN_TO_RUN} if deterministic else {}
 
   @wp.kernel(module="unique", module_options=module_options)
   def kernel(
@@ -686,7 +683,7 @@ def set_const_fixed(m: types.Model, d: types.Data):
       _accumulate_subtreemass(bool(m.opt.deterministic & types.DeterminismType.ATOMICS)),
       dim=(nworld_subtreemass, body_tree.size),
       inputs=[m.body_parentid, m.body_subtreemass, body_tree],
-      outputs=[m.body_subtreemass],  # kernel_analyzer: ignore[atomic]
+      outputs=[m.body_subtreemass],
     )
 
   nworld_geom = np.max([m.geom_dataid.shape[0], m.geom_size.shape[0], m.geom_aabb.shape[0], m.geom_rbound.shape[0]])

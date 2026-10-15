@@ -1889,7 +1889,6 @@ def _tendon_actuator_force(deterministic: bool = False):
   module_options = {"enable_backward": False}
   if deterministic:
     module_options["deterministic"] = wp.DeterministicMode.RUN_TO_RUN
-    module_options["deterministic_max_records"] = 1
 
   @wp.kernel(module="unique", module_options=module_options)
   def kernel(
@@ -1942,7 +1941,7 @@ def _qfrc_actuator(nv: int, deterministic: bool = False):
   module_options = {"enable_backward": False}
   if deterministic:
     module_options["deterministic"] = wp.DeterministicMode.RUN_TO_RUN
-    module_options["deterministic_max_records"] = max(nv, 1)
+    module_options["deterministic_max_records"] = nv
 
   @wp.kernel(module="unique", module_options=module_options)
   def kernel(
@@ -2063,12 +2062,12 @@ def fwd_actuation(m: Model, d: Data):
     if m.callback.act_bias:
       m.callback.act_bias(m, d)
 
-    det = bool(m.opt.deterministic & DeterminismType.ATOMICS)
+    det_atomics = bool(m.opt.deterministic & DeterminismType.ATOMICS)
     if m.ntendon:
       # total actuator force at tendon
       ten_actfrc = wp.zeros((d.nworld, m.ntendon), dtype=float)
       wp.launch(
-        _tendon_actuator_force(det),
+        _tendon_actuator_force(det_atomics),
         dim=(d.nworld, m.nactuator),
         inputs=[m.actuator_trntype, m.actuator_trnid, d.actuator_force],
         outputs=[ten_actfrc],
@@ -2084,7 +2083,7 @@ def fwd_actuation(m: Model, d: Data):
     # TODO(team): optimize performance
     d.qfrc_actuator.zero_()
     wp.launch(
-      _qfrc_actuator(m.nv if det else 0, det),
+      _qfrc_actuator(m.nv if det_atomics else 0, det_atomics),
       dim=(d.nworld, m.nactuator),
       inputs=[
         d.moment_rownnz,

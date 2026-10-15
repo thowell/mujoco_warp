@@ -3610,7 +3610,7 @@ def _efc_contact_jac_dense(tile_size: int, cone_type: types.ConeType, njmax: int
   module_options = {"enable_backward": False}
   if deterministic:
     module_options["deterministic"] = wp.DeterministicMode.RUN_TO_RUN
-    module_options["deterministic_max_records"] = max(njmax, 1)
+    module_options["deterministic_max_records"] = njmax
 
   @wp.kernel(module="unique", module_options=module_options, grid_stride=False)
   def kernel(
@@ -3743,7 +3743,7 @@ def _efc_contact_jac_dense_flex(tile_size: int, cone_type: types.ConeType, njmax
   module_options = {"enable_backward": False}
   if deterministic:
     module_options["deterministic"] = wp.DeterministicMode.RUN_TO_RUN
-    module_options["deterministic_max_records"] = max(njmax, 1)
+    module_options["deterministic_max_records"] = njmax
 
   @wp.kernel(module="unique", module_options=module_options, grid_stride=False)
   def kernel(
@@ -5547,11 +5547,11 @@ def make_constraint(m: types.Model, d: types.Data):
         d.efc.Jqvel.zero_()
         tile_size = m.block_dim.contact_jac_tiled
         n_dof_blocks = (m.nv_pad + tile_size - 1) // tile_size
-        det = bool(m.opt.deterministic & types.DeterminismType.ATOMICS)
+        det_atomics = bool(m.opt.deterministic & types.DeterminismType.ATOMICS)
 
         if has_flex:
           wp.launch_tiled(
-            _efc_contact_jac_dense_flex(tile_size, m.opt.cone, d.njmax if det else 0, det),
+            _efc_contact_jac_dense_flex(tile_size, m.opt.cone, d.njmax if det_atomics else 0, det_atomics),
             dim=(d.nworld, n_dof_blocks),
             inputs=[
               m.body_rootid,
@@ -5597,7 +5597,7 @@ def make_constraint(m: types.Model, d: types.Data):
           )
         else:
           wp.launch_tiled(
-            _efc_contact_jac_dense(tile_size, m.opt.cone, d.njmax if det else 0, det),
+            _efc_contact_jac_dense(tile_size, m.opt.cone, d.njmax if det_atomics else 0, det_atomics),
             dim=(d.nworld, n_dof_blocks),
             inputs=[
               m.body_rootid,

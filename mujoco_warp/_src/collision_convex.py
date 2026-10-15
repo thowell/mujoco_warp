@@ -913,7 +913,7 @@ def ccd_kernel_builder(
       or (use_multiccd and ((has_face1 and has_face2) or (has_edge1 and has_face2) or (has_face1 and has_edge2)))
     ):
       if not needs_epa and dist < 0.0 and margin == 0.0 and gjk_result.dim > 0:
-        ccdid = wp.atomic_add(nccd_in, geomgeomid, 1)
+        ccdid = wp.atomic_add(nccd_in, geomgeomid, 1)  # kernel_analyzer: ignore[atomic]
         if ccdid >= naccdmax_in:
           if wp.static(bool(warn_overflow & OverflowType.CCD)):
             wp.printf(

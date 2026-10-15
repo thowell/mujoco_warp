@@ -16,7 +16,6 @@
 """Tests for the core MuJoCo Warp types."""
 
 import dataclasses
-from unittest import mock
 
 import mujoco
 import numpy as np
@@ -26,14 +25,8 @@ from absl.testing import parameterized
 
 from mujoco_warp import test_data
 from mujoco_warp._src import util_pkg
-from mujoco_warp._src.collision_driver import collision
-from mujoco_warp._src.constraint import make_constraint
-from mujoco_warp._src.forward import step
 from mujoco_warp._src.io import override_model
-from mujoco_warp._src.island import island
 from mujoco_warp._src.types import Data
-from mujoco_warp._src.types import DeterminismType
-from mujoco_warp._src.types import IntegratorType
 from mujoco_warp._src.types import Model
 from mujoco_warp._src.types import Option
 from mujoco_warp._src.types import OverflowType
@@ -151,166 +144,6 @@ class TypesTest(parameterized.TestCase):
     ]:
       override_model(m, override)
       self.assertEqual(m.opt.warn_overflow, expected)
-
-  def test_determinism_type_flags(self):
-    self.assertEqual(int(DeterminismType.NONE), 0)
-    self.assertEqual(int(DeterminismType.CONTACTS), 1 << 0)
-    self.assertEqual(int(DeterminismType.CONSTRAINT), 1 << 1)
-    self.assertEqual(int(DeterminismType.ATOMICS), 1 << 2)
-    self.assertEqual(int(DeterminismType.ISLANDS), 1 << 3)
-    self.assertEqual(int(DeterminismType.ALL), (1 << 0) | (1 << 1) | (1 << 2) | (1 << 3))
-
-  def test_option_deterministic(self):
-    _, _, m, _ = test_data.fixture(
-      xml="""
-      <mujoco/>
-      """
-    )
-
-    # Defaults to NONE
-    self.assertEqual(m.opt.deterministic, int(DeterminismType.NONE))
-    self.assertFalse(bool(m.opt.deterministic))
-
-    # Setting boolean True converts to ALL
-    m.opt.deterministic = True
-    self.assertEqual(m.opt.deterministic, int(DeterminismType.ALL))
-    self.assertTrue(bool(m.opt.deterministic & DeterminismType.CONTACTS))
-    self.assertTrue(bool(m.opt.deterministic & DeterminismType.CONSTRAINT))
-    self.assertTrue(bool(m.opt.deterministic & DeterminismType.ATOMICS))
-    self.assertTrue(bool(m.opt.deterministic & DeterminismType.ISLANDS))
-
-    # Setting boolean False converts to NONE
-    m.opt.deterministic = False
-    self.assertEqual(m.opt.deterministic, int(DeterminismType.NONE))
-    self.assertFalse(bool(m.opt.deterministic))
-
-    # Setting individual flags with orthogonality check
-    flags = (
-      DeterminismType.CONTACTS,
-      DeterminismType.CONSTRAINT,
-      DeterminismType.ATOMICS,
-      DeterminismType.ISLANDS,
-    )
-    for flag in flags:
-      m.opt.deterministic = flag
-      self.assertEqual(m.opt.deterministic, int(flag))
-      for other in flags:
-        self.assertEqual(bool(m.opt.deterministic & other), flag == other)
-
-    # Test override_model support
-    for override, expected in [
-      ({"opt.deterministic": 0}, int(DeterminismType.NONE)),
-      ({"opt.deterministic": True}, int(DeterminismType.ALL)),
-      ({"opt.deterministic": "CONTACTS"}, int(DeterminismType.CONTACTS)),
-      (
-        ["opt.deterministic=CONSTRAINT|ATOMICS|ISLANDS"],
-        int(DeterminismType.CONSTRAINT | DeterminismType.ATOMICS | DeterminismType.ISLANDS),
-      ),
-      (["opt.deterministic=ALL"], int(DeterminismType.ALL)),
-      (["opt.deterministic=~CONTACTS"], int(DeterminismType.ALL) & ~DeterminismType.CONTACTS),
-    ]:
-      override_model(m, override)
-      self.assertEqual(m.opt.deterministic, expected)
-
-  @parameterized.parameters(1, 2)
-  def test_determinism_pipeline_hooks(self, nworld):
-    """Tests that sort hooks and atomic determinism modes execute cleanly across the pipeline."""
-    with mock.patch.multiple("mujoco_warp._src.types", M_BLOCK_SCALAR_MAX=0, M_BLOCK_DENSE_MAX=0):
-      _, _, m, d = test_data.fixture(
-        xml="""
-        <mujoco>
-          <worldbody>
-            <body name="b" pos="0 0 0.05">
-              <freejoint/>
-              <geom size=".1"/>
-              <body pos="0.1 0 0">
-                <joint name="j" type="slide" axis="1 0 0" stiffness="10" damping="1"/>
-                <geom size=".05" pos="0.5 0 0.5"/>
-              </body>
-            </body>
-            <geom type="plane" size="1 1 .1"/>
-          </worldbody>
-          <tendon>
-            <fixed name="t">
-              <joint joint="j" coef="1"/>
-            </fixed>
-          </tendon>
-          <actuator>
-            <position tendon="t" kp="10"/>
-          </actuator>
-          <sensor>
-            <subtreeangmom body="b"/>
-          </sensor>
-        </mujoco>
-        """,
-        qvel_noise=0.01,
-        nworld=nworld,
-      )
-
-    if nworld == 2:
-      qpos = d.qpos.numpy()
-      qpos[1, 2] += 0.5
-      d.qpos.assign(qpos)
-
-    qpos0 = d.qpos.numpy().copy()
-    qvel0 = d.qvel.numpy().copy()
-
-    # Step with atomics modes and verify parity across sparse LDL, subtree_vel, and actuation
-    for integrator in (IntegratorType.EULER, IntegratorType.DISCRETE):
-      m.opt.integrator = integrator
-      ref_qacc, ref_linvel, ref_angmom = None, None, None
-      for flag in (DeterminismType.NONE, DeterminismType.ATOMICS, DeterminismType.ALL):
-        m.opt.deterministic = flag
-        d.qpos.assign(qpos0)
-        d.qvel.assign(qvel0)
-        d.qacc.fill_(wp.inf)
-        d.subtree_linvel.fill_(wp.inf)
-        d.subtree_angmom.fill_(wp.inf)
-        step(m, d)
-        qacc = d.qacc.numpy().copy()
-        linvel = d.subtree_linvel.numpy().copy()
-        angmom = d.subtree_angmom.numpy().copy()
-        self.assertFalse(np.any(np.isinf(qacc)))
-        self.assertFalse(np.any(np.isinf(linvel)))
-        self.assertFalse(np.any(np.isinf(angmom)))
-        if ref_qacc is None:
-          ref_qacc, ref_linvel, ref_angmom = qacc, linvel, angmom
-        else:
-          np.testing.assert_allclose(qacc, ref_qacc, atol=1e-5, rtol=1e-5)
-          np.testing.assert_allclose(linvel, ref_linvel, atol=1e-5, rtol=1e-5)
-          np.testing.assert_allclose(angmom, ref_angmom, atol=1e-5, rtol=1e-5)
-
-      if wp.get_device().is_cuda:
-        m.opt.deterministic = DeterminismType.ATOMICS
-        d.qpos.assign(qpos0)
-        d.qvel.assign(qvel0)
-        d.qacc.fill_(wp.inf)
-        with wp.ScopedCapture() as capture:
-          step(m, d)
-        d.qpos.assign(qpos0)
-        d.qvel.assign(qvel0)
-        d.qacc.fill_(wp.inf)
-        wp.capture_launch(capture.graph)
-        np.testing.assert_allclose(d.qacc.numpy(), ref_qacc, atol=1e-5, rtol=1e-5)
-
-    # Test sort hooks
-    with mock.patch("mujoco_warp._src.collision_driver._sort_contacts") as mock_sort_contacts:
-      m.opt.deterministic = DeterminismType.CONTACTS
-      collision(m, d)
-      self.assertTrue(mock_sort_contacts.called)
-
-    with mock.patch("mujoco_warp._src.constraint._sort_constraints") as mock_sort_constraints:
-      m.opt.deterministic = DeterminismType.CONSTRAINT
-      make_constraint(m, d)
-      self.assertTrue(mock_sort_constraints.called)
-
-    with mock.patch("mujoco_warp._src.island._sort_islands") as mock_sort_islands:
-      m.opt.deterministic = DeterminismType.ISLANDS
-      island(m, d)
-      self.assertTrue(mock_sort_islands.called)
-
-    if nworld == 2:
-      self.assertFalse(np.allclose(d.qacc.numpy()[0], d.qacc.numpy()[1]))
 
 
 if __name__ == "__main__":

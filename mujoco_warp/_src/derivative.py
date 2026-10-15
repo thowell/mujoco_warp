@@ -28,6 +28,7 @@ from mujoco_warp._src.passive import ellipsoid_max_moment
 from mujoco_warp._src.passive import geom_semiaxes
 from mujoco_warp._src.support import next_act
 from mujoco_warp._src.types import EFM_CON_MAX_DOF
+from mujoco_warp._src.types import FLEX_INTERP_MAX_NODES
 from mujoco_warp._src.types import MJ_MINVAL
 from mujoco_warp._src.types import BiasType
 from mujoco_warp._src.types import Data
@@ -200,11 +201,11 @@ def _nonzero_mask(x: float) -> float:
 
 
 @cache_kernel
-def _qderiv_actuator_passive_actuation_sparse(nv: int, deterministic: bool = False):
+def _qderiv_actuator_passive_actuation_sparse(nM: int, deterministic: bool = False):
   module_options = {"enable_backward": False}
   if deterministic:
     module_options["deterministic"] = wp.DeterministicMode.RUN_TO_RUN
-    module_options["deterministic_max_records"] = max(nv * (nv + 1) // 2, 1)
+    module_options["deterministic_max_records"] = nM
 
   @wp.kernel(module="unique", module_options=module_options)
   def kernel(
@@ -498,7 +499,6 @@ def deriv_rne_cfrcbody_backward(deterministic: bool = False):
   module_options = {"enable_backward": False}
   if deterministic:
     module_options["deterministic"] = wp.DeterministicMode.RUN_TO_RUN
-    module_options["deterministic_max_records"] = 1
 
   @wp.kernel(module="unique", module_options=module_options)
   def kernel(
@@ -528,7 +528,6 @@ def deriv_rne_body2jnt_sparse(deterministic: bool = False):
   module_options = {"enable_backward": False}
   if deterministic:
     module_options["deterministic"] = wp.DeterministicMode.RUN_TO_RUN
-    module_options["deterministic_max_records"] = 1
 
   @wp.kernel(module="unique", module_options=module_options)
   def kernel(
@@ -620,7 +619,7 @@ def deriv_rne_vel(m: Model, d: Data, out: wp.array2d[float]):
       deriv_rne_cfrcbody_backward(bool(m.opt.deterministic & DeterminismType.ATOMICS)),
       dim=(d.nworld, body_tree.size, m.nv),
       inputs=[m.body_parentid, body_tree, Dcfrcbody],
-      outputs=[Dcfrcbody],  # kernel_analyzer: ignore[atomic]
+      outputs=[Dcfrcbody],
     )
 
   # Project body-space derivatives into joint-space qDeriv (always sparse D-structure)
@@ -930,7 +929,6 @@ def _qderiv_ellipsoid_fluid(deterministic: bool = False):
   module_options = {"enable_backward": False}
   if deterministic:
     module_options["deterministic"] = wp.DeterministicMode.RUN_TO_RUN
-    module_options["deterministic_max_records"] = 1
 
   @wp.kernel(module="unique", module_options=module_options)
   def kernel(
@@ -1130,7 +1128,6 @@ def _qderiv_box_fluid(deterministic: bool = False):
   module_options = {"enable_backward": False}
   if deterministic:
     module_options["deterministic"] = wp.DeterministicMode.RUN_TO_RUN
-    module_options["deterministic_max_records"] = 1
 
   @wp.kernel(module="unique", module_options=module_options)
   def kernel(
@@ -1279,9 +1276,9 @@ def deriv_smooth_vel(m: Model, d: Data, out: wp.array2d[float]):
         outputs=[vel],
       )
       # out (qDeriv) is in M-structure.
-      det = bool(m.opt.deterministic & DeterminismType.ATOMICS)
+      det_atomics = bool(m.opt.deterministic & DeterminismType.ATOMICS)
       wp.launch(
-        _qderiv_actuator_passive_actuation_sparse(m.nv if det else 0, det),
+        _qderiv_actuator_passive_actuation_sparse(m.nM if det_atomics else 0, det_atomics),
         dim=(d.nworld, m.nactuator),
         inputs=[
           m.M_elemid,
@@ -1518,7 +1515,7 @@ def _eff_tendon_shift(nv: int, deterministic: bool = False):
   module_options = {"enable_backward": False}
   if deterministic:
     module_options["deterministic"] = wp.DeterministicMode.RUN_TO_RUN
-    module_options["deterministic_max_records"] = max(nv, 1)
+    module_options["deterministic_max_records"] = nv
 
   @wp.kernel(module="unique", module_options=module_options)
   def kernel(
@@ -1589,7 +1586,7 @@ def _eff_actuator_actuation(nv: int, deterministic: bool = False):
   module_options = {"enable_backward": False}
   if deterministic:
     module_options["deterministic"] = wp.DeterministicMode.RUN_TO_RUN
-    module_options["deterministic_max_records"] = max(nv, 1)
+    module_options["deterministic_max_records"] = nv
 
   @wp.kernel(module="unique", module_options=module_options)
   def kernel(
@@ -1793,7 +1790,7 @@ def _eff_add_tendon_qH_diag(nv: int, deterministic: bool = False):
   module_options = {"enable_backward": False}
   if deterministic:
     module_options["deterministic"] = wp.DeterministicMode.RUN_TO_RUN
-    module_options["deterministic_max_records"] = max(nv, 1)
+    module_options["deterministic_max_records"] = nv
 
   @wp.kernel(module="unique", module_options=module_options)
   def kernel(
@@ -1831,7 +1828,7 @@ def _eff_add_actuator_qH_diag(nv: int, deterministic: bool = False):
   module_options = {"enable_backward": False}
   if deterministic:
     module_options["deterministic"] = wp.DeterministicMode.RUN_TO_RUN
-    module_options["deterministic_max_records"] = max(nv, 1)
+    module_options["deterministic_max_records"] = nv
 
   @wp.kernel(module="unique", module_options=module_options)
   def kernel(
@@ -1969,7 +1966,7 @@ def _eff_mul_add_tendon(check_skip: bool, nv: int, deterministic: bool = False):
   module_options = {"enable_backward": False}
   if deterministic:
     module_options["deterministic"] = wp.DeterministicMode.RUN_TO_RUN
-    module_options["deterministic_max_records"] = max(nv, 1)
+    module_options["deterministic_max_records"] = nv
 
   @wp.kernel(module="unique", module_options=module_options, grid_stride=False)
   def kernel(
@@ -2014,7 +2011,7 @@ def _eff_mul_add_actuator(check_skip: bool, nv: int, deterministic: bool = False
   module_options = {"enable_backward": False}
   if deterministic:
     module_options["deterministic"] = wp.DeterministicMode.RUN_TO_RUN
-    module_options["deterministic_max_records"] = max(nv, 1)
+    module_options["deterministic_max_records"] = nv
 
   @wp.kernel(module="unique", module_options=module_options, grid_stride=False)
   def kernel(
@@ -2094,7 +2091,6 @@ def _eff_flex_stretch_stiff_vert(deterministic: bool = False):
   module_options = {"enable_backward": False}
   if deterministic:
     module_options["deterministic"] = wp.DeterministicMode.RUN_TO_RUN
-    module_options["deterministic_max_records"] = 9
 
   @wp.kernel(module="unique", module_options=module_options)
   def kernel(
@@ -2166,7 +2162,6 @@ def _eff_flex_stretch_stiff_edge(deterministic: bool = False):
   module_options = {"enable_backward": False}
   if deterministic:
     module_options["deterministic"] = wp.DeterministicMode.RUN_TO_RUN
-    module_options["deterministic_max_records"] = 9
 
   @wp.kernel(module="unique", module_options=module_options)
   def kernel(
@@ -2247,7 +2242,6 @@ def _eff_flex_bend_stiff(deterministic: bool = False):
   module_options = {"enable_backward": False}
   if deterministic:
     module_options["deterministic"] = wp.DeterministicMode.RUN_TO_RUN
-    module_options["deterministic_max_records"] = 144
 
   @wp.kernel(module="unique", module_options=module_options)
   def kernel(
@@ -2324,33 +2318,30 @@ def _eff_flex_bend_stiff(deterministic: bool = False):
 
     for i in range(4):
       dof_i = dofs[i]
-      if dof_i < 0 or efm_K_rownnz[dof_i] == 0:
-        continue
-      bi = bodies[i]
-      R_bi_T = wp.transpose(xmat_in[worldid, bi])
-      qi = xquat_in[worldid, bi]
-      for j in range(4):
-        dof_j = dofs[j]
-        if dof_j < 0:
-          continue
-        q = scale * flex_bending[bend_offset + 4 * i + j]
-        if q == 0.0:
-          continue
-        bj = bodies[j]
-        if bi == bj or qi == xquat_in[worldid, bj]:
-          for r in range(3):
-            row = dof_i + r
-            idx = _find_csr_col(efm_K_rowadr[row], efm_K_rownnz[row], dof_j, efm_K_colind)
-            if idx >= 0:
-              wp.atomic_add(efm_K_val_out, worldid, idx + r, q)
-        else:
-          blkd = q * (R_bi_T * xmat_in[worldid, bj])
-          for r in range(3):
-            row = dof_i + r
-            idx = _find_csr_col(efm_K_rowadr[row], efm_K_rownnz[row], dof_j, efm_K_colind)
-            if idx >= 0:
-              for c in range(3):
-                wp.atomic_add(efm_K_val_out, worldid, idx + c, blkd[r, c])
+      if dof_i >= 0 and efm_K_rownnz[dof_i] > 0:
+        bi = bodies[i]
+        R_bi_T = wp.transpose(xmat_in[worldid, bi])
+        qi = xquat_in[worldid, bi]
+        for j in range(4):
+          dof_j = dofs[j]
+          if dof_j >= 0:
+            q = scale * flex_bending[bend_offset + 4 * i + j]
+            if q != 0.0:
+              bj = bodies[j]
+              if bi == bj or qi == xquat_in[worldid, bj]:
+                for r in range(3):
+                  row = dof_i + r
+                  idx = _find_csr_col(efm_K_rowadr[row], efm_K_rownnz[row], dof_j, efm_K_colind)
+                  if idx >= 0:
+                    wp.atomic_add(efm_K_val_out, worldid, idx + r, q)
+              else:
+                blkd = q * (R_bi_T * xmat_in[worldid, bj])
+                for r in range(3):
+                  row = dof_i + r
+                  idx = _find_csr_col(efm_K_rowadr[row], efm_K_rownnz[row], dof_j, efm_K_colind)
+                  if idx >= 0:
+                    for c in range(3):
+                      wp.atomic_add(efm_K_val_out, worldid, idx + c, blkd[r, c])
 
   return kernel
 
@@ -2360,7 +2351,7 @@ def _eff_flex_interp_stiff(deterministic: bool = False):
   module_options = {"enable_backward": False}
   if deterministic:
     module_options["deterministic"] = wp.DeterministicMode.RUN_TO_RUN
-    module_options["deterministic_max_records"] = 576
+    module_options["deterministic_max_records"] = 9 * FLEX_INTERP_MAX_NODES * FLEX_INTERP_MAX_NODES
 
   @wp.kernel(module="unique", module_options=module_options)
   def kernel(
@@ -2677,7 +2668,7 @@ def _eff_flex_interp_mul(check_skip: bool, is_shift: bool, nv: int, deterministi
   module_options = {"enable_backward": False}
   if deterministic:
     module_options["deterministic"] = wp.DeterministicMode.RUN_TO_RUN
-    module_options["deterministic_max_records"] = max(27 * nv, 1)
+    module_options["deterministic_max_records"] = FLEX_INTERP_MAX_NODES * nv
 
   @wp.kernel(module="unique", module_options=module_options, grid_stride=False)
   def kernel(
@@ -3180,8 +3171,9 @@ def eff_build(m: Model, d: Data):
       outputs=[d.efm_K_val],
     )
 
+    det_atomics = bool(m.opt.deterministic & DeterminismType.ATOMICS)
     wp.launch(
-      _eff_flex_bend_stiff(bool(m.opt.deterministic & DeterminismType.ATOMICS)),
+      _eff_flex_bend_stiff(det_atomics),
       dim=(d.nworld, m.nflexedge),
       inputs=[
         m.opt.timestep,
@@ -3215,7 +3207,7 @@ def eff_build(m: Model, d: Data):
 
     if m.flex_interp_assemblable:
       wp.launch(
-        _eff_flex_interp_stiff(bool(m.opt.deterministic & DeterminismType.ATOMICS)),
+        _eff_flex_interp_stiff(det_atomics),
         dim=(d.nworld, m.nflexintcell),
         inputs=[
           m.opt.timestep,
@@ -3296,10 +3288,9 @@ def eff_shift(m: Model, d: Data):
     outputs=[d.efm_c, d.efm_diag],
   )
 
-  det = bool(m.opt.deterministic & DeterminismType.ATOMICS)
-
+  det_atomics = bool(m.opt.deterministic & DeterminismType.ATOMICS)
   wp.launch(
-    _eff_tendon_shift(m.nv if det else 0, det),
+    _eff_tendon_shift(m.nv if det_atomics else 0, det_atomics),
     dim=(d.nworld, m.ntendon),
     inputs=[
       m.opt.timestep,
@@ -3325,7 +3316,7 @@ def eff_shift(m: Model, d: Data):
     passive.flex_stretch_mul(m, d, d.efm_c, d.qvel, s1_in=-1.0, s2_in=0.0, use_timestep=True, non_simple_only=False)
 
     wp.launch(
-      _eff_flex_interp_mul(False, True, m.nv if det else 0, det),
+      _eff_flex_interp_mul(False, True, m.nv if det_atomics else 0, det_atomics),
       dim=(d.nworld, m.nflexintcell),
       inputs=[
         m.opt.timestep,
@@ -3356,7 +3347,7 @@ def eff_shift(m: Model, d: Data):
   if m.has_flex_passive and not ((m.opt.disableflags & DisableBit.SPRING) and (m.opt.disableflags & DisableBit.DAMPER)):
     efm_con_dof, efm_con_val, efm_con_scale, _, efm_con_nnz = build_efm_contact(m, d)
     wp.launch(
-      _eff_contact_shift(det),
+      _eff_contact_shift(bool(m.opt.deterministic & DeterminismType.ATOMICS)),
       dim=d.naconmax,
       inputs=[
         m.opt.timestep,
@@ -3375,7 +3366,7 @@ def eff_shift(m: Model, d: Data):
     Mi = m.M_fullm_i
     Mj = m.M_fullm_j
     wp.launch(
-      _qderiv_ellipsoid_fluid(det),
+      _qderiv_ellipsoid_fluid(bool(m.opt.deterministic & DeterminismType.ATOMICS)),
       dim=(d.nworld, m.body_fluid_ellipsoid_adr.size, Mi.size),
       inputs=[
         m.opt.timestep,
@@ -3406,7 +3397,7 @@ def eff_shift(m: Model, d: Data):
       outputs=[d.efm_fluid],
     )
     wp.launch(
-      _qderiv_box_fluid(det),
+      _qderiv_box_fluid(bool(m.opt.deterministic & DeterminismType.ATOMICS)),
       dim=(d.nworld, m.body_fluid_box_adr.size, Mi.size),
       inputs=[
         m.opt.timestep,
@@ -3446,11 +3437,10 @@ def eff_actuation(m: Model, d: Data):
   else:
     ctrl = d.ctrl
 
-  det = bool(m.opt.deterministic & DeterminismType.ATOMICS)
-
   d.efm_ca.zero_()
+  det_atomics = bool(m.opt.deterministic & DeterminismType.ATOMICS)
   wp.launch(
-    _eff_actuator_actuation(m.nv if det else 0, det),
+    _eff_actuator_actuation(m.nv if det_atomics else 0, det_atomics),
     dim=(d.nworld, m.nactuator),
     inputs=[
       m.opt.timestep,
@@ -3500,7 +3490,7 @@ def eff_actuation(m: Model, d: Data):
     outputs=[d.qH],
   )
   wp.launch(
-    _eff_add_tendon_qH_diag(m.nv if det else 0, det),
+    _eff_add_tendon_qH_diag(m.nv if det_atomics else 0, det_atomics),
     dim=(d.nworld, m.ntendon),
     inputs=[
       m.ten_J_rownnz,
@@ -3514,7 +3504,7 @@ def eff_actuation(m: Model, d: Data):
     outputs=[d.qH],
   )
   wp.launch(
-    _eff_add_actuator_qH_diag(m.nv if det else 0, det),
+    _eff_add_actuator_qH_diag(m.nv if det_atomics else 0, det_atomics),
     dim=(d.nworld, m.nactuator),
     inputs=[
       m.M_rownnz,
@@ -3573,7 +3563,6 @@ def eff_mul_m(
   if m.opt.integrator == IntegratorType.DISCRETE:
     check_skip = skip is not None
     skip_arr = skip if check_skip else m.body_is_free
-    det = bool(m.opt.deterministic & DeterminismType.ATOMICS)
     if m.nefmK > 0:
       wp.launch(
         _eff_mul_diag_and_csr(check_skip),
@@ -3596,8 +3585,9 @@ def eff_mul_m(
         inputs=[d.efm_diag, vec, skip_arr],
         outputs=[res],
       )
+    det_atomics = bool(m.opt.deterministic & DeterminismType.ATOMICS)
     wp.launch(
-      _eff_mul_add_tendon(check_skip, m.nv if det else 0, det),
+      _eff_mul_add_tendon(check_skip, m.nv if det_atomics else 0, det_atomics),
       dim=(d.nworld, m.ntendon),
       inputs=[
         m.ten_J_rownnz,
@@ -3611,7 +3601,7 @@ def eff_mul_m(
       outputs=[res],
     )
     wp.launch(
-      _eff_mul_add_actuator(check_skip, m.nv if det else 0, det),
+      _eff_mul_add_actuator(check_skip, m.nv if det_atomics else 0, det_atomics),
       dim=(d.nworld, m.nactuator),
       inputs=[
         d.moment_rownnz,
@@ -3630,7 +3620,7 @@ def eff_mul_m(
       else:
         efm_con_dof, efm_con_val, efm_con_scale, _, efm_con_nnz = efm_con
       wp.launch(
-        _eff_mul_add_contact(check_skip, det),
+        _eff_mul_add_contact(check_skip, det_atomics),
         dim=d.naconmax,
         inputs=[
           d.contact.worldid,
@@ -3677,7 +3667,7 @@ def eff_mul_m(
       (m.opt.disableflags & DisableBit.SPRING) and (m.opt.disableflags & DisableBit.DAMPER)
     ):
       wp.launch(
-        _eff_flex_interp_mul(check_skip, False, m.nv if det else 0, det),
+        _eff_flex_interp_mul(check_skip, False, m.nv if det_atomics else 0, det_atomics),
         dim=(d.nworld, m.nflexintcell),
         inputs=[
           m.opt.timestep,
@@ -3769,7 +3759,7 @@ def _eff_fold_tendon(nv: int, deterministic: bool = False):
   module_options = {"enable_backward": False}
   if deterministic:
     module_options["deterministic"] = wp.DeterministicMode.RUN_TO_RUN
-    module_options["deterministic_max_records"] = max(3 * nv, 1)
+    module_options["deterministic_max_records"] = 3 * nv
 
   @wp.kernel(module="unique", module_options=module_options)
   def kernel(
@@ -3812,7 +3802,7 @@ def _eff_fold_actuator(nv: int, deterministic: bool = False):
   module_options = {"enable_backward": False}
   if deterministic:
     module_options["deterministic"] = wp.DeterministicMode.RUN_TO_RUN
-    module_options["deterministic_max_records"] = max(3 * nv, 1)
+    module_options["deterministic_max_records"] = 3 * nv
 
   @wp.kernel(module="unique", module_options=module_options)
   def kernel(
@@ -3855,7 +3845,7 @@ def _eff_fold_efc_sparse(nv: int, deterministic: bool = False):
   module_options = {"enable_backward": False}
   if deterministic:
     module_options["deterministic"] = wp.DeterministicMode.RUN_TO_RUN
-    module_options["deterministic_max_records"] = max(3 * nv, 1)
+    module_options["deterministic_max_records"] = 3 * nv
 
   @wp.kernel(module="unique", module_options=module_options)
   def kernel(
@@ -3973,7 +3963,6 @@ def eff_prec_fold(m: Model, d: Data, out: Optional[wp.array] = None) -> wp.array
     return epL
   epB = wp.empty_like(d.efm_L)
   dofblk = m.efm_dofblk
-  det = bool(m.opt.deterministic & DeterminismType.ATOMICS)
 
   wp.launch(
     _eff_build_blocks_raw,
@@ -3996,8 +3985,9 @@ def eff_prec_fold(m: Model, d: Data, out: Optional[wp.array] = None) -> wp.array
     outputs=[epB],
   )
 
+  det_atomics = bool(m.opt.deterministic & DeterminismType.ATOMICS)
   wp.launch(
-    _eff_fold_tendon(m.nv if det else 0, det),
+    _eff_fold_tendon(m.nv if det_atomics else 0, det_atomics),
     dim=(d.nworld, m.ntendon),
     inputs=[
       m.ten_J_rownnz,
@@ -4012,7 +4002,7 @@ def eff_prec_fold(m: Model, d: Data, out: Optional[wp.array] = None) -> wp.array
   )
 
   wp.launch(
-    _eff_fold_actuator(m.nv if det else 0, det),
+    _eff_fold_actuator(m.nv if det_atomics else 0, det_atomics),
     dim=(d.nworld, m.nactuator),
     inputs=[
       m.efm_dofid,
@@ -4028,7 +4018,7 @@ def eff_prec_fold(m: Model, d: Data, out: Optional[wp.array] = None) -> wp.array
 
   if m.is_sparse:
     wp.launch(
-      _eff_fold_efc_sparse(m.nv if det else 0, det),
+      _eff_fold_efc_sparse(m.nv if det_atomics else 0, det_atomics),
       dim=(d.nworld, d.njmax),
       inputs=[
         m.efm_dofid,
@@ -4046,7 +4036,7 @@ def eff_prec_fold(m: Model, d: Data, out: Optional[wp.array] = None) -> wp.array
   if m.has_flex_passive:
     efm_con_dof, efm_con_val, efm_con_scale, _, efm_con_nnz = build_efm_contact(m, d)
     wp.launch(
-      _eff_fold_contact_rank1(det),
+      _eff_fold_contact_rank1(bool(m.opt.deterministic & DeterminismType.ATOMICS)),
       dim=d.naconmax,
       inputs=[
         m.efm_dofid,

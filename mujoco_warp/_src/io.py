@@ -3238,12 +3238,10 @@ def override_model(model: types.Model | mujoco.MjModel, overrides: dict[str, Any
       typ = type(getattr(obj, attr))
 
       if key == "opt.deterministic":
-        if isinstance(val, bool) or (isinstance(val, str) and val.upper() in ("TRUE", "FALSE")):
-          val = (
-            int(types.DeterminismType.ALL)
-            if (val is True or (isinstance(val, str) and val.upper() == "TRUE"))
-            else int(types.DeterminismType.NONE)
-          )
+        if isinstance(val, str) and val.upper() in ("TRUE", "FALSE"):
+          val = val.upper() == "TRUE"
+        if isinstance(val, (bool, np.bool_)):
+          val = int(types.DeterminismType.ALL if val else types.DeterminismType.NONE)
         elif isinstance(val, str) and val.isdigit():
           val = int(val)
 
