@@ -14,6 +14,7 @@
 # ==============================================================================
 import dataclasses
 import enum
+import operator
 from typing import Callable, Optional
 
 import mujoco
@@ -51,8 +52,11 @@ Q_LD_BLOCK_SPARSE = -1
 # maximum number of plugin attributes
 _NPLUGINATTR = 128
 
-# maximum number of DOFs per passive flex contact (2 sides x 4 tet vertices x 3 DOFs)
+# max DOFs per passive flex contact (2 sides * 4 max vertices per 3D tet * 3 DOFs per vertex)
 EFM_CON_MAX_DOF = 24
+
+# max nodes per interpolated flex cell ((2 + 1)^3 for quadratic)
+FLEX_INTERP_MAX_NODES = 27
 
 
 # TODO(team): add check that all wp.launch_tiled 'block_dim' settings are configurable
@@ -1026,11 +1030,15 @@ class Option:
 
   @deterministic.setter
   def deterministic(self, value: bool | int | None):
-    if isinstance(value, bool):
-      value = int(DeterminismType.ALL) if value else int(DeterminismType.NONE)
-    elif value is None:
-      value = int(DeterminismType.NONE)
-    self._deterministic = int(value)
+    if value is None or isinstance(value, (bool, np.bool_)):
+      value = DeterminismType.ALL if value else DeterminismType.NONE
+    value = operator.index(value)
+    if value < 0:
+      # complements, e.g. ~DeterminismType.CONTACTS is negative on Python 3.10
+      value &= int(DeterminismType.ALL)
+    if value & ~int(DeterminismType.ALL):
+      raise ValueError(f"deterministic must be a DeterminismType bitmask, got {value}")
+    self._deterministic = value
 
   # TODO(team): remove in future version
   @property

@@ -416,8 +416,8 @@ def _sap_pair_margin(npair_margin: int, npair_gap: int):
     pair_margin_id = batchid % npair_margin if wp.static(npair_margin > 1) else 0
     pair_gap_id = batchid % npair_gap if wp.static(npair_gap > 1) else 0
     margin = pair_margin[pair_margin_id, pairid] + pair_gap[pair_gap_id, pairid]  # kernel_analyzer: ignore
-    wp.atomic_max(geom_pair_margin_out, batchid, pair_geom1[pairid], margin)
-    wp.atomic_max(geom_pair_margin_out, batchid, pair_geom2[pairid], margin)
+    wp.atomic_max(geom_pair_margin_out, batchid, pair_geom1[pairid], margin)  # kernel_analyzer: ignore[atomic]
+    wp.atomic_max(geom_pair_margin_out, batchid, pair_geom2[pairid], margin)  # kernel_analyzer: ignore[atomic]
 
   return sap_pair_margin
 

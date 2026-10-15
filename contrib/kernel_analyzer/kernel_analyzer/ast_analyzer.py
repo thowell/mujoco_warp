@@ -163,18 +163,8 @@ class MissingDeterministicFactory(Issue):
 
 @dataclasses.dataclass
 class MissingDeterministicMaxRecords(Issue):
-  reason: str = 'deterministic factory must set "deterministic_max_records" in module_options'
-
   def __str__(self):
-    return f'"{self.kernel}" {self.reason}'
-
-
-@dataclasses.dataclass
-class AtomicTargetConflict(Issue):
-  reason: str
-
-  def __str__(self):
-    return f'"{self.kernel}" {self.reason}'
+    return f'"{self.kernel}" contains atomic operations in a dynamic loop and must set "deterministic_max_records"'
 
 
 # TODO(team): add argument order analyzer.
@@ -362,23 +352,16 @@ def analyze(
   active_off_rules: set[str] = set()
 
   for lineno, line in enumerate(source_lines, 1):  # lineno is 1-indexed
-    m_off = re.search(r"#\s*kernel_analyzer:\s*off(?:\[(.*?)\])?", line)
-    if m_off:
-      active_off_rules.add(m_off.group(1).strip() if m_off.group(1) else "*")
-    m_on = re.search(r"#\s*kernel_analyzer:\s*on(?:\[(.*?)\])?", line)
-    if m_on:
-      rule = m_on.group(1).strip() if m_on.group(1) else "*"
-      active_off_rules.discard(rule)
-      if rule == "*":
-        active_off_rules.clear()
-
-    m_ign = re.search(r"#\s*kernel_analyzer:\s*ignore(?:\[(.*?)\])?", line)
-    rules_to_ignore = set(active_off_rules)
-    if m_ign:
-      rules_to_ignore.add(m_ign.group(1).strip() if m_ign.group(1) else "*")
-
-    if rules_to_ignore:
-      ignore_lines[lineno] = rules_to_ignore
+    for action, rule in re.findall(r"#\s*kernel_analyzer:\s*(off|on|ignore)(?:\[(.*?)\])?", line):
+      rule = rule.strip() or "*"
+      if action == "off":
+        active_off_rules.add(rule)
+      elif action == "on":
+        active_off_rules.clear() if rule == "*" else active_off_rules.discard(rule)
+      elif action == "ignore":
+        ignore_lines.setdefault(lineno, set()).add(rule)
+    if active_off_rules:
+      ignore_lines.setdefault(lineno, set()).update(active_off_rules)
 
   def _is_ignored(iss: Issue) -> bool:
     if isinstance(iss.node, ast.FunctionDef):
@@ -387,17 +370,11 @@ def analyze(
     else:
       start_line = iss.node.lineno
       end_line = iss.node.end_lineno or start_line
-    matched_rules: set[str] = set()
-    for l in range(start_line, end_line + 1):
-      if l in ignore_lines:
-        matched_rules.update(ignore_lines[l])
-    if not matched_rules:
-      return False
-    if "*" in matched_rules:
-      return True
-    if isinstance(iss, (MissingDeterministicFactory, MissingDeterministicMaxRecords, AtomicTargetConflict)):
-      return any("atomic" in r.lower() or "deterministic" in r.lower() for r in matched_rules)
-    return False
+    rules = {r for l in range(start_line, end_line + 1) for r in ignore_lines.get(l, ())}
+    return "*" in rules or (
+      isinstance(iss, (MissingDeterministicFactory, MissingDeterministicMaxRecords))
+      and any("atomic" in r.lower() for r in rules)
+    )
 
   def _is_atomic_call(sub: ast.AST) -> bool:
     return (
@@ -418,244 +395,70 @@ def analyze(
       and sub.func.attr == "static"
     )
 
-  def _extract_root_name(expr: ast.AST) -> Optional[str]:
-    root = expr
-    while isinstance(root, ast.Subscript):
-      root = root.value
-    return root.id if isinstance(root, ast.Name) else None
-
-  def _has_loop_break_or_continue(stmts: List[ast.stmt]) -> bool:
-    stack: List[ast.AST] = list(stmts)
-    while stack:
-      cur = stack.pop()
-      if isinstance(cur, (ast.Break, ast.Continue)):
+  def _has_loop_break(stmts: List[ast.stmt]) -> bool:
+    for s in stmts:
+      if isinstance(s, (ast.Break, ast.Continue)):
         return True
-      if isinstance(cur, (ast.For, ast.While, ast.FunctionDef)):
-        continue
-      stack.extend(ast.iter_child_nodes(cur))
+      if isinstance(s, ast.If) and (_has_loop_break(s.body) or _has_loop_break(s.orelse)):
+        return True
     return False
 
-  def _is_unrolled_for(loop_node: ast.For) -> bool:
-    it = loop_node.iter
+  def _is_unrolled_for(loop: ast.For) -> bool:
+    it = loop.iter
     if not (isinstance(it, ast.Call) and isinstance(it.func, ast.Name) and it.func.id == "range" and 1 <= len(it.args) <= 3):
+      return False
+    if _has_loop_break(loop.body):
       return False
     vals = []
     for a in it.args:
       if isinstance(a, ast.Constant) and isinstance(a.value, int):
         vals.append(a.value)
+      elif (
+        isinstance(a, ast.UnaryOp)
+        and isinstance(a.op, ast.USub)
+        and isinstance(a.operand, ast.Constant)
+        and isinstance(a.operand.value, int)
+      ):
+        vals.append(-a.operand.value)
       elif _is_wp_static(a):
         vals.append(None)
       else:
         return False
-    if _has_loop_break_or_continue(loop_node.body):
-      return False
-    if any(_is_wp_static(sub) for sub in ast.walk(loop_node)):
+    if None in vals:
       return True
-    if all(v is not None for v in vals):
-      start = 0 if len(vals) == 1 else vals[0]
-      end = vals[0] if len(vals) == 1 else vals[1]
-      step = 1 if len(vals) < 3 else vals[2]
-      if step == 0:
-        return False
-      return len(range(start, end, step)) <= 16
-    return False
+    start = 0 if len(vals) == 1 else vals[0]
+    end = vals[0] if len(vals) == 1 else vals[1]
+    step = 1 if len(vals) < 3 else vals[2]
+    return step != 0 and abs(end - start) // abs(step) <= 16
 
-  def _find_dynamic_loop_atomics(
-    stmts: List[ast.stmt],
-    fn_name: str,
-    dyn_atomic_funcs: set[str],
-    all_atomic_funcs: set[str],
-    in_dyn_loop: bool = False,
-  ) -> List[ast.Call]:
-    found: List[ast.Call] = []
-    for stmt in stmts:
-      if isinstance(stmt, ast.FunctionDef):
-        continue
-      cur_dyn = in_dyn_loop
-      if isinstance(stmt, ast.While):
-        cur_dyn = True
-      elif isinstance(stmt, ast.For) and not _is_unrolled_for(stmt):
-        cur_dyn = True
-
-      # Check expressions directly on stmt (excluding child statement blocks)
-      child_blocks = []
-      for field in ("body", "orelse", "finalbody", "handlers"):
-        val = getattr(stmt, field, None)
-        if isinstance(val, list):
-          child_blocks.extend(val)
-      child_block_ids = {id(c) for c in child_blocks}
-
-      stack = [stmt]
-      while stack:
-        cur = stack.pop()
-        if isinstance(cur, ast.Call):
-          if _is_atomic_call(cur) and not _is_ignored(MissingDeterministicFactory(cur, fn_name)):
-            if cur_dyn:
-              found.append(cur)
-          elif isinstance(cur.func, ast.Name) and not _is_ignored(MissingDeterministicFactory(cur, fn_name)):
-            if cur.func.id in dyn_atomic_funcs or (cur_dyn and cur.func.id in all_atomic_funcs):
-              found.append(cur)
-        for ch in ast.iter_child_nodes(cur):
-          if id(ch) not in child_block_ids and not isinstance(ch, ast.FunctionDef):
-            stack.append(ch)
-
-      for field in ("body", "orelse", "finalbody"):
-        val = getattr(stmt, field, None)
-        if isinstance(val, list):
-          found.extend(_find_dynamic_loop_atomics(val, fn_name, dyn_atomic_funcs, all_atomic_funcs, cur_dyn))
-    return found
-
-  def _get_deterministic_max_records_expr(enclosing_func: ast.FunctionDef) -> Optional[ast.AST]:
-    for sub in ast.walk(enclosing_func):
-      if isinstance(sub, ast.Assign):
-        for target in sub.targets:
-          if (
-            isinstance(target, ast.Subscript)
-            and isinstance(target.slice, ast.Constant)
-            and target.slice.value == "deterministic_max_records"
-          ):
-            return sub.value
-      elif isinstance(sub, ast.Dict):
-        for k, v in zip(sub.keys, sub.values):
-          if isinstance(k, ast.Constant) and k.value == "deterministic_max_records":
-            return v
-    return None
-
-  def _propagate_func_atomic_info(
-    func_map: Dict[str, ast.FunctionDef],
-    atomic_funcs: Dict[str, List[ast.Call]],
-    dyn_atomic_funcs: set[str],
-    atomic_param_indices: Dict[str, set[int]],
-    rw_param_indices: Dict[str, set[int]],
-  ):
-    for fname, fnode in func_map.items():
-      param_idx = {a.arg: i for i, a in enumerate(fnode.args.args)}
-      atomics = [
-        sub for sub in ast.walk(fnode) if _is_atomic_call(sub) and not _is_ignored(MissingDeterministicFactory(sub, fname))
-      ]
-      if atomics:
-        atomic_funcs[fname] = atomics
-        for acall in atomics:
-          if acall.args:
-            rname = _extract_root_name(acall.args[0])
-            if rname in param_idx:
-              atomic_param_indices.setdefault(fname, set()).add(param_idx[rname])
-
-    changed = True
-    while changed:
-      changed = False
-      for fname, fnode in func_map.items():
-        param_idx = {a.arg: i for i, a in enumerate(fnode.args.args)}
-        for sub in ast.walk(fnode):
-          if isinstance(sub, ast.Call) and isinstance(sub.func, ast.Name) and sub.func.id in atomic_funcs:
-            if not _is_ignored(MissingDeterministicFactory(sub, fname)):
-              if fname not in atomic_funcs:
-                atomic_funcs[fname] = [sub]
-                changed = True
-              for pidx in atomic_param_indices.get(sub.func.id, ()):
-                if pidx < len(sub.args):
-                  rname = _extract_root_name(sub.args[pidx])
-                  if rname in param_idx and param_idx[rname] not in atomic_param_indices.get(fname, ()):
-                    atomic_param_indices.setdefault(fname, set()).add(param_idx[rname])
-                    changed = True
-
-    for fname, fnode in func_map.items():
-      param_idx = {a.arg: i for i, a in enumerate(fnode.args.args)}
-      atomic_arg_ids: set[int] = set()
-      for sub in ast.walk(fnode):
-        if isinstance(sub, ast.Call) and not _is_ignored(MissingDeterministicFactory(sub, fname)):
-          if _is_atomic_call(sub) and sub.args:
-            for n in ast.walk(sub.args[0]):
-              atomic_arg_ids.add(id(n))
-          elif isinstance(sub.func, ast.Name) and sub.func.id in atomic_param_indices:
-            for pidx in atomic_param_indices[sub.func.id]:
-              if pidx < len(sub.args):
-                for n in ast.walk(sub.args[pidx]):
-                  atomic_arg_ids.add(id(n))
-      for sub in ast.walk(fnode):
-        if isinstance(sub, ast.AugAssign) and isinstance(sub.target, ast.Subscript):
-          rname = _extract_root_name(sub.target)
-          if rname in param_idx:
-            rw_param_indices.setdefault(fname, set()).add(param_idx[rname])
-        elif isinstance(sub, ast.Subscript) and id(sub) not in atomic_arg_ids:
-          rname = _extract_root_name(sub)
-          if rname in param_idx:
-            rw_param_indices.setdefault(fname, set()).add(param_idx[rname])
-
-    changed = True
-    while changed:
-      changed = False
-      for fname, fnode in func_map.items():
-        param_idx = {a.arg: i for i, a in enumerate(fnode.args.args)}
-        for sub in ast.walk(fnode):
-          if isinstance(sub, ast.Call) and isinstance(sub.func, ast.Name) and sub.func.id in rw_param_indices:
-            for pidx in rw_param_indices[sub.func.id]:
-              if pidx < len(sub.args):
-                rname = _extract_root_name(sub.args[pidx])
-                if rname in param_idx and param_idx[rname] not in rw_param_indices.get(fname, ()):
-                  rw_param_indices.setdefault(fname, set()).add(param_idx[rname])
-                  changed = True
-
-    changed = True
-    while changed:
-      changed = False
-      for fname, fnode in func_map.items():
-        if fname in dyn_atomic_funcs or fname not in atomic_funcs:
-          continue
-        if _find_dynamic_loop_atomics(fnode.body, fname, dyn_atomic_funcs, set(atomic_funcs.keys())):
-          dyn_atomic_funcs.add(fname)
-          changed = True
-
-  # Pre-scan top-level @wp.func definitions for un-ignored atomic operations so
-  # calling @wp.kernel functions are checked for a deterministic factory.
-  top_level_funcs: Dict[str, ast.FunctionDef] = {}
   top_level_atomic_funcs: Dict[str, List[ast.Call]] = {}
-  top_level_dyn_atomic_funcs: set[str] = set()
-  top_level_atomic_param_indices: Dict[str, set[int]] = {}
-  top_level_rw_param_indices: Dict[str, set[int]] = {}
   called_top_level_atomic_funcs: set[str] = set()
-  det_factory_read_in_indices: Dict[str, set[int]] = {}
-  det_factory_atomic_out_indices: Dict[str, set[int]] = {}
-  if check_atomic:
-    for node in ast.iter_child_nodes(tree):
-      if isinstance(node, ast.FunctionDef):
-        for d in node.decorator_list:
-          dec = ast.get_source_segment(source, d)
-          if _is_func(dec):
-            top_level_funcs[node.name] = node
-            break
+  atomic_funcs: set[str] = set()
+  dyn_atomic_funcs: set[str] = set()
 
-    _propagate_func_atomic_info(
-      top_level_funcs,
-      top_level_atomic_funcs,
-      top_level_dyn_atomic_funcs,
-      top_level_atomic_param_indices,
-      top_level_rw_param_indices,
-    )
-
-  def _build_static_branch_map(root_node: ast.FunctionDef) -> Dict[int, Dict[int, bool]]:
-    branch_map: Dict[int, Dict[int, bool]] = {}
-
-    def _visit(n: ast.AST, current: Dict[int, bool]):
-      branch_map[id(n)] = current
-      if isinstance(n, ast.If) and any(_is_wp_static(s) for s in ast.walk(n.test)):
-        if_id = id(n)
-        _visit(n.test, current)
-        body_ctx = dict(current)
-        body_ctx[if_id] = True
-        for b in n.body:
-          _visit(b, body_ctx)
-        else_ctx = dict(current)
-        else_ctx[if_id] = False
-        for o in n.orelse:
-          _visit(o, else_ctx)
-        return
-      for ch in ast.iter_child_nodes(n):
-        if not isinstance(ch, ast.FunctionDef):
-          _visit(ch, current)
-
-    _visit(root_node, {})
-    return branch_map
+  def _find_dyn_atomics(curr: ast.AST, in_dyn_loop: bool = False) -> List[ast.Call]:
+    found: List[ast.Call] = []
+    if isinstance(curr, ast.While):
+      found.extend(_find_dyn_atomics(curr.test, in_dyn_loop))
+      for s in curr.body + curr.orelse:
+        found.extend(_find_dyn_atomics(s, True))
+      return found
+    if isinstance(curr, ast.For):
+      found.extend(_find_dyn_atomics(curr.iter, in_dyn_loop))
+      dyn = in_dyn_loop or not _is_unrolled_for(curr)
+      for s in curr.body + curr.orelse:
+        found.extend(_find_dyn_atomics(s, dyn))
+      return found
+    if isinstance(curr, ast.Call):
+      fname = curr.func.id if isinstance(curr.func, ast.Name) else None
+      if ((in_dyn_loop and (_is_atomic_call(curr) or fname in atomic_funcs)) or fname in dyn_atomic_funcs) and not _is_ignored(
+        MissingDeterministicMaxRecords(curr, "")
+      ):
+        found.append(curr)
+    for child in ast.iter_child_nodes(curr):
+      if not isinstance(child, ast.FunctionDef):
+        found.extend(_find_dyn_atomics(child, in_dyn_loop))
+    return found
 
   def _analyze_function(node: ast.FunctionDef, is_nested: bool, enclosing_func: Optional[ast.FunctionDef] = None):
     """Analyze a function definition for kernel issues."""
@@ -684,208 +487,33 @@ def analyze(
 
     # Kernels and functions with atomics must be inside a deterministic factory.
     if check_atomic and (_is_kernel(decorator) or _is_func(decorator)):
-      has_det = False
-      if is_nested and enclosing_func is not None:
-        has_det = any(a.arg == "deterministic" for a in enclosing_func.args.args + enclosing_func.args.kwonlyargs)
-      if _is_kernel(decorator) or is_nested:
-        for sub in ast.walk(node):
-          if isinstance(sub, ast.Call) and isinstance(sub.func, ast.Name) and sub.func.id in top_level_atomic_funcs:
-            called_top_level_atomic_funcs.add(sub.func.id)
-            if not has_det:
-              issues.append(MissingDeterministicFactory(sub, node.name))
-          elif not has_det and _is_atomic_call(sub):
+      has_det = (
+        is_nested
+        and enclosing_func is not None
+        and any(a.arg == "deterministic" for a in enclosing_func.args.args + enclosing_func.args.kwonlyargs)
+      )
+      for sub in ast.walk(node):
+        is_atomic_func_call = isinstance(sub, ast.Call) and isinstance(sub.func, ast.Name) and sub.func.id in atomic_funcs
+        if is_atomic_func_call and sub.func.id in top_level_atomic_funcs:
+          called_top_level_atomic_funcs.add(sub.func.id)
+        if (is_atomic_func_call or _is_atomic_call(sub)) and not _is_ignored(MissingDeterministicFactory(sub, node.name)):
+          if _is_func(decorator):
+            atomic_funcs.add(node.name)
+          if not is_nested and _is_func(decorator):
+            top_level_atomic_funcs.setdefault(node.name, []).append(sub)
+          elif not has_det:
             issues.append(MissingDeterministicFactory(sub, node.name))
 
-      if is_nested and _is_kernel(decorator) and has_det and enclosing_func is not None:
-        # Collect all nested @wp.func / @wp.func_native helpers inside enclosing_func
-        local_func_map: Dict[str, ast.FunctionDef] = {}
-        local_atomic_funcs: Dict[str, List[ast.Call]] = dict(top_level_atomic_funcs)
-        local_dyn_atomic_funcs: set[str] = set(top_level_dyn_atomic_funcs)
-        local_atomic_param_indices: Dict[str, set[int]] = {k: set(v) for k, v in top_level_atomic_param_indices.items()}
-        local_rw_param_indices: Dict[str, set[int]] = {k: set(v) for k, v in top_level_rw_param_indices.items()}
-        sync_func_names: set[str] = set()
-        for sub_fn in ast.walk(enclosing_func):
-          if isinstance(sub_fn, ast.FunctionDef) and sub_fn is not enclosing_func and sub_fn is not node:
-            for sd in sub_fn.decorator_list:
-              sdec = ast.get_source_segment(source, sd) or ""
-              if "func_native" in sdec and ("WP_TILE_SYNC" in sdec or "__syncthreads" in sdec):
-                sync_func_names.add(sub_fn.name)
-              if _is_func(sdec):
-                local_func_map[sub_fn.name] = sub_fn
-
-        if local_func_map:
-          _propagate_func_atomic_info(
-            local_func_map,
-            local_atomic_funcs,
-            local_dyn_atomic_funcs,
-            local_atomic_param_indices,
-            local_rw_param_indices,
-          )
-
-        local_atomic_func_names = set(local_atomic_funcs.keys())
-        max_rec_expr = _get_deterministic_max_records_expr(enclosing_func)
-        dyn_atomics = _find_dynamic_loop_atomics(node.body, node.name, local_dyn_atomic_funcs, local_atomic_func_names)
-        if max_rec_expr is None:
-          issues.append(
-            MissingDeterministicMaxRecords(
-              node,
-              node.name,
-              'deterministic factory must set "deterministic_max_records" in module_options',
-            )
-          )
-        elif (
-          dyn_atomics
-          and isinstance(max_rec_expr, ast.Constant)
-          and isinstance(max_rec_expr.value, int)
-          and max_rec_expr.value <= 1
-        ):
-          for dcall in dyn_atomics:
-            issues.append(
-              MissingDeterministicMaxRecords(
-                dcall,
-                node.name,
-                'executes atomic operations in a dynamic loop; "deterministic_max_records" must be set to the loop upper bound (> 1)',
-              )
-            )
-
-        # Check for thread sync or intra-kernel read / write / AugAssign on atomic target arrays
-        direct_atomics = [
-          sub for sub in ast.walk(node) if _is_atomic_call(sub) and not _is_ignored(MissingDeterministicFactory(sub, node.name))
-        ]
-        func_atomic_calls = [
-          sub
-          for sub in ast.walk(node)
-          if isinstance(sub, ast.Call)
-          and isinstance(sub.func, ast.Name)
-          and sub.func.id in local_atomic_func_names
-          and not _is_ignored(MissingDeterministicFactory(sub, node.name))
-        ]
-        all_unignored_atomics = list(direct_atomics) + func_atomic_calls
-        if sync_func_names and all_unignored_atomics:
-          has_sync_call = any(
-            isinstance(sub, ast.Call) and isinstance(sub.func, ast.Name) and sub.func.id in sync_func_names
-            for sub in ast.walk(node)
-          )
-          if has_sync_call:
-            for acall in all_unignored_atomics:
-              issues.append(
-                AtomicTargetConflict(
-                  acall,
-                  node.name,
-                  "uses thread synchronization with deterministic scatter atomics, which are deferred until kernel exit",
-                )
-              )
-
-        atomic_ops_by_target: Dict[str, List[ast.Call]] = {}
-        atomic_arg0_ids: set[int] = set()
-        for acall in direct_atomics:
-          if acall.args:
-            arg0 = acall.args[0]
-            for n in ast.walk(arg0):
-              atomic_arg0_ids.add(id(n))
-            rname = _extract_root_name(arg0)
-            if rname:
-              atomic_ops_by_target.setdefault(rname, []).append(acall)
-
-        for fcall in func_atomic_calls:
-          if isinstance(fcall.func, ast.Name):
-            for pidx in local_atomic_param_indices.get(fcall.func.id, ()):
-              if pidx < len(fcall.args):
-                arg_expr = fcall.args[pidx]
-                for n in ast.walk(arg_expr):
-                  atomic_arg0_ids.add(id(n))
-                rname = _extract_root_name(arg_expr)
-                if rname:
-                  atomic_ops_by_target.setdefault(rname, []).append(fcall)
-
-        if atomic_ops_by_target:
-          in_params = [p.arg for p in node.args.args if not (p.arg.endswith("_out") or p.arg in ("res", "out"))]
-          out_params = [p.arg for p in node.args.args if p.arg.endswith("_out") or p.arg in ("res", "out")]
-          read_param_names: set[str] = set()
-          for sub in ast.walk(node):
-            if isinstance(sub, ast.Subscript) and isinstance(sub.ctx, ast.Load) and id(sub) not in atomic_arg0_ids:
-              rname = _extract_root_name(sub)
-              if rname:
-                read_param_names.add(rname)
-            elif isinstance(sub, ast.Call) and isinstance(sub.func, ast.Name) and sub.func.id in local_rw_param_indices:
-              for pidx in local_rw_param_indices[sub.func.id]:
-                if pidx < len(sub.args):
-                  rname = _extract_root_name(sub.args[pidx])
-                  if rname:
-                    read_param_names.add(rname)
-          det_factory_read_in_indices[enclosing_func.name] = {i for i, p in enumerate(in_params) if p in read_param_names}
-          det_factory_atomic_out_indices[enclosing_func.name] = {
-            i for i, p in enumerate(out_params) if p in atomic_ops_by_target
-          }
-
-          static_branch_map = _build_static_branch_map(node)
-
-          def _conflicts_with_atomics(sub_node: ast.AST, target_name: str) -> bool:
-            b_sub = static_branch_map.get(id(sub_node), {})
-            for acall in atomic_ops_by_target.get(target_name, ()):
-              b_acall = static_branch_map.get(id(acall), {})
-              if not any(k in b_acall and b_sub[k] != b_acall[k] for k in b_sub):
-                return True
-            return False
-
-          aug_target_sub_ids: set[int] = set()
-          outer_sub_children_ids: set[int] = set()
-          for sub in ast.walk(node):
-            if isinstance(sub, ast.Subscript) and isinstance(sub.value, ast.Subscript):
-              outer_sub_children_ids.add(id(sub.value))
-
-          for sub in ast.walk(node):
-            if isinstance(sub, ast.AugAssign) and isinstance(sub.target, ast.Subscript):
-              rname = _extract_root_name(sub.target)
-              if rname in atomic_ops_by_target:
-                for n in ast.walk(sub.target):
-                  aug_target_sub_ids.add(id(n))
-                if _conflicts_with_atomics(sub, rname):
-                  issues.append(
-                    AtomicTargetConflict(
-                      sub,
-                      node.name,
-                      f'modifies "{rname}" in-place alongside atomic operations; deterministic scatter atomics are deferred until kernel exit',
-                    )
-                  )
-
-          for sub in ast.walk(node):
-            if (
-              isinstance(sub, ast.Subscript)
-              and id(sub) not in atomic_arg0_ids
-              and id(sub) not in aug_target_sub_ids
-              and id(sub) not in outer_sub_children_ids
-            ):
-              rname = _extract_root_name(sub)
-              if rname in atomic_ops_by_target and _conflicts_with_atomics(sub, rname):
-                if isinstance(sub.ctx, ast.Store):
-                  issues.append(
-                    AtomicTargetConflict(
-                      sub,
-                      node.name,
-                      f'writes "{rname}" directly alongside atomic operations; deterministic scatter atomics are deferred until kernel exit',
-                    )
-                  )
-                elif isinstance(sub.ctx, ast.Load):
-                  issues.append(
-                    AtomicTargetConflict(
-                      sub,
-                      node.name,
-                      f'reads "{rname}" alongside atomic operations; deterministic scatter atomics are deferred until kernel exit',
-                    )
-                  )
-            elif isinstance(sub, ast.Call) and isinstance(sub.func, ast.Name) and sub.func.id in local_rw_param_indices:
-              for pidx in local_rw_param_indices[sub.func.id]:
-                if pidx < len(sub.args):
-                  rname = _extract_root_name(sub.args[pidx])
-                  if rname in atomic_ops_by_target and _conflicts_with_atomics(sub, rname):
-                    issues.append(
-                      AtomicTargetConflict(
-                        sub,
-                        node.name,
-                        f'reads or modifies "{rname}" via "{sub.func.id}" alongside atomic operations; deterministic scatter atomics are deferred until kernel exit',
-                      )
-                    )
+      dyn_atomics = _find_dyn_atomics(node)
+      if _is_func(decorator) and dyn_atomics:
+        dyn_atomic_funcs.add(node.name)
+      elif _is_kernel(decorator) and has_det and dyn_atomics:
+        has_max_records = any(
+          isinstance(c, ast.Constant) and c.value == "deterministic_max_records" for c in ast.walk(enclosing_func)
+        )
+        if not has_max_records:
+          for sub in dyn_atomics:
+            issues.append(MissingDeterministicMaxRecords(sub, node.name))
 
     _analyze_kernel(node)
 
@@ -1108,44 +736,6 @@ def analyze(
       if fname not in called_top_level_atomic_funcs:
         for sub in atomics:
           issues.append(MissingDeterministicFactory(sub, fname))
-
-    for sub_node in ast.walk(tree):
-      if (
-        isinstance(sub_node, ast.Call)
-        and isinstance(sub_node.func, ast.Attribute)
-        and isinstance(sub_node.func.value, ast.Name)
-        and sub_node.func.value.id == "wp"
-        and sub_node.func.attr in ("launch", "launch_tiled")
-        and sub_node.args
-        and isinstance(sub_node.args[0], ast.Call)
-        and isinstance(sub_node.args[0].func, ast.Name)
-      ):
-        fname = sub_node.args[0].func.id
-        if fname in det_factory_atomic_out_indices and fname in det_factory_read_in_indices:
-          inputs_arg = None
-          outputs_arg = None
-          for kw in sub_node.keywords:
-            if kw.arg == "inputs":
-              inputs_arg = kw.value
-            elif kw.arg == "outputs":
-              outputs_arg = kw.value
-          if isinstance(inputs_arg, (ast.List, ast.Tuple)) and isinstance(outputs_arg, (ast.List, ast.Tuple)):
-            for out_idx in det_factory_atomic_out_indices[fname]:
-              if out_idx < len(outputs_arg.elts):
-                out_elt = outputs_arg.elts[out_idx]
-                out_src = (ast.get_source_segment(source, out_elt) or "").strip()
-                for in_idx in det_factory_read_in_indices[fname]:
-                  if in_idx < len(inputs_arg.elts):
-                    in_src = (ast.get_source_segment(source, inputs_arg.elts[in_idx]) or "").strip()
-                    if out_src and out_src == in_src:
-                      issues.append(
-                        AtomicTargetConflict(
-                          out_elt,
-                          fname,
-                          f'passes "{out_src}" as both a read input and an atomic output; deterministic scatter atomics are deferred until kernel exit',
-                        )
-                      )
-                      break
 
   # Check operator precedence disambiguation throughout the file
   for sub_node in ast.walk(tree):

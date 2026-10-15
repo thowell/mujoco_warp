@@ -1507,12 +1507,12 @@ def sensor_vel(m: Model, d: Data):
   )
 
   if m.nsensortaxel:
-    weld_geom_count = wp.zeros((d.nworld, m.ntactileweld), dtype=int)
-    weld_geom_list = wp.full((d.nworld, m.ntactileweld, MJ_MAXCONPAIR), -1, dtype=int)
+    weld_geom_count = wp.empty((d.nworld, m.ntactileweld), dtype=int)
+    weld_geom_list = wp.empty((d.nworld, m.ntactileweld, MJ_MAXCONPAIR), dtype=int)
     nwords = (m.ngeom + 31) // 32
     weld_geom_seen = wp.zeros((d.nworld, m.ntactileweld, nwords), dtype=wp.uint32)
     wp.launch(
-      _preprocess_tactile_contacts_kernel(int(m.opt.warn_overflow)),
+      _mark_tactile_contacts,
       dim=d.naconmax,
       inputs=[
         m.body_weldid,
@@ -1522,9 +1522,14 @@ def sensor_vel(m: Model, d: Data):
         d.contact.worldid,
         d.nacon,
       ],
+      outputs=[weld_geom_seen],
+    )
+    wp.launch(
+      _collect_tactile_contacts_kernel(int(m.opt.warn_overflow)),
+      dim=(d.nworld, m.ntactileweld),
+      inputs=[m.ngeom, weld_geom_seen],
       outputs=[
         d.overflow,
-        weld_geom_seen,
         weld_geom_count,
         weld_geom_list,
       ],
@@ -1671,25 +1676,33 @@ def _joint_actuator_force(
   return qfrc_actuator_in[worldid, jnt_dofadr[objid]]
 
 
-@wp.kernel
-def _tendon_actuator_force(
-  # Model:
-  actuator_trntype: wp.array[int],
-  actuator_trnid: wp.array[wp.vec2i],
-  sensor_objid: wp.array[int],
-  sensor_adr: wp.array[int],
-  sensor_tendonactfrc_adr: wp.array[int],
-  # Data in:
-  actuator_force_in: wp.array2d[float],
-  # Data out:
-  sensordata_out: wp.array2d[float],
-):
-  worldid, tenactfrcid, actid = wp.tid()
-  sensorid = sensor_tendonactfrc_adr[tenactfrcid]
+@cache_kernel
+def _tendon_actuator_force(deterministic: bool = False):
+  module_options = {"enable_backward": False}
+  if deterministic:
+    module_options["deterministic"] = wp.DeterministicMode.RUN_TO_RUN
 
-  if actuator_trntype[actid] == TrnType.TENDON and actuator_trnid[actid][0] == sensor_objid[sensorid]:
-    adr = sensor_adr[sensorid]
-    sensordata_out[worldid, adr] += actuator_force_in[worldid, actid]
+  @wp.kernel(module="unique", module_options=module_options)
+  def kernel(
+    # Model:
+    actuator_trntype: wp.array[int],
+    actuator_trnid: wp.array[wp.vec2i],
+    sensor_objid: wp.array[int],
+    sensor_adr: wp.array[int],
+    sensor_tendonactfrc_adr: wp.array[int],
+    # Data in:
+    actuator_force_in: wp.array2d[float],
+    # Data out:
+    sensordata_out: wp.array2d[float],
+  ):
+    worldid, tenactfrcid, actid = wp.tid()
+    sensorid = sensor_tendonactfrc_adr[tenactfrcid]
+
+    if actuator_trntype[actid] == TrnType.TENDON and actuator_trnid[actid][0] == sensor_objid[sensorid]:
+      adr = sensor_adr[sensorid]
+      wp.atomic_add(sensordata_out, worldid, adr, actuator_force_in[worldid, actid])
+
+  return kernel
 
 
 @wp.kernel
@@ -1922,7 +1935,6 @@ def _sensor_touch(deterministic: bool = False):
   module_options = {"enable_backward": False}
   if deterministic:
     module_options["deterministic"] = wp.DeterministicMode.RUN_TO_RUN
-    module_options["deterministic_max_records"] = 1
 
   @wp.kernel(module="unique", module_options=module_options)
   def kernel(
@@ -2010,72 +2022,88 @@ def _transform_spatial(vec: wp.spatial_vector, dif: wp.vec3) -> wp.vec3:
   return wp.spatial_bottom(vec) - wp.cross(dif, wp.spatial_top(vec))
 
 
+@wp.kernel(enable_backward=False, grid_stride=True)
+def _mark_tactile_contacts(
+  # Model:
+  body_weldid: wp.array[int],
+  geom_bodyid: wp.array[int],
+  weld_tactile_id: wp.array[int],
+  # Data in:
+  contact_geom_in: wp.array[wp.vec2i],
+  contact_worldid_in: wp.array[int],
+  nacon_in: wp.array[int],
+  # Out:
+  weld_geom_seen_out: wp.array3d[wp.uint32],
+):
+  conid = wp.tid()
+  if conid >= wp.min(nacon_in[0], contact_geom_in.shape[0]):
+    return
+
+  contact_geom = contact_geom_in[conid]
+  geom1 = contact_geom[0]
+  geom2 = contact_geom[1]
+
+  # TODO(team): support flex body contacts (MuJoCo C resolves via mj_flexBody).
+  # Flex body contacts have negative geom indices; skip for now.
+  if geom1 < 0 or geom2 < 0:
+    return
+
+  worldid = contact_worldid_in[conid]
+  weld1 = body_weldid[geom_bodyid[geom1]]
+  weld2 = body_weldid[geom_bodyid[geom2]]
+
+  for side in range(2):
+    weld = weld1 if side == 0 else weld2
+    geom = geom2 if side == 0 else geom1
+
+    # Skip bodies without tactile sensors
+    tactile_idx = weld_tactile_id[weld]
+    if tactile_idx < 0:
+      continue
+
+    word_idx = geom // 32
+    bit_mask = wp.uint32(1) << wp.uint32(geom % 32)
+    wp.atomic_or(weld_geom_seen_out[worldid, tactile_idx], word_idx, bit_mask)
+
+
 @cache_kernel
-def _preprocess_tactile_contacts_kernel(warn_overflow: int):
-  @wp.kernel(module="unique", enable_backward=False, grid_stride=True)
-  def _preprocess_tactile_contacts(
+def _collect_tactile_contacts_kernel(warn_overflow: int):
+  @wp.kernel(module="unique", enable_backward=False)
+  def _collect_tactile_contacts(
     # Model:
-    body_weldid: wp.array[int],
-    geom_bodyid: wp.array[int],
-    weld_tactile_id: wp.array[int],
-    # Data in:
-    contact_geom_in: wp.array[wp.vec2i],
-    contact_worldid_in: wp.array[int],
-    nacon_in: wp.array[int],
+    ngeom: int,
+    # In:
+    weld_geom_seen_in: wp.array3d[wp.uint32],
     # Data out:
     overflow_out: wp.array[int],
     # Out:
-    weld_geom_seen_out: wp.array3d[wp.uint32],
     weld_geom_count_out: wp.array2d[int],
     weld_geom_list_out: wp.array3d[int],
   ):
-    conid = wp.tid()
-    ncon = nacon_in[0]
-    if conid >= ncon:
-      return
-
-    contact_geom = contact_geom_in[conid]
-    geom1 = contact_geom[0]
-    geom2 = contact_geom[1]
-
-    # TODO(team): support flex body contacts (MuJoCo C resolves via mj_flexBody).
-    # Flex body contacts have negative geom indices; skip for now.
-    if geom1 < 0 or geom2 < 0:
-      return
-
-    worldid = contact_worldid_in[conid]
-    weld1 = body_weldid[geom_bodyid[geom1]]
-    weld2 = body_weldid[geom_bodyid[geom2]]
-
-    for side in range(2):
-      weld = weld1 if side == 0 else weld2
-      geom = geom2 if side == 0 else geom1
-
-      # Skip bodies without tactile sensors
-      tactile_idx = weld_tactile_id[weld]
-      if tactile_idx < 0:
+    worldid, tactile_idx = wp.tid()
+    idx = int(0)
+    nwords = (ngeom + 31) // 32
+    for word_idx in range(nwords):
+      word = weld_geom_seen_in[worldid, tactile_idx, word_idx]
+      if word == wp.uint32(0):
         continue
-
-      # Exact atomic bitset test-and-set guarantees one slot reservation per distinct geom.
-      # Duplicate contacts for the same geom cannot consume buffer slots or displace distinct geoms.
-      word_idx = geom // 32
-      bit_mask = wp.uint32(1) << wp.uint32(geom % 32)
-      old_seen = wp.atomic_or(weld_geom_seen_out[worldid, tactile_idx], word_idx, bit_mask)
-      if (old_seen & bit_mask) == wp.uint32(0):
-        idx = wp.atomic_add(weld_geom_count_out[worldid], tactile_idx, 1)  # kernel_analyzer: ignore[atomic]
-        if idx < MJ_MAXCONPAIR:
-          weld_geom_list_out[worldid, tactile_idx, idx] = geom
-        else:
-          if wp.static(bool(warn_overflow & OverflowType.TACTILE)):
-            if idx == MJ_MAXCONPAIR:
+      for bit in range(32):
+        geom = word_idx * 32 + bit
+        if geom < ngeom and (word & (wp.uint32(1) << wp.uint32(bit))) != wp.uint32(0):
+          if idx < MJ_MAXCONPAIR:
+            weld_geom_list_out[worldid, tactile_idx, idx] = geom
+          elif idx == MJ_MAXCONPAIR:
+            if wp.static(bool(warn_overflow & OverflowType.TACTILE)):
               wp.printf(
                 "tactile sensor collision pair overflow: number of contacting geoms >= %u\n"
                 "To disable the print warning: m.opt.warn_overflow &= ~mjw.OverflowType.TACTILE (or = 0 for all)\n",
                 MJ_MAXCONPAIR,
               )
-          wp.atomic_or(overflow_out, worldid, int(OverflowType.TACTILE))
+            wp.atomic_or(overflow_out, worldid, int(OverflowType.TACTILE))
+          idx += 1
+    weld_geom_count_out[worldid, tactile_idx] = idx
 
-  return _preprocess_tactile_contacts
+  return _collect_tactile_contacts
 
 
 @wp.kernel
@@ -2254,8 +2282,12 @@ def _check_match(body_parentid: wp.array[int], body: int, geom: int, objtype: in
 
 
 @cache_kernel
-def _contact_match_builder(warn_overflow: int):
-  @wp.kernel(module="unique", enable_backward=False)
+def _contact_match_builder(warn_overflow: int, deterministic: bool = False):
+  module_options = {"enable_backward": False}
+  if deterministic:
+    module_options["deterministic"] = wp.DeterministicMode.RUN_TO_RUN
+
+  @wp.kernel(module="unique", module_options=module_options)
   def _contact_match(
     # Model:
     opt_cone: int,
@@ -2298,7 +2330,7 @@ def _contact_match_builder(warn_overflow: int):
     contactsensorid, contactid = wp.tid()
     sensorid = sensor_contact_adr_in[contactsensorid]
 
-    if contactid >= nacon_in[0]:
+    if contactid >= wp.min(nacon_in[0], contact_geom_in.shape[0]):
       return
 
     if not (contact_type_in[contactid] & ContactType.CONSTRAINT):
@@ -2364,7 +2396,7 @@ def _contact_match_builder(warn_overflow: int):
         if not match22:
           dir = -1.0
 
-    contactmatchid = wp.atomic_add(sensor_contact_nmatch_out[worldid], contactsensorid, 1)  # kernel_analyzer: ignore[atomic]
+    contactmatchid = wp.atomic_add(sensor_contact_nmatch_out[worldid], contactsensorid, 1)
 
     if contactmatchid >= opt_contact_sensor_maxmatch:
       if wp.static(bool(warn_overflow & OverflowType.CONTACT_MATCH)):
@@ -2693,7 +2725,7 @@ def _eval_sensor_contact(m: Model, d: Data, sensor_contact_adr: wp.array[int]):
   sensor_contact_direction = wp.empty((d.nworld, ncontact, maxmatch), dtype=float)
 
   wp.launch(
-    _contact_match_builder(int(m.opt.warn_overflow)),
+    _contact_match_builder(int(m.opt.warn_overflow), bool(m.opt.deterministic & DeterminismType.ATOMICS)),
     dim=(ncontact, d.naconmax),
     inputs=[
       m.opt.cone,
@@ -2836,7 +2868,7 @@ def sensor_acc(m: Model, d: Data, skip_rne_postconstraint: bool = False):
   )
 
   wp.launch(
-    _tendon_actuator_force,
+    _tendon_actuator_force(bool(m.opt.deterministic & DeterminismType.ATOMICS)),
     dim=(d.nworld, m.sensor_tendonactfrc_adr.size, m.nactuator),
     inputs=[
       m.actuator_trntype,
@@ -2910,7 +2942,6 @@ def _energy_pos_gravity(deterministic: bool = False):
   module_options = {"enable_backward": False}
   if deterministic:
     module_options["deterministic"] = wp.DeterministicMode.RUN_TO_RUN
-    module_options["deterministic_max_records"] = 1
 
   @wp.kernel(module="unique", module_options=module_options)
   def kernel(
@@ -2941,7 +2972,6 @@ def _energy_pos_passive_joint(deterministic: bool = False):
   module_options = {"enable_backward": False}
   if deterministic:
     module_options["deterministic"] = wp.DeterministicMode.RUN_TO_RUN
-    module_options["deterministic_max_records"] = 1
 
   @wp.kernel(module="unique", module_options=module_options)
   def kernel(
@@ -3042,7 +3072,6 @@ def _energy_pos_passive_tendon(deterministic: bool = False):
   module_options = {"enable_backward": False}
   if deterministic:
     module_options["deterministic"] = wp.DeterministicMode.RUN_TO_RUN
-    module_options["deterministic_max_records"] = 1
 
   @wp.kernel(module="unique", module_options=module_options)
   def kernel(
@@ -3090,7 +3119,6 @@ def _energy_pos_passive_flex(deterministic: bool = False):
   module_options = {"enable_backward": False}
   if deterministic:
     module_options["deterministic"] = wp.DeterministicMode.RUN_TO_RUN
-    module_options["deterministic_max_records"] = 1
 
   @wp.kernel(module="unique", module_options=module_options)
   def kernel(
