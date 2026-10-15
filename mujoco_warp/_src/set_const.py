@@ -709,6 +709,8 @@ def set_const_0(m: types.Model, d: types.Data, restore: bool = True):
     restore: Whether to restore state fields to correspond to d.qpos.
   """
   qpos_saved = wp.clone(d.qpos)
+  enableflags_saved = m.opt.enableflags
+  m.opt.enableflags = enableflags_saved & ~types.EnableBit.SLEEP
 
   wp.launch(_copy_qpos0_to_qpos, dim=(d.nworld, m.nq), inputs=[m.qpos0], outputs=[d.qpos])
 
@@ -886,6 +888,8 @@ def set_const_0(m: types.Model, d: types.Data, restore: bool = True):
     smooth.tendon_armature(m, d)
     smooth.factor_m(m, d)
     smooth.transmission(m, d)
+
+  m.opt.enableflags = enableflags_saved
 
 
 def set_const_spring(m: types.Model, d: types.Data, restore: bool = True):
