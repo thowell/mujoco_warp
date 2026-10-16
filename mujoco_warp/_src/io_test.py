@@ -2936,8 +2936,7 @@ class IOTest(parameterized.TestCase):
       xml="""
       <mujoco>
         <worldbody>
-          <flexcomp name="cloth" type="grid" count="2 2 1" spacing=".1 .1 .1"
-                    radius=".01" dim="2" mass=".1">
+          <flexcomp name="cloth" type="grid" count="2 2 1" spacing=".1 .1 .1" radius=".01" dim="2" mass=".1">
             <contact selfcollide="none"/>
           </flexcomp>
         </worldbody>

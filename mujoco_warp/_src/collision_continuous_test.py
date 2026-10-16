@@ -106,6 +106,47 @@ def _eval_geom_dist_kernel(
   gap_out[0] = gap
 
 
+@wp.kernel
+def _eval_geom_point_dist_kernel(
+  # Model:
+  mesh_vert: wp.array[wp.vec3],
+  mesh_polynormal: wp.array[wp.vec3],
+  mesh_polyvertadr: wp.array[int],
+  mesh_polyvertnum: wp.array[int],
+  mesh_polyvert: wp.array[int],
+  # In:
+  gt: int,
+  gp: wp.vec3,
+  gR: wp.mat33,
+  va: int,
+  pa: int,
+  pn: int,
+  pos: wp.array[wp.vec3],
+  # Out:
+  dist_out: wp.array[float],
+  normal_out: wp.array[wp.vec3],
+):
+  i = wp.tid()
+  dist, n = cc.geom_point_dist_normal(
+    mesh_vert,
+    mesh_polynormal,
+    mesh_polyvertadr,
+    mesh_polyvertnum,
+    mesh_polyvert,
+    gt,
+    wp.vec3(0.0, 0.0, 0.0),
+    gp,
+    gR,
+    pos[i],
+    va,
+    pa,
+    pn,
+    1e30,
+  )
+  dist_out[i] = dist
+  normal_out[i] = n
+
+
 class ContinuousCollisionTest(parameterized.TestCase):
   def test_point_triangle_distance_kernel(self):
     a = wp.vec3(0.0, 0.0, 0.0)
@@ -151,15 +192,161 @@ class ContinuousCollisionTest(parameterized.TestCase):
     np.testing.assert_allclose(out_cp2.numpy()[0], [0.0, 0.0, 0.3], atol=1e-5)
     np.testing.assert_allclose(out_st.numpy()[0], [0.5, 0.5], atol=1e-5)
 
+  def test_geom_dist_mesh(self):
+    """Verifies signed mesh distance and normal at face, edge, vertex, and interior points."""
+    mjm, _, m, d = test_data.fixture(
+      xml="""
+      <mujoco>
+        <asset>
+          <mesh name="box" vertex=" -0.1 -0.1 -0.1  0.1 -0.1 -0.1  0.1 0.1 -0.1  -0.1 0.1 -0.1 -0.1 -0.1 0.1  0.1 -0.1 0.1  0.1 0.1 0.1  -0.1 0.1 0.1"/>
+        </asset>
+        <worldbody>
+          <geom type="mesh" mesh="box" pos="0.5 0 0"/>
+        </worldbody>
+      </mujoco>
+      """
+    )
+    gp = wp.vec3(*d.geom_xpos.numpy()[0, 0])
+    gR = wp.mat33(*d.geom_xmat.numpy()[0, 0].flatten())
+    offset = np.array([0.5, 0.0, 0.0])
+    query = np.array(
+      [
+        [0.0, 0.0, 0.3],
+        [0.2, 0.0, 0.2],
+        [0.2, 0.2, 0.2],
+        [0.0, 0.0, 0.05],
+      ]
+    )
+    pos = wp.array(query + offset, dtype=wp.vec3)
+    dist = wp.full(4, wp.inf, dtype=float)
+    normal = wp.full(4, wp.vec3(wp.inf, wp.inf, wp.inf), dtype=wp.vec3)
+    wp.launch(
+      _eval_geom_point_dist_kernel,
+      dim=4,
+      inputs=[
+        m.mesh_vert,
+        m.mesh_polynormal,
+        m.mesh_polyvertadr,
+        m.mesh_polyvertnum,
+        m.mesh_polyvert,
+        int(GeomType.MESH),
+        gp,
+        gR,
+        int(mjm.mesh_vertadr[0]),
+        int(mjm.mesh_polyadr[0]),
+        int(mjm.mesh_polynum[0]),
+        pos,
+      ],
+      outputs=[dist, normal],
+    )
+    s2 = np.sqrt(0.5)
+    s3 = np.sqrt(1.0 / 3.0)
+    np.testing.assert_allclose(dist.numpy(), [0.2, np.sqrt(0.02), np.sqrt(0.03), -0.05], atol=1e-5)
+    np.testing.assert_allclose(
+      normal.numpy(),
+      [[0.0, 0.0, 1.0], [s2, 0.0, s2], [s3, s3, s3], [0.0, 0.0, 1.0]],
+      atol=1e-5,
+    )
+
+  @parameterized.parameters(1, 2)
+  def test_ipc_advance_toi(self, nworld):
+    """Verifies conservative advancement stops an approaching vertex at 20% of its initial gap."""
+    _, _, m, d = test_data.fixture(
+      xml="""
+      <mujoco>
+        <option integrator="discrete" solver="CG">
+          <flag ipc="enable"/>
+        </option>
+        <worldbody>
+          <geom type="plane" size="1 1 0.1"/>
+          <flexcomp name="cloth" type="grid" dim="2" count="2 2 1" spacing="0.05 0.05 1" radius="0.001" mass="0.05" pos="0 0 0.01">
+            <contact selfcollide="none"/>
+          </flexcomp>
+        </worldbody>
+      </mujoco>
+      """,
+      nworld=nworld,
+    )
+    xfree = d.flexvert_xpos.numpy()
+    x = xfree.copy()
+    x[:, :, 2] -= 0.05
+    if nworld == 2:
+      xfree[1, :, 2] += 1.0
+      x[1, :, 2] = xfree[1, :, 2] - 0.01
+    ws = ipc.get_ipc_workspace(m, d)
+    ws.world_done.zero_()
+    ws.xfree.assign(xfree)
+    ws.x.assign(x)
+    cc.ipc_update_geom_features(m, d, ws)
+    cc.ipc_discover_candidates(m, d, ws, ws.xfree, ws.xfree, ws.x, 3.0 * ipc.IPC_GHAT, ipc.IPC_GHAT)
+    ws.alpha_min.fill_(wp.inf)
+    cc.ipc_advance(m, d, ws)
+
+    ncand = int(ws.ncand.numpy()[0])
+    self.assertGreater(ncand, 0)
+    g0 = float(np.min(ws.cand_ld0.numpy()[0, :ncand]))
+    alpha = float(ws.alpha_min.numpy()[0])
+    np.testing.assert_allclose(alpha, 0.8 * g0 / 0.05, rtol=1e-2)
+    if nworld == 2:
+      self.assertEqual(int(ws.ncand.numpy()[1]), 0)
+      self.assertEqual(float(ws.alpha_min.numpy()[1]), 1.0)
+
+  @parameterized.parameters(1, 2)
+  def test_flex_edge_edge_candidates(self, nworld):
+    """Verifies FLEX_EDGE_EDGE candidates between crossing edges of two flexes."""
+    _, _, m, d = test_data.fixture(
+      xml="""
+      <mujoco>
+        <option integrator="discrete" solver="CG">
+          <flag ipc="enable"/>
+        </option>
+        <worldbody>
+          <flexcomp name="a" type="grid" dim="2" count="2 2 1" spacing="0.1 0.1 1" radius="0.001" mass="0.05">
+            <contact selfcollide="none"/>
+          </flexcomp>
+          <flexcomp name="b" type="grid" dim="2" count="2 2 1" spacing="0.1 0.1 1" radius="0.001" mass="0.05" pos="0 0 0.002" euler="0 0 45">
+            <contact selfcollide="none"/>
+          </flexcomp>
+        </worldbody>
+      </mujoco>
+      """,
+      nworld=nworld,
+    )
+    if nworld == 2:
+      fv = d.flexvert_xpos.numpy()
+      fv[1, 4:, 2] += 1.0
+      d.flexvert_xpos = wp.array(fv, dtype=wp.vec3, device=d.flexvert_xpos.device)
+    ws = ipc.get_ipc_workspace(m, d)
+    ws.world_done.zero_()
+    ws.ncand.fill_(-1)
+    cc.ipc_update_geom_features(m, d, ws)
+    cc.ipc_discover_candidates(m, d, ws, d.flexvert_xpos, d.flexvert_xpos, d.flexvert_xpos, 3.0 * ipc.IPC_GHAT, ipc.IPC_GHAT)
+
+    ncand = int(ws.ncand.numpy()[0])
+    types = ws.cand_type.numpy()[0, :ncand]
+    idxs = ws.cand_idx.numpy()[0, :ncand]
+    ee = idxs[types == int(cc.FlexPairType.FLEX_EDGE_EDGE)]
+    self.assertGreater(len(ee), 0)
+    vflex = m.flex_vertflexid.numpy()
+    for a1, b1, a2, b2 in ee:
+      self.assertNotEqual(vflex[a1], vflex[a2])
+      self.assertEqual(vflex[a1], vflex[b1])
+      self.assertEqual(vflex[a2], vflex[b2])
+    self.assertEqual(len({tuple(sorted(((a1, b1), (a2, b2)))) for a1, b1, a2, b2 in ee}), len(ee))
+    if nworld == 2:
+      self.assertEqual(int(ws.ncand.numpy()[1]), 0)
+
   @parameterized.parameters(1, 2)
   def test_ipc_topology_and_candidates(self, nworld):
     _, _, m, d = test_data.fixture(
       xml="""
       <mujoco>
+        <option integrator="discrete" solver="CG">
+          <flag ipc="enable"/>
+        </option>
         <worldbody>
           <geom type="plane" size="1 1 0.1"/>
-          <flexcomp name="cloth" type="grid" dim="2" count="3 3 1"
-                    spacing="0.05 0.05 1" radius="0.005" mass="0.05" pos="0 0 0.004"/>
+          <flexcomp name="cloth" type="grid" dim="2" count="3 3 1" spacing="0.05 0.05 1" radius="0.005" mass="0.05" pos="0 0 0.004"/>
         </worldbody>
       </mujoco>
       """,
@@ -172,7 +359,7 @@ class ContinuousCollisionTest(parameterized.TestCase):
     ws = ipc.get_ipc_workspace(m, d)
     ws.fidx.fill_(-1)
     ws.aset_type.fill_(-1)
-    ipc.ipc_init_topology(m, ws)
+    ipc.ipc_init_topology(m, d, ws)
     cc.ipc_update_geom_features(m, d, ws)
     cc.ipc_discover_candidates(m, d, ws, d.flexvert_xpos, d.flexvert_xpos, d.flexvert_xpos, 1e30, 1e30)
     ipc.ipc_seed_active_set(m, d, ws)
@@ -227,6 +414,7 @@ class ContinuousCollisionTest(parameterized.TestCase):
     out_gap = wp.full(1, wp.inf, dtype=float)
 
     def eval_gap(gt, gsz, gp, gR, p):
+      out_gap.fill_(wp.inf)
       wp.launch(
         _eval_geom_dist_kernel,
         dim=1,
@@ -292,13 +480,14 @@ class ContinuousCollisionTest(parameterized.TestCase):
     _, _, m, d = test_data.fixture(
       xml="""
       <mujoco>
+        <option integrator="discrete" solver="CG">
+          <flag ipc="enable"/>
+        </option>
         <worldbody>
-          <flexcomp name="cloth1" type="grid" dim="2" count="2 2 1"
-                    spacing="0.05 0.05 1" radius="0.005" mass="0.05">
+          <flexcomp name="cloth1" type="grid" dim="2" count="2 2 1" spacing="0.05 0.05 1" radius="0.005" mass="0.05">
             <contact selfcollide="none"/>
           </flexcomp>
-          <flexcomp name="cloth2" type="grid" dim="2" count="2 2 1"
-                    spacing="0.05 0.05 1" radius="0.005" mass="0.05" pos="0 0 1.0">
+          <flexcomp name="cloth2" type="grid" dim="2" count="2 2 1" spacing="0.05 0.05 1" radius="0.005" mass="0.05" pos="0 0 1.0">
             <contact selfcollide="none"/>
           </flexcomp>
         </worldbody>
@@ -328,16 +517,19 @@ class ContinuousCollisionTest(parameterized.TestCase):
       self.assertEqual(int(ws.naset.numpy()[1]), 0)
 
   @parameterized.parameters(1, 2)
-  def test_ipc_exclude_filtering(self, nworld):
+  def test_ipc_static_geom_ignores_body_filters(self, nworld):
+    """Verifies flex vs static geom candidates ignore body exclude rules, matching MuJoCo C."""
     _, _, m, d = test_data.fixture(
       xml="""
       <mujoco>
+        <option integrator="discrete" solver="CG">
+          <flag ipc="enable"/>
+        </option>
         <worldbody>
           <body name="obstacle">
             <geom type="box" size="0.1 0.1 0.1"/>
           </body>
-          <flexcomp name="cloth" type="grid" dim="2" count="2 2 1"
-                    spacing="0.05 0.05 1" radius="0.005" mass="0.05" pos="0 0 0.02">
+          <flexcomp name="cloth" type="grid" dim="2" count="2 2 1" spacing="0.05 0.05 1" radius="0.005" mass="0.05" pos="0 0 0.102">
             <contact selfcollide="none"/>
           </flexcomp>
         </worldbody>
@@ -353,16 +545,16 @@ class ContinuousCollisionTest(parameterized.TestCase):
     )
     if nworld == 2:
       fv = d.flexvert_xpos.numpy()
-      fv[1, :, 2] += 0.01
+      fv[1, :, 2] += 1.0
       d.flexvert_xpos = wp.array(fv, dtype=wp.vec3, device=d.flexvert_xpos.device)
     ws = ipc.get_ipc_workspace(m, d)
-    ws.aset_type.fill_(-1)
+    ws.naset.fill_(-1)
     cc.ipc_update_geom_features(m, d, ws)
-    cc.ipc_discover_candidates(m, d, ws, d.flexvert_xpos, d.flexvert_xpos, d.flexvert_xpos, 1e30, 1e30)
+    cc.ipc_discover_candidates(m, d, ws, d.flexvert_xpos, d.flexvert_xpos, d.flexvert_xpos, 3.0 * ipc.IPC_GHAT, ipc.IPC_GHAT)
     ipc.ipc_seed_active_set(m, d, ws)
-    # All flex vertices excluded against obstacle geom
-    for w in range(nworld):
-      self.assertEqual(int(ws.naset.numpy()[w]), 0)
+    self.assertGreater(int(ws.naset.numpy()[0]), 0)
+    if nworld == 2:
+      self.assertEqual(int(ws.naset.numpy()[1]), 0)
 
   @parameterized.parameters(1, 2)
   def test_ipc_static_geom_retained(self, nworld):
@@ -370,10 +562,12 @@ class ContinuousCollisionTest(parameterized.TestCase):
     _, _, m, d = test_data.fixture(
       xml="""
       <mujoco>
+        <option integrator="discrete" solver="CG">
+          <flag ipc="enable"/>
+        </option>
         <worldbody>
           <geom name="sphere" size="0.3" pos="0 0 0.3"/>
-          <flexcomp name="cloth" type="grid" dim="2" count="2 2 1"
-                    spacing="0.05 0.05 1" radius="0.005" mass="0.05" pos="0 0 0.88">
+          <flexcomp name="cloth" type="grid" dim="2" count="2 2 1" spacing="0.05 0.05 1" radius="0.005" mass="0.05" pos="0 0 0.88">
             <contact selfcollide="none"/>
           </flexcomp>
         </worldbody>
@@ -407,12 +601,10 @@ class ContinuousCollisionTest(parameterized.TestCase):
           <flag ipc="enable"/>
         </option>
         <worldbody>
-          <flexcomp name="c1" type="grid" dim="2" count="2 2 1" spacing="0.05 0.05 1"
-                    radius="0.001" mass="0.05">
+          <flexcomp name="c1" type="grid" dim="2" count="2 2 1" spacing="0.05 0.05 1" radius="0.001" mass="0.05">
             <contact selfcollide="none"/>
           </flexcomp>
-          <flexcomp name="c2" type="grid" dim="2" count="2 2 1" spacing="0.05 0.05 1"
-                    radius="0.002" mass="0.05" pos="0 0 0.0031">
+          <flexcomp name="c2" type="grid" dim="2" count="2 2 1" spacing="0.05 0.05 1" radius="0.002" mass="0.05" pos="0 0 0.0031">
             <contact selfcollide="none"/>
           </flexcomp>
         </worldbody>
@@ -452,8 +644,7 @@ class ContinuousCollisionTest(parameterized.TestCase):
         </option>
         <worldbody>
           <geom name="box" type="box" size="0.1 0.2 0.3"/>
-          <flexcomp name="cloth" type="grid" dim="2" count="2 2 1" spacing="0.05 0.05 1"
-                    radius="0.005" mass="0.05" pos="0 0 0.35">
+          <flexcomp name="cloth" type="grid" dim="2" count="2 2 1" spacing="0.05 0.05 1" radius="0.005" mass="0.05" pos="0 0 0.35">
             <contact selfcollide="none"/>
           </flexcomp>
         </worldbody>
@@ -471,7 +662,7 @@ class ContinuousCollisionTest(parameterized.TestCase):
     ws.nge.fill_(-1)
     ws.geom_corners.fill_(wp.vec3(wp.inf, wp.inf, wp.inf))
     ws.geom_edges.fill_(wp.vec3(wp.inf, wp.inf, wp.inf))
-    ipc.ipc_init_topology(m, ws)
+    ipc.ipc_init_topology(m, d, ws)
     cc.ipc_update_geom_features(m, d, ws)
 
     for w in range(nworld):
@@ -498,8 +689,7 @@ class ContinuousCollisionTest(parameterized.TestCase):
         </option>
         <worldbody>
           <geom name="floor" type="plane" size="1 1 0.1"/>
-          <flexcomp name="cloth" type="grid" dim="2" count="2 2 1" spacing="0.05 0.05 1"
-                    radius="0.005" mass="0.05" pos="0 0 0.05">
+          <flexcomp name="cloth" type="grid" dim="2" count="2 2 1" spacing="0.05 0.05 1" radius="0.005" mass="0.05" pos="0 0 0.05">
             <contact selfcollide="none"/>
           </flexcomp>
         </worldbody>
@@ -508,11 +698,13 @@ class ContinuousCollisionTest(parameterized.TestCase):
       nworld=nworld,
     )
     ws = ipc.get_ipc_workspace(m, d)
-    ipc.ipc_init_topology(m, ws)
+    ipc.ipc_init_topology(m, d, ws)
     cc.ipc_update_geom_features(m, d, ws)
 
     x = d.flexvert_xpos
     # At z = 0.05 with zero fsweep, cloth is outside band -> 0 admitted
+    ws.ncand.fill_(-1)
+    ws.naset.fill_(-1)
     cc.ipc_discover_candidates(m, d, ws, x, x, x, -1e30, -1e30)
     ipc.ipc_seed_active_set(m, d, ws)
     self.assertEqual(int(ws.naset.numpy().sum()), 0)
@@ -523,6 +715,7 @@ class ContinuousCollisionTest(parameterized.TestCase):
     if nworld == 2:
       dto_np[1, :, 2] -= 0.01
     dto = wp.array(dto_np, dtype=wp.vec3, device=x.device)
+    ws.ncand.fill_(-1)
     cc.ipc_discover_candidates(m, d, ws, x, x, dto, 0.0, 0.002)
     self.assertEqual(int(ws.ncand.numpy()[0]), 4)
     if nworld == 2:
@@ -541,8 +734,7 @@ class ContinuousCollisionTest(parameterized.TestCase):
             <body name="carrier" pos="0 0 0.5">
               <joint axis="0 1 0"/>
               <geom size="0.02" mass="0.1"/>
-              <flexcomp name="cloth" type="grid" dim="2" count="2 2 1"
-                        spacing="0.05 0.05 1" radius="0.005" mass="0.05">
+              <flexcomp name="cloth" type="grid" dim="2" count="2 2 1" spacing="0.05 0.05 1" radius="0.005" mass="0.05">
                 <pin id="0"/>
               </flexcomp>
             </body>
@@ -562,8 +754,7 @@ class ContinuousCollisionTest(parameterized.TestCase):
             <body name="carrier" pos="0 0 0.5">
               <joint type="slide" axis="1 0 0"/>
               <geom size="0.02" mass="0.1"/>
-              <flexcomp name="cloth" type="grid" dim="2" count="2 2 1"
-                        spacing="0.05 0.05 1" radius="0.005" mass="0.05">
+              <flexcomp name="cloth" type="grid" dim="2" count="2 2 1" spacing="0.05 0.05 1" radius="0.005" mass="0.05">
                 <pin id="0"/>
               </flexcomp>
             </body>
@@ -583,8 +774,7 @@ class ContinuousCollisionTest(parameterized.TestCase):
         </option>
         <worldbody>
           <geom type="plane" size="1 1 0.1"/>
-          <flexcomp name="cloth" type="grid" dim="2" count="2 2 1"
-                    spacing="0.05 0.05 1" radius="0.005" mass="0.05" pos="0 0 0.004">
+          <flexcomp name="cloth" type="grid" dim="2" count="2 2 1" spacing="0.05 0.05 1" radius="0.005" mass="0.05" pos="0 0 0.004">
             <contact selfcollide="none"/>
           </flexcomp>
         </worldbody>
@@ -601,6 +791,7 @@ class ContinuousCollisionTest(parameterized.TestCase):
     self.assertEqual(ws.max_aset, 2)
     self.assertEqual(ws.max_cand, 2)
     d.overflow.zero_()
+    ws.ncand.fill_(-1)
     cc.ipc_update_geom_features(m, d, ws)
     cc.ipc_discover_candidates(m, d, ws, d.flexvert_xpos, d.flexvert_xpos, d.flexvert_xpos, 1e30, 1e30)
     self.assertGreater(int(ws.ncand.numpy()[0]), ws.max_cand)
@@ -630,10 +821,9 @@ class ContinuousCollisionTest(parameterized.TestCase):
         </asset>
         <worldbody>
           <geom name="p0" type="mesh" mesh="prism" pos="-0.3 0 0"/>
-          <geom name="p1" type="mesh" mesh="prism" pos="0 0 0"/>
+          <geom name="p1" type="mesh" mesh="prism"/>
           <geom name="p2" type="mesh" mesh="prism" pos="0.3 0 0"/>
-          <flexcomp name="cloth" type="grid" dim="2" count="2 2 1"
-                    spacing="0.05 0.05 1" radius="0.005" mass="0.05" pos="0 0 0.05">
+          <flexcomp name="cloth" type="grid" dim="2" count="2 2 1" spacing="0.05 0.05 1" radius="0.005" mass="0.05" pos="0 0 0.05">
             <contact selfcollide="none"/>
           </flexcomp>
         </worldbody>
@@ -643,6 +833,8 @@ class ContinuousCollisionTest(parameterized.TestCase):
     )
     ws = ipc.get_ipc_workspace(m, d)
     d.overflow.zero_()
+    ws.geom_corners.fill_(wp.vec3(wp.inf))
+    ws.geom_edges.fill_(wp.vec3(wp.inf))
     cc.ipc_update_geom_features(m, d, ws)
 
     for w in range(nworld):
@@ -665,7 +857,7 @@ class ContinuousCollisionTest(parameterized.TestCase):
     ws.edge_geom = wp.empty((nworld, 132), dtype=int, device=d.qpos.device)
 
     d.overflow.zero_()
-    ipc.ipc_init_topology(m, ws)
+    ipc.ipc_init_topology(m, d, ws)
     cc.ipc_update_geom_features(m, d, ws)
     for w in range(nworld):
       self.assertEqual(int(ws.ngv.numpy()[w]), 96)
@@ -682,13 +874,11 @@ class ContinuousCollisionTest(parameterized.TestCase):
           <flag ipc="enable"/>
         </option>
         <worldbody>
-          <flexcomp name="c1" type="grid" dim="2" count="2 2 1" spacing="0.05 0.05 1"
-                    radius="0.001" mass="0.05">
+          <flexcomp name="c1" type="grid" dim="2" count="2 2 1" spacing="0.05 0.05 1" radius="0.001" mass="0.05">
             <contact selfcollide="none"/>
             <pin id="0"/>
           </flexcomp>
-          <flexcomp name="c2" type="grid" dim="2" count="2 2 1" spacing="0.05 0.05 1"
-                    radius="0.002" mass="0.05" pos="0 0 0.0031">
+          <flexcomp name="c2" type="grid" dim="2" count="2 2 1" spacing="0.05 0.05 1" radius="0.002" mass="0.05" pos="0 0 0.0031">
             <contact selfcollide="none"/>
             <pin id="0"/>
           </flexcomp>
@@ -723,6 +913,110 @@ class ContinuousCollisionTest(parameterized.TestCase):
             self.assertNotIn(vbody[va], (vbody[a2], vbody[b2]))
     if nworld == 2:
       self.assertEqual(int(ws.ncand.numpy()[1]), 0)
+
+  @parameterized.parameters(1, 2)
+  def test_flex_grid_matches_all_pairs(self, nworld):
+    """Verifies the flex hash grid finds exactly the all-pairs flex-flex candidates."""
+    _, _, m, d = test_data.fixture(
+      xml="""
+      <mujoco>
+        <option integrator="discrete" solver="CG">
+          <flag ipc="enable"/>
+        </option>
+        <worldbody>
+          <flexcomp name="cloth" type="grid" dim="2" count="7 7 1" spacing="0.01 0.01 1" radius="0.001" mass="0.05">
+            <contact selfcollide="auto"/>
+          </flexcomp>
+        </worldbody>
+      </mujoco>
+      """,
+      nworld=nworld,
+    )
+    # fold the cloth's right half over its left half, 2 mm above (4 mm in the second world)
+    fv = d.flexvert_xpos.numpy()
+    for w in range(nworld):
+      right = fv[w, :, 0] > 1e-6
+      fv[w, right, 0] *= -1.0
+      fv[w, right, 2] += 0.002 * (w + 1)
+    d.flexvert_xpos = wp.array(fv, dtype=wp.vec3)
+    flexflex = (int(cc.FlexPairType.FLEX_VERT_TRI), int(cc.FlexPairType.FLEX_EDGE_EDGE))
+
+    def candidates(min_pairs, ws):
+      cc.BP_GRID_MIN_PAIRS = min_pairs
+      ws.ncand.fill_(-1)
+      cc.ipc_discover_candidates(m, d, ws, d.flexvert_xpos, d.flexvert_xpos, d.flexvert_xpos, 3.0 * ipc.IPC_GHAT, ipc.IPC_GHAT)
+      ncand = ws.ncand.numpy()
+      types = ws.cand_type.numpy()
+      idxs = ws.cand_idx.numpy()
+      ld0 = ws.cand_ld0.numpy()
+      return [
+        sorted((int(types[w, c]), tuple(idxs[w, c]), float(ld0[w, c])) for c in range(ncand[w]) if types[w, c] in flexflex)
+        for w in range(nworld)
+      ]
+
+    default_min_pairs = cc.BP_GRID_MIN_PAIRS
+    try:
+      cc.BP_GRID_MIN_PAIRS = 0
+      ws = ipc.get_ipc_workspace(m, d)
+      ws.world_done.zero_()
+      cc.ipc_update_geom_features(m, d, ws)
+      grid = candidates(0, ws)
+      all_pairs = candidates(1 << 62, ws)
+    finally:
+      cc.BP_GRID_MIN_PAIRS = default_min_pairs
+
+    for w in range(nworld):
+      self.assertGreater(len(grid[w]), 0)
+      self.assertEqual(grid[w], all_pairs[w])
+    for t in flexflex:
+      self.assertTrue(any(c[0] == t for c in grid[0]))
+    if nworld == 2:
+      self.assertNotEqual(len(grid[0]), len(grid[1]))
+
+  @parameterized.parameters(1, 2)
+  def test_capsule_box_feature_partial_overflow(self, nworld):
+    """Verifies capsule/box feature extraction initializes slots up to capacity."""
+    _, _, m, d = test_data.fixture(
+      xml="""
+      <mujoco>
+        <option integrator="discrete" solver="CG">
+          <flag ipc="enable"/>
+        </option>
+        <worldbody>
+          <geom type="capsule" size="0.05 0.2"/>
+          <geom type="box" size="0.1 0.1 0.1" pos="0.3 0 0"/>
+          <flexcomp name="cloth" type="grid" dim="2" count="2 2 1" spacing="0.05 0.05 1" radius="0.005" mass="0.05" pos="0 0 0.5">
+            <contact selfcollide="none"/>
+          </flexcomp>
+        </worldbody>
+      </mujoco>
+      """,
+      nworld=nworld,
+    )
+    ws = ipc.get_ipc_workspace(m, d)
+    # 1 capsule (2 corners, 1 edge) + 1 box (8 corners, 12 edges) = 10 corners, 13 edges
+    # Bisect capsule at max_ngv=1 first, then bisect box at max_ngv=5, max_nge=6
+    for max_c, max_e in [(1, 1), (5, 6)]:
+      ws.max_ngv = max_c
+      ws.max_nge = max_e
+      ws.geom_corner_loc = wp.full((nworld, max_c), wp.vec3(wp.inf), dtype=wp.vec3, device=d.qpos.device)
+      ws.geom_corners = wp.full((nworld, max_c), wp.vec3(wp.inf), dtype=wp.vec3, device=d.qpos.device)
+      ws.corner_geom = wp.full((nworld, max_c), -1, dtype=int, device=d.qpos.device)
+      ws.geom_edge_loc = wp.full((nworld, max_e, 2), wp.vec3(wp.inf), dtype=wp.vec3, device=d.qpos.device)
+      ws.geom_edges = wp.full((nworld, max_e, 2), wp.vec3(wp.inf), dtype=wp.vec3, device=d.qpos.device)
+      ws.edge_geom = wp.full((nworld, max_e), -1, dtype=int, device=d.qpos.device)
+
+      d.overflow.zero_()
+      ipc.ipc_init_topology(m, d, ws)
+      cc.ipc_update_geom_features(m, d, ws)
+      for w in range(nworld):
+        self.assertEqual(int(ws.ngv.numpy()[w]), 10)
+        self.assertEqual(int(ws.nge.numpy()[w]), 13)
+        self.assertTrue(bool(int(d.overflow.numpy()[w]) & int(OverflowType.BROADPHASE)))
+        self.assertTrue(np.all(np.isfinite(ws.geom_corners.numpy()[w])))
+        self.assertTrue(np.all(ws.corner_geom.numpy()[w] >= 0))
+        self.assertTrue(np.all(np.isfinite(ws.geom_edges.numpy()[w])))
+        self.assertTrue(np.all(ws.edge_geom.numpy()[w] >= 0))
 
 
 if __name__ == "__main__":

@@ -712,11 +712,10 @@ class PassiveTest(parameterized.TestCase):
           <body name="carrier">
             <joint type="slide"/>
             <geom size="0.01" pos="1 0 0" mass="1"/>
-            <flexcomp name="cloth" type="grid" dim="2" count="2 2 1" spacing="0.04 0.04 1"
-                      radius="0.005" mass="0.05">
+            <flexcomp name="cloth" type="grid" dim="2" count="2 2 1" spacing="0.04 0.04 1" radius="0.005" mass="0.05">
               <pin id="0 1"/>
               <contact passive="true" selfcollide="none"/>
-              <elasticity young="500" poisson="0.3" thickness="0.005" elastic2d="stretch" damping="0.05"/>
+              <elasticity young="500" thickness="0.005" elastic2d="stretch" damping="0.05"/>
             </flexcomp>
           </body>
         </worldbody>

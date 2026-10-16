@@ -18,10 +18,16 @@ Provides GPU distance primitives (point-triangle, segment-segment, static geom f
 ownership predicates (mjc_ipcOwnsFlexFlex, mjc_ipcOwnsFlexGeom), pair geometry (mjc_pairGap,
 mjc_pairVerts, mjc_pairBand, mjc_standoff), swept candidate discovery (mjc_candidates),
 and conservative advancement ToI bisection (mjc_advance).
+
+Candidate discovery is brute force on the GPU: flex vertex x static geom, static geom corner
+x flex triangle, static geom edge x flex edge, flex vertex x flex triangle, and flex edge x
+flex edge, i.e. O(V * G + C * F + E_g * E + V * F + E^2) pair tests per query with AABB
+early exits. MuJoCo C uses per-flex BVHs instead, so large self-colliding flexes (tens of
+thousands of edges) scale quadratically here.
 """
 
 from enum import IntEnum
-from typing import Any
+from typing import TYPE_CHECKING
 
 import warp as wp
 
@@ -31,6 +37,9 @@ from mujoco_warp._src.types import GeomType
 from mujoco_warp._src.types import Model
 from mujoco_warp._src.types import OverflowType
 from mujoco_warp._src.warp_util import cache_kernel
+
+if TYPE_CHECKING:
+  from mujoco_warp._src.ipc import IpcWorkspace
 
 wp.set_module_options({"enable_backward": False})
 
@@ -46,7 +55,7 @@ class FlexPairType(IntEnum):
 
 
 @wp.func
-def geom_supported(
+def _geom_supported(
   # Model:
   geom_type: wp.array[int],
   geom_dataid: wp.array2d[int],
@@ -97,7 +106,7 @@ def ipc_owns_flex_geom(
   b = geom_bodyid[gi]
   if b >= 0 and body_weldid[b] != 0:
     return False
-  return geom_supported(geom_type, geom_dataid, mesh_graphadr, worldid, gi)
+  return _geom_supported(geom_type, geom_dataid, mesh_graphadr, worldid, gi)
 
 
 @wp.func
@@ -107,7 +116,7 @@ def standoff(band: float, cap: float) -> float:
 
 
 @wp.func
-def feat_radius(gt: int, gsz: wp.vec3) -> float:
+def _feat_radius(gt: int, gsz: wp.vec3) -> float:
   """Returns rounding radius for sphere/capsule hull features (featRadius)."""
   return gsz[0] if (gt == int(GeomType.CAPSULE) or gt == int(GeomType.SPHERE)) else 0.0
 
@@ -133,7 +142,7 @@ def pair_vert_range(pt: int) -> tuple[int, int]:
 
 
 @wp.func
-def pair_bo_and_band(
+def _pair_bo_and_band(
   # In:
   pt: int,
   idx: wp.vec4i,
@@ -174,43 +183,6 @@ def _aabb_separated(a_min: wp.vec3, a_max: wp.vec3, b_min: wp.vec3, b_max: wp.ve
     or a_max[2] + pad < b_min[2]
     or a_min[2] - pad > b_max[2]
   )
-
-
-@wp.func
-def _body_pair_filtered(
-  # Model:
-  nexclude: int,
-  opt_disableflags: int,
-  body_parentid: wp.array[int],
-  body_weldid: wp.array[int],
-  exclude_signature: wp.array[int],
-  # In:
-  b1: int,
-  b2: int,
-) -> bool:
-  """Returns True if bodies b1 and b2 are collision-filtered by weld, parent, or exclude rules."""
-  if b1 < 0 or b2 < 0:
-    return True
-  w1 = body_weldid[b1]
-  w2 = body_weldid[b2]
-  if w1 == w2:
-    return True
-  if (opt_disableflags & int(DisableBit.FILTERPARENT)) == 0:
-    if w1 != 0 and w2 != 0:
-      wp1 = body_weldid[body_parentid[w1]]
-      wp2 = body_weldid[body_parentid[w2]]
-      if w1 == wp2 or w2 == wp1:
-        return True
-  if nexclude > 0:
-    lo = wp.min(b1, b2)
-    hi = wp.max(b1, b2)
-    sig1 = (lo << 16) + hi
-    sig2 = (hi << 16) + lo
-    for i in range(nexclude):
-      s = exclude_signature[i]
-      if s == sig1 or s == sig2:
-        return True
-  return False
 
 
 @wp.func
@@ -360,7 +332,7 @@ def _closest_on_poly(
 
 
 @wp.func
-def geom_dist_mesh(
+def _geom_dist_mesh(
   # Model:
   mesh_vert: wp.array[wp.vec3],
   mesh_polynormal: wp.array[wp.vec3],
@@ -468,7 +440,7 @@ def geom_point_dist_normal(
     return dd, gR * nl
   if gt == int(GeomType.MESH):
     pl = wp.transpose(gR) * (pos - gp)
-    d_mesh, n_mesh = geom_dist_mesh(
+    d_mesh, n_mesh = _geom_dist_mesh(
       mesh_vert,
       mesh_polynormal,
       mesh_polyvertadr,
@@ -570,7 +542,7 @@ def pair_gap(
 
 
 @wp.func
-def unpack_pair_geom(
+def _unpack_pair_geom(
   # Model:
   geom_type: wp.array[int],
   geom_dataid: wp.array2d[int],
@@ -601,7 +573,7 @@ def unpack_pair_geom(
   if gi >= 0:
     gt = geom_type[gi]
     gsz = geom_size[worldid % geom_size.shape[0], gi]
-    feat_rad = feat_radius(gt, gsz)
+    feat_rad = _feat_radius(gt, gsz)
     gp = geom_xpos_in[worldid, gi]
     gR = geom_xmat_in[worldid, gi]
     if gt == int(GeomType.MESH):
@@ -645,7 +617,7 @@ def eval_pair_gap(
   p3: wp.vec3,
 ) -> tuple[float, wp.vec3, wp.vec4i, wp.vec4, int]:
   """Unpacks static geom features and evaluates pair_gap at (p0, p1, p2, p3)."""
-  gt, gsz, feat_rad, gp, gR, corner, eg0, eg1, va, pa, pn = unpack_pair_geom(
+  gt, gsz, feat_rad, gp, gR, corner, eg0, eg1, va, pa, pn = _unpack_pair_geom(
     geom_type,
     geom_dataid,
     geom_size,
@@ -685,6 +657,459 @@ def eval_pair_gap(
     pa,
     pn,
   )
+
+
+# Flex-flex broadphase: a per-world uniform hash grid over inflated element boxes. Each box is
+# padded by its share of the narrowphase pad (bo + reach of any pair it is in, split between the
+# features, plus rounding slack), so box overlap is conservative and the pair tests above see
+# exactly the brute-force candidate set. A box covers a bounded number of cells; a pair is tested
+# only in the cell holding the low corner of the boxes' overlap, by one of its entries' threads.
+BP_EDGE = 0
+BP_TRI = 1
+BP_CELL_BITS = 21
+# cells are the largest box over BP_CELL_DIV, so a box covers at most BP_CELL_DIV + 1 cells per axis
+BP_CELL_DIV = 2
+BP_CELL_MAX = (BP_CELL_DIV + 1) * (BP_CELL_DIV + 1) * (BP_CELL_DIV + 1)
+# brute-force pair tests over all worlds above which the grid's fixed launch cost pays off
+BP_GRID_MIN_PAIRS = 10_000_000
+
+
+@wp.func
+def _emit_cand(
+  # In:
+  worldid: int,
+  pt: int,
+  idx: wp.vec4i,
+  gi: int,
+  dd: float,
+  warn_overflow: bool,
+  # Data out:
+  overflow_out: wp.array[int],
+  # Out:
+  ncand_out: wp.array[int],
+  cand_type_out: wp.array2d[int],
+  cand_idx_out: wp.array2d[wp.vec4i],
+  cand_geom_out: wp.array2d[int],
+  cand_ld0_out: wp.array2d[float],
+):
+  c = wp.atomic_add(ncand_out, worldid, 1)
+  max_cand = cand_type_out.shape[1]
+  if c >= max_cand:
+    if warn_overflow and c == max_cand:
+      wp.printf(
+        "IPC candidate overflow - please increase nccdmax beyond %u or naccdmax beyond %u\n"
+        "To disable the print warning: m.opt.warn_overflow &= ~mjw.OverflowType.BROADPHASE (or = 0 for all)\n",
+        max_cand,
+        max_cand * ncand_out.shape[0],
+      )
+    wp.atomic_or(overflow_out, worldid, wp.static(OverflowType.BROADPHASE))
+    return
+  cand_type_out[worldid, c] = pt
+  cand_idx_out[worldid, c] = idx
+  cand_geom_out[worldid, c] = gi
+  cand_ld0_out[worldid, c] = dd
+
+
+@wp.func
+def _add_cand_geom(
+  # In:
+  worldid: int,
+  pt: int,
+  idx: wp.vec4i,
+  gi: int,
+  dd: float,
+  bo: float,
+  band: float,
+  reach: float,
+  dl: wp.array2d[float],
+  warn_overflow: bool,
+  # Data out:
+  overflow_out: wp.array[int],
+  # Out:
+  ncand_out: wp.array[int],
+  cand_type_out: wp.array2d[int],
+  cand_idx_out: wp.array2d[wp.vec4i],
+  cand_geom_out: wp.array2d[int],
+  cand_ld0_out: wp.array2d[float],
+):
+  """Applies mjc_addCand filtering for flex-geom pairs using precomputed vertex travel dl."""
+  if dd >= bo + reach:
+    return
+  off, nv = pair_vert_range(pt)
+  bound = dl[worldid, idx[off]]
+  if nv > 1:
+    bound = wp.max(bound, dl[worldid, idx[off + 1]])
+  if nv > 2:
+    bound = wp.max(bound, dl[worldid, idx[off + 2]])
+  if dd >= bo + band + bound:
+    return
+  _emit_cand(
+    worldid,
+    pt,
+    idx,
+    gi,
+    dd,
+    warn_overflow,
+    overflow_out,
+    ncand_out,
+    cand_type_out,
+    cand_idx_out,
+    cand_geom_out,
+    cand_ld0_out,
+  )
+
+
+@wp.func
+def _add_cand(
+  # In:
+  worldid: int,
+  pt: int,
+  idx: wp.vec4i,
+  gi: int,
+  dd: float,
+  bo: float,
+  band: float,
+  reach: float,
+  dfrom: wp.array2d[wp.vec3],
+  dto: wp.array2d[wp.vec3],
+  dl: wp.array2d[float],
+  warn_overflow: bool,
+  # Data out:
+  overflow_out: wp.array[int],
+  # Out:
+  ncand_out: wp.array[int],
+  cand_type_out: wp.array2d[int],
+  cand_idx_out: wp.array2d[wp.vec4i],
+  cand_geom_out: wp.array2d[int],
+  cand_ld0_out: wp.array2d[float],
+):
+  """Applies mjc_addCand filtering and emits flex-flex candidate to cand arrays."""
+  if dd >= bo + reach or dd <= 0.0:
+    return
+
+  v0 = idx[0]
+  v1 = idx[1]
+  v2 = idx[2]
+  v3 = idx[3]
+  dl0 = dl[worldid, v0]
+  dl1 = dl[worldid, v1]
+  dl2 = dl[worldid, v2]
+  dl3 = dl[worldid, v3]
+  dl_upper = (
+    dl0 + wp.max(dl1, wp.max(dl2, dl3)) if pt == int(FlexPairType.FLEX_VERT_TRI) else wp.max(dl0, dl1) + wp.max(dl2, dl3)
+  )
+  if dd >= bo + band + dl_upper + 1e-6:
+    return
+
+  dv0 = dto[worldid, v0] - dfrom[worldid, v0]
+  dv1 = dto[worldid, v1] - dfrom[worldid, v1]
+  dv2 = dto[worldid, v2] - dfrom[worldid, v2]
+  dv3 = dto[worldid, v3] - dfrom[worldid, v3]
+
+  bound = (
+    wp.max(wp.length(dv1 - dv0), wp.max(wp.length(dv2 - dv0), wp.length(dv3 - dv0)))
+    if pt == int(FlexPairType.FLEX_VERT_TRI)
+    else wp.max(wp.max(wp.length(dv0 - dv2), wp.length(dv0 - dv3)), wp.max(wp.length(dv1 - dv2), wp.length(dv1 - dv3)))
+  )
+  if dd >= bo + band + bound:
+    return
+
+  _emit_cand(
+    worldid,
+    pt,
+    idx,
+    gi,
+    dd,
+    warn_overflow,
+    overflow_out,
+    ncand_out,
+    cand_type_out,
+    cand_idx_out,
+    cand_geom_out,
+    cand_ld0_out,
+  )
+
+
+@wp.func
+def _same_body(flex_vertbodyid: wp.array[int], a: int, b: int) -> bool:
+  ba = flex_vertbodyid[a]
+  return ba >= 0 and ba == flex_vertbodyid[b]
+
+
+@wp.func
+def _flex_vert_tri_pair(
+  # Model:
+  flex_contype: wp.array[int],
+  flex_conaffinity: wp.array[int],
+  flex_selfcollide: wp.array[int],
+  flex_dim: wp.array[int],
+  flex_vertadr: wp.array[int],
+  flex_elemadr: wp.array[int],
+  flex_elemdataadr: wp.array[int],
+  flex_vertbodyid: wp.array[int],
+  flex_elem: wp.array[int],
+  flex_elemflexid: wp.array[int],
+  flex_vertflexid: wp.array[int],
+  # In:
+  rad: wp.array[float],
+  x: wp.array2d[wp.vec3],
+  dfrom: wp.array2d[wp.vec3],
+  dto: wp.array2d[wp.vec3],
+  dl: wp.array2d[float],
+  fsweep: wp.array2d[float],
+  ghat: float,
+  worldid: int,
+  v: int,
+  e: int,
+  warn_overflow: bool,
+  # Data out:
+  overflow_out: wp.array[int],
+  # Out:
+  ncand_out: wp.array[int],
+  cand_type_out: wp.array2d[int],
+  cand_idx_out: wp.array2d[wp.vec4i],
+  cand_geom_out: wp.array2d[int],
+  cand_ld0_out: wp.array2d[float],
+):
+  """Tests 2D flex vertex v against triangle e and emits a FLEX_VERT_TRI candidate."""
+  f1 = flex_vertflexid[v]
+  f2 = flex_elemflexid[e]
+  if not ipc_owns_flex_flex(flex_dim, f1, f2):
+    return
+  fc1 = flex_contype[f1]
+  fa1 = flex_conaffinity[f1]
+  if f1 == f2:
+    if flex_selfcollide[f1] == 0 or (fc1 & fa1) == 0:
+      return
+  elif _mask_filtered(fc1, fa1, flex_contype[f2], flex_conaffinity[f2]):
+    return
+
+  eadr = flex_elemdataadr[f2] + 3 * (e - flex_elemadr[f2])
+  va2 = flex_vertadr[f2]
+  v0 = va2 + flex_elem[eadr]
+  v1 = va2 + flex_elem[eadr + 1]
+  v2 = va2 + flex_elem[eadr + 2]
+  if (
+    v == v0
+    or v == v1
+    or v == v2
+    or _same_body(flex_vertbodyid, v, v0)
+    or _same_body(flex_vertbodyid, v, v1)
+    or _same_body(flex_vertbodyid, v, v2)
+  ):
+    return
+
+  idx = wp.vec4i(v, v0, v1, v2)
+  bo_band = _pair_bo_and_band(int(FlexPairType.FLEX_VERT_TRI), idx, rad, ghat)
+  bo = bo_band[0]
+  band = bo_band[1]
+  reach = 3.0 * band + dl[worldid, v] + fsweep[worldid, f2]
+  p0 = x[worldid, v]
+  p1 = x[worldid, v0]
+  p2 = x[worldid, v1]
+  p3 = x[worldid, v2]
+
+  if _aabb_separated(p0, p0, wp.min(wp.min(p1, p2), p3), wp.max(wp.max(p1, p2), p3), bo + reach):
+    return
+
+  dd, _cp, _w = pt_tri_dist(p0, p1, p2, p3)
+
+  _add_cand(
+    worldid,
+    int(FlexPairType.FLEX_VERT_TRI),
+    idx,
+    -1,
+    dd,
+    bo,
+    band,
+    reach,
+    dfrom,
+    dto,
+    dl,
+    warn_overflow,
+    overflow_out,
+    ncand_out,
+    cand_type_out,
+    cand_idx_out,
+    cand_geom_out,
+    cand_ld0_out,
+  )
+
+
+@wp.func
+def _flex_edge_edge_pair(
+  # Model:
+  flex_contype: wp.array[int],
+  flex_conaffinity: wp.array[int],
+  flex_selfcollide: wp.array[int],
+  flex_dim: wp.array[int],
+  flex_vertadr: wp.array[int],
+  flex_vertbodyid: wp.array[int],
+  flex_edge: wp.array[wp.vec2i],
+  flex_edgeflexid: wp.array[int],
+  # In:
+  rad: wp.array[float],
+  x: wp.array2d[wp.vec3],
+  dfrom: wp.array2d[wp.vec3],
+  dto: wp.array2d[wp.vec3],
+  dl: wp.array2d[float],
+  fsweep: wp.array2d[float],
+  ghat: float,
+  worldid: int,
+  e1: int,
+  e2: int,
+  warn_overflow: bool,
+  # Data out:
+  overflow_out: wp.array[int],
+  # Out:
+  ncand_out: wp.array[int],
+  cand_type_out: wp.array2d[int],
+  cand_idx_out: wp.array2d[wp.vec4i],
+  cand_geom_out: wp.array2d[int],
+  cand_ld0_out: wp.array2d[float],
+):
+  """Tests 2D flex edges e1 < e2 and emits a FLEX_EDGE_EDGE candidate when they are non-adjacent."""
+  f1 = flex_edgeflexid[e1]
+  f2 = flex_edgeflexid[e2]
+  if not ipc_owns_flex_flex(flex_dim, f1, f2):
+    return
+  fc1 = flex_contype[f1]
+  fa1 = flex_conaffinity[f1]
+  if f1 == f2:
+    if flex_selfcollide[f1] == 0 or (fc1 & fa1) == 0:
+      return
+  elif _mask_filtered(fc1, fa1, flex_contype[f2], flex_conaffinity[f2]):
+    return
+
+  va1 = flex_vertadr[f1]
+  ev1 = flex_edge[e1]
+  a1 = va1 + ev1[0]
+  b1 = va1 + ev1[1]
+
+  va2 = flex_vertadr[f2]
+  ev2 = flex_edge[e2]
+  a2 = va2 + ev2[0]
+  b2 = va2 + ev2[1]
+
+  if (
+    a1 == a2
+    or a1 == b2
+    or b1 == a2
+    or b1 == b2
+    or _same_body(flex_vertbodyid, a1, a2)
+    or _same_body(flex_vertbodyid, a1, b2)
+    or _same_body(flex_vertbodyid, b1, a2)
+    or _same_body(flex_vertbodyid, b1, b2)
+  ):
+    return
+
+  idx = wp.vec4i(a1, b1, a2, b2)
+  bo_band = _pair_bo_and_band(int(FlexPairType.FLEX_EDGE_EDGE), idx, rad, ghat)
+  bo = bo_band[0]
+  band = bo_band[1]
+  reach = 3.0 * band + wp.max(dl[worldid, a1], dl[worldid, b1]) + fsweep[worldid, f2]
+  p0 = x[worldid, a1]
+  p1 = x[worldid, b1]
+  p2 = x[worldid, a2]
+  p3 = x[worldid, b2]
+
+  if _aabb_separated(wp.min(p0, p1), wp.max(p0, p1), wp.min(p2, p3), wp.max(p2, p3), bo + reach):
+    return
+
+  dd, _cp1, _cp2, _s, _t = seg_seg_dist(p0, p1, p2, p3)
+
+  _add_cand(
+    worldid,
+    int(FlexPairType.FLEX_EDGE_EDGE),
+    idx,
+    -1,
+    dd,
+    bo,
+    band,
+    reach,
+    dfrom,
+    dto,
+    dl,
+    warn_overflow,
+    overflow_out,
+    ncand_out,
+    cand_type_out,
+    cand_idx_out,
+    cand_geom_out,
+    cand_ld0_out,
+  )
+
+
+@wp.func
+def _bp_pad(r: float, ghat: float, travel: float, lo: wp.vec3, hi: wp.vec3) -> float:
+  """Half of a pair's pad owed by a feature with radius r and travel bound, plus rounding slack."""
+  h = r + 1.5 * wp.min(ghat, r) + travel
+  m = wp.max(
+    wp.max(wp.max(wp.abs(lo[0]), wp.abs(lo[1])), wp.abs(lo[2])), wp.max(wp.max(wp.abs(hi[0]), wp.abs(hi[1])), wp.abs(hi[2]))
+  )
+  return h + 1.0e-5 * (h + m) + 1.0e-7
+
+
+@wp.func
+def _bp_grow(
+  # In:
+  worldid: int,
+  fam: int,
+  lo: wp.vec3,
+  hi: wp.vec3,
+  # Out:
+  bp_bound_out: wp.array3d[float],
+):
+  """Accumulates the world's grid bounds (min corner, max corner, largest box extent)."""
+  for a in range(3):
+    wp.atomic_min(bp_bound_out, worldid, fam, a, lo[a])
+    wp.atomic_max(bp_bound_out, worldid, fam, 3 + a, hi[a])
+  wp.atomic_max(bp_bound_out, worldid, fam, 6, wp.max(wp.max(hi[0] - lo[0], hi[1] - lo[1]), hi[2] - lo[2]))
+
+
+@wp.func
+def _bp_cell_size(bp_bound: wp.array3d[float], worldid: int, fam: int) -> tuple[wp.vec3, float]:
+  bmin = wp.vec3(bp_bound[worldid, fam, 0], bp_bound[worldid, fam, 1], bp_bound[worldid, fam, 2])
+  span = wp.max(
+    wp.max(bp_bound[worldid, fam, 3] - bmin[0], bp_bound[worldid, fam, 4] - bmin[1]),
+    bp_bound[worldid, fam, 5] - bmin[2],
+  )
+  c = wp.max(wp.max(bp_bound[worldid, fam, 6] / float(BP_CELL_DIV), span / float(1 << (BP_CELL_BITS - 1))), 1.0e-9)
+  return bmin, 1.0 / c
+
+
+@wp.func
+def _bp_cell(bmin: wp.vec3, inv_c: float, p: wp.vec3) -> wp.vec3i:
+  cmax = (1 << BP_CELL_BITS) - 1
+  ix = wp.clamp(int(wp.floor((p[0] - bmin[0]) * inv_c)), 0, cmax)
+  iy = wp.clamp(int(wp.floor((p[1] - bmin[1]) * inv_c)), 0, cmax)
+  iz = wp.clamp(int(wp.floor((p[2] - bmin[2]) * inv_c)), 0, cmax)
+  return wp.vec3i(ix, iy, iz)
+
+
+@wp.func
+def _bp_bucket(cell: wp.vec3i, nbucket: int) -> int:
+  h = (cell[0] * 73856093) ^ (cell[1] * 19349663) ^ (cell[2] * 83492791)
+  return h & (nbucket - 1)
+
+
+@wp.func
+def _bp_same(a: wp.vec3i, b: wp.vec3i) -> bool:
+  return a[0] == b[0] and a[1] == b[1] and a[2] == b[2]
+
+
+@wp.func
+def _bp_overlap(alo: wp.vec3, ahi: wp.vec3, blo: wp.vec3, bhi: wp.vec3) -> bool:
+  return (
+    alo[0] <= bhi[0] and blo[0] <= ahi[0] and alo[1] <= bhi[1] and blo[1] <= ahi[1] and alo[2] <= bhi[2] and blo[2] <= ahi[2]
+  )
+
+
+@wp.func
+def _bp_vert_box(rad: wp.array[float], x: wp.array2d[wp.vec3], dl: wp.array2d[float], ghat: float, worldid: int, v: int):
+  p = x[worldid, v]
+  h = _bp_pad(rad[v], ghat, dl[worldid, v], p, p)
+  return p - wp.vec3(h), p + wp.vec3(h)
 
 
 @wp.kernel
@@ -735,37 +1160,36 @@ def ipc_init_geom_features_kernel(
         corner_geom_out[worldid, ngv] = gi
       ngv += 1
     elif gt == int(GeomType.CAPSULE):
-      if ngv + 1 < max_c:
+      if ngv < max_c:
         geom_corner_loc_out[worldid, ngv] = wp.vec3(0.0, 0.0, -1.0)
         corner_geom_out[worldid, ngv] = gi
-        geom_corner_loc_out[worldid, ngv + 1] = wp.vec3(0.0, 0.0, 1.0)
-        corner_geom_out[worldid, ngv + 1] = gi
-      ngv += 2
+      ngv += 1
+      if ngv < max_c:
+        geom_corner_loc_out[worldid, ngv] = wp.vec3(0.0, 0.0, 1.0)
+        corner_geom_out[worldid, ngv] = gi
+      ngv += 1
       if nge < max_e:
         geom_edge_loc_out[worldid, nge, 0] = wp.vec3(0.0, 0.0, -1.0)
         geom_edge_loc_out[worldid, nge, 1] = wp.vec3(0.0, 0.0, 1.0)
         edge_geom_out[worldid, nge] = gi
       nge += 1
     elif gt == int(GeomType.BOX):
-      if ngv + 7 < max_c:
-        idx = int(0)
-        for ix in range(2):
-          sx = -1.0 if ix == 0 else 1.0
-          for iy in range(2):
-            sy = -1.0 if iy == 0 else 1.0
-            for iz in range(2):
-              sz = -1.0 if iz == 0 else 1.0
-              geom_corner_loc_out[worldid, ngv + idx] = wp.vec3(sx, sy, sz)
-              corner_geom_out[worldid, ngv + idx] = gi
-              idx += 1
-      ngv += 8
-      if nge + 11 < max_e:
-        eidx = int(0)
-        for axis in range(3):
-          for i1 in range(2):
-            s1 = -1.0 if i1 == 0 else 1.0
-            for i2 in range(2):
-              s2 = -1.0 if i2 == 0 else 1.0
+      for ix in range(2):
+        sx = -1.0 if ix == 0 else 1.0
+        for iy in range(2):
+          sy = -1.0 if iy == 0 else 1.0
+          for iz in range(2):
+            sz = -1.0 if iz == 0 else 1.0
+            if ngv < max_c:
+              geom_corner_loc_out[worldid, ngv] = wp.vec3(sx, sy, sz)
+              corner_geom_out[worldid, ngv] = gi
+            ngv += 1
+      for axis in range(3):
+        for i1 in range(2):
+          s1 = -1.0 if i1 == 0 else 1.0
+          for i2 in range(2):
+            s2 = -1.0 if i2 == 0 else 1.0
+            if nge < max_e:
               lo = wp.vec3(0.0, 0.0, 0.0)
               hi = wp.vec3(0.0, 0.0, 0.0)
               if axis == 0:
@@ -777,11 +1201,10 @@ def ipc_init_geom_features_kernel(
               else:
                 lo = wp.vec3(s1, s2, -1.0)
                 hi = wp.vec3(s1, s2, 1.0)
-              geom_edge_loc_out[worldid, nge + eidx, 0] = lo
-              geom_edge_loc_out[worldid, nge + eidx, 1] = hi
-              edge_geom_out[worldid, nge + eidx] = gi
-              eidx += 1
-      nge += 12
+              geom_edge_loc_out[worldid, nge, 0] = lo
+              geom_edge_loc_out[worldid, nge, 1] = hi
+              edge_geom_out[worldid, nge] = gi
+            nge += 1
     elif gt == int(GeomType.MESH) and nmesh > 0:
       mid = geom_dataid[worldid % geom_dataid.shape[0], gi]
       if mid < 0 or mesh_graphadr[mid] < 0:
@@ -921,7 +1344,7 @@ def ipc_update_geom_aabbs_kernel(
   geom_aabb_max_out[worldid, gi] = wc + wh
 
 
-def ipc_update_geom_features(m: Model, d: Data, ws: Any):
+def ipc_update_geom_features(m: Model, d: Data, ws: "IpcWorkspace"):
   """Updates world-space static geom corners, edges, and AABBs across all worlds."""
   wp.launch(
     ipc_update_geom_features_kernel(int(m.opt.warn_overflow)),
@@ -982,170 +1405,11 @@ def ipc_compute_fsweep_kernel(
   wp.atomic_max(fsweep_out, worldid, f, dl_v)
 
 
-@wp.func
-def _emit_cand(
-  # In:
-  worldid: int,
-  pt: int,
-  idx: wp.vec4i,
-  gi: int,
-  dd: float,
-  warn_overflow: bool,
-  # Data out:
-  overflow_out: wp.array[int],
-  # Out:
-  ncand_out: wp.array[int],
-  cand_type_out: wp.array2d[int],
-  cand_idx_out: wp.array2d[wp.vec4i],
-  cand_geom_out: wp.array2d[int],
-  cand_ld0_out: wp.array2d[float],
-):
-  c = wp.atomic_add(ncand_out, worldid, 1)
-  max_cand = cand_type_out.shape[1]
-  if c >= max_cand:
-    if warn_overflow and c == max_cand:
-      wp.printf(
-        "IPC candidate overflow - please increase nconmax beyond %u or naconmax beyond %u\n"
-        "To disable the print warning: m.opt.warn_overflow &= ~mjw.OverflowType.BROADPHASE (or = 0 for all)\n",
-        max_cand,
-        max_cand * ncand_out.shape[0],
-      )
-    wp.atomic_or(overflow_out, worldid, wp.static(OverflowType.BROADPHASE))
-    return
-  cand_type_out[worldid, c] = pt
-  cand_idx_out[worldid, c] = idx
-  cand_geom_out[worldid, c] = gi
-  cand_ld0_out[worldid, c] = dd
-
-
-@wp.func
-def _add_cand_geom(
-  # In:
-  worldid: int,
-  pt: int,
-  idx: wp.vec4i,
-  gi: int,
-  dd: float,
-  bo: float,
-  band: float,
-  reach: float,
-  dl: wp.array2d[float],
-  warn_overflow: bool,
-  # Data out:
-  overflow_out: wp.array[int],
-  # Out:
-  ncand_out: wp.array[int],
-  cand_type_out: wp.array2d[int],
-  cand_idx_out: wp.array2d[wp.vec4i],
-  cand_geom_out: wp.array2d[int],
-  cand_ld0_out: wp.array2d[float],
-):
-  """Applies mjc_addCand filtering for flex-geom pairs using precomputed vertex travel dl."""
-  if dd >= bo + reach:
-    return
-  off, nv = pair_vert_range(pt)
-  bound = dl[worldid, idx[off]]
-  if nv > 1:
-    bound = wp.max(bound, dl[worldid, idx[off + 1]])
-  if nv > 2:
-    bound = wp.max(bound, dl[worldid, idx[off + 2]])
-  if dd >= bo + band + bound:
-    return
-  _emit_cand(
-    worldid,
-    pt,
-    idx,
-    gi,
-    dd,
-    warn_overflow,
-    overflow_out,
-    ncand_out,
-    cand_type_out,
-    cand_idx_out,
-    cand_geom_out,
-    cand_ld0_out,
-  )
-
-
-@wp.func
-def _add_cand(
-  # In:
-  worldid: int,
-  pt: int,
-  idx: wp.vec4i,
-  gi: int,
-  dd: float,
-  bo: float,
-  band: float,
-  reach: float,
-  dfrom: wp.array2d[wp.vec3],
-  dto: wp.array2d[wp.vec3],
-  dl: wp.array2d[float],
-  warn_overflow: bool,
-  # Data out:
-  overflow_out: wp.array[int],
-  # Out:
-  ncand_out: wp.array[int],
-  cand_type_out: wp.array2d[int],
-  cand_idx_out: wp.array2d[wp.vec4i],
-  cand_geom_out: wp.array2d[int],
-  cand_ld0_out: wp.array2d[float],
-):
-  """Applies mjc_addCand filtering and emits flex-flex candidate to cand arrays."""
-  if dd >= bo + reach or dd <= 0.0:
-    return
-
-  v0 = idx[0]
-  v1 = idx[1]
-  v2 = idx[2]
-  v3 = idx[3]
-  dl0 = dl[worldid, v0]
-  dl1 = dl[worldid, v1]
-  dl2 = dl[worldid, v2]
-  dl3 = dl[worldid, v3]
-  dl_upper = (
-    dl0 + wp.max(dl1, wp.max(dl2, dl3)) if pt == int(FlexPairType.FLEX_VERT_TRI) else wp.max(dl0, dl1) + wp.max(dl2, dl3)
-  )
-  if dd >= bo + band + dl_upper + 1e-6:
-    return
-
-  dv0 = dto[worldid, v0] - dfrom[worldid, v0]
-  dv1 = dto[worldid, v1] - dfrom[worldid, v1]
-  dv2 = dto[worldid, v2] - dfrom[worldid, v2]
-  dv3 = dto[worldid, v3] - dfrom[worldid, v3]
-
-  bound = (
-    wp.max(wp.length(dv1 - dv0), wp.max(wp.length(dv2 - dv0), wp.length(dv3 - dv0)))
-    if pt == int(FlexPairType.FLEX_VERT_TRI)
-    else wp.max(wp.max(wp.length(dv0 - dv2), wp.length(dv0 - dv3)), wp.max(wp.length(dv1 - dv2), wp.length(dv1 - dv3)))
-  )
-  if dd >= bo + band + bound:
-    return
-
-  _emit_cand(
-    worldid,
-    pt,
-    idx,
-    gi,
-    dd,
-    warn_overflow,
-    overflow_out,
-    ncand_out,
-    cand_type_out,
-    cand_idx_out,
-    cand_geom_out,
-    cand_ld0_out,
-  )
-
-
 @cache_kernel
 def ipc_cand_vert_geom_kernel(warn_overflow: int):
   @wp.kernel(module="unique", enable_backward=False)
   def kernel(
     # Model:
-    nexclude: int,
-    opt_disableflags: int,
-    body_parentid: wp.array[int],
     body_weldid: wp.array[int],
     geom_type: wp.array[int],
     geom_contype: wp.array[int],
@@ -1165,7 +1429,6 @@ def ipc_cand_vert_geom_kernel(warn_overflow: int):
     mesh_polyvertadr: wp.array[int],
     mesh_polyvertnum: wp.array[int],
     mesh_polyvert: wp.array[int],
-    exclude_signature: wp.array[int],
     flex_vertflexid: wp.array[int],
     # Data in:
     geom_xpos_in: wp.array2d[wp.vec3],
@@ -1174,7 +1437,6 @@ def ipc_cand_vert_geom_kernel(warn_overflow: int):
     fidx: wp.array[int],
     pin_has_chain: wp.array[bool],
     rad: wp.array[float],
-    pbody: wp.array[int],
     geom_aabb_min: wp.array2d[wp.vec3],
     geom_aabb_max: wp.array2d[wp.vec3],
     world_done: wp.array[int],
@@ -1207,10 +1469,6 @@ def ipc_cand_vert_geom_kernel(warn_overflow: int):
     if _mask_filtered(fc, fa, gc, ga):
       return
 
-    bid_g = geom_bodyid[gi]
-    if _body_pair_filtered(nexclude, opt_disableflags, body_parentid, body_weldid, exclude_signature, pbody[v], bid_g):
-      return
-
     gt = geom_type[gi]
     va = int(0)
     pa = int(0)
@@ -1222,7 +1480,7 @@ def ipc_cand_vert_geom_kernel(warn_overflow: int):
       pn = mesh_polynum[mid]
 
     idx = wp.vec4i(v, 0, 0, 0)
-    bo_band = pair_bo_and_band(int(FlexPairType.FLEX_VERT_GEOM), idx, rad, ghat)
+    bo_band = _pair_bo_and_band(int(FlexPairType.FLEX_VERT_GEOM), idx, rad, ghat)
     bo = bo_band[0]
     band = bo_band[1]
     reach = thresh + dl[worldid, v]
@@ -1249,7 +1507,7 @@ def ipc_cand_vert_geom_kernel(warn_overflow: int):
       va,
       pa,
       pn,
-      bo + reach,
+      bo + band,
     )
 
     _add_cand_geom(
@@ -1279,14 +1537,9 @@ def ipc_cand_corner_tri_kernel(warn_overflow: int):
   @wp.kernel(module="unique", enable_backward=False)
   def kernel(
     # Model:
-    nexclude: int,
-    opt_disableflags: int,
-    body_parentid: wp.array[int],
-    body_weldid: wp.array[int],
     geom_type: wp.array[int],
     geom_contype: wp.array[int],
     geom_conaffinity: wp.array[int],
-    geom_bodyid: wp.array[int],
     geom_size: wp.array2d[wp.vec3],
     flex_contype: wp.array[int],
     flex_conaffinity: wp.array[int],
@@ -1295,11 +1548,9 @@ def ipc_cand_corner_tri_kernel(warn_overflow: int):
     flex_elemadr: wp.array[int],
     flex_elemdataadr: wp.array[int],
     flex_elem: wp.array[int],
-    exclude_signature: wp.array[int],
     flex_elemflexid: wp.array[int],
     # In:
     rad: wp.array[float],
-    pbody: wp.array[int],
     ngv: wp.array[int],
     geom_corners: wp.array2d[wp.vec3],
     corner_geom: wp.array2d[int],
@@ -1318,15 +1569,12 @@ def ipc_cand_corner_tri_kernel(warn_overflow: int):
     cand_geom_out: wp.array2d[int],
     cand_ld0_out: wp.array2d[float],
   ):
-    """Discovers GEOM_CORNER_TRI candidates between static geom corners and 2D flex triangles."""
-    worldid, c_i, e = wp.tid()
-    if world_done[worldid] != 0 or c_i >= wp.min(ngv[worldid], geom_corners.shape[1]):
+    """Discovers GEOM_CORNER_TRI candidates between static geom corners and a 2D flex triangle."""
+    worldid, e = wp.tid()
+    if world_done[worldid] != 0:
       return
     f = flex_elemflexid[e]
     if flex_dim[f] != 2:
-      return
-    gi = corner_geom[worldid, c_i]
-    if _mask_filtered(flex_contype[f], flex_conaffinity[f], geom_contype[gi], geom_conaffinity[gi]):
       return
 
     eadr = flex_elemdataadr[f] + 3 * (e - flex_elemadr[f])
@@ -1334,50 +1582,53 @@ def ipc_cand_corner_tri_kernel(warn_overflow: int):
     v0 = va + flex_elem[eadr]
     v1 = va + flex_elem[eadr + 1]
     v2 = va + flex_elem[eadr + 2]
+    fc = flex_contype[f]
+    fa = flex_conaffinity[f]
 
-    bid_g = geom_bodyid[gi]
-    if (
-      _body_pair_filtered(nexclude, opt_disableflags, body_parentid, body_weldid, exclude_signature, pbody[v0], bid_g)
-      and _body_pair_filtered(nexclude, opt_disableflags, body_parentid, body_weldid, exclude_signature, pbody[v1], bid_g)
-      and _body_pair_filtered(nexclude, opt_disableflags, body_parentid, body_weldid, exclude_signature, pbody[v2], bid_g)
-    ):
-      return
-
-    idx = wp.vec4i(c_i, v0, v1, v2)
-    bo_band = pair_bo_and_band(int(FlexPairType.GEOM_CORNER_TRI), idx, rad, ghat)
-    bo = bo_band[0]
-    band = bo_band[1]
-    reach = thresh_geom + fsweep[worldid, f]
-    fr = feat_radius(geom_type[gi], geom_size[worldid % geom_size.shape[0], gi])
-    corner = geom_corners[worldid, c_i]
     p1 = x[worldid, v0]
     p2 = x[worldid, v1]
     p3 = x[worldid, v2]
+    tri_min = wp.min(wp.min(p1, p2), p3)
+    tri_max = wp.max(wp.max(p1, p2), p3)
+    reach = thresh_geom + fsweep[worldid, f]
+    sz_w = worldid % geom_size.shape[0]
 
-    if _aabb_separated(corner, corner, wp.min(wp.min(p1, p2), p3), wp.max(wp.max(p1, p2), p3), bo + reach + fr):
-      return
+    nc = wp.min(ngv[worldid], geom_corners.shape[1])
+    for c_i in range(nc):
+      gi = corner_geom[worldid, c_i]
+      if _mask_filtered(fc, fa, geom_contype[gi], geom_conaffinity[gi]):
+        continue
 
-    d_val, _cp, _w = pt_tri_dist(corner, p1, p2, p3)
-    dd = d_val - fr
+      idx = wp.vec4i(c_i, v0, v1, v2)
+      bo_band = _pair_bo_and_band(int(FlexPairType.GEOM_CORNER_TRI), idx, rad, ghat)
+      bo = bo_band[0]
+      band = bo_band[1]
+      fr = _feat_radius(geom_type[gi], geom_size[sz_w, gi])
+      corner = geom_corners[worldid, c_i]
 
-    _add_cand_geom(
-      worldid,
-      int(FlexPairType.GEOM_CORNER_TRI),
-      idx,
-      gi,
-      dd,
-      bo,
-      band,
-      reach,
-      dl,
-      wp.static(bool(warn_overflow & OverflowType.BROADPHASE)),
-      overflow_out,
-      ncand_out,
-      cand_type_out,
-      cand_idx_out,
-      cand_geom_out,
-      cand_ld0_out,
-    )
+      if _aabb_separated(corner, corner, tri_min, tri_max, bo + reach + fr):
+        continue
+
+      d_val, _cp, _w = pt_tri_dist(corner, p1, p2, p3)
+
+      _add_cand_geom(
+        worldid,
+        int(FlexPairType.GEOM_CORNER_TRI),
+        idx,
+        gi,
+        d_val - fr,
+        bo,
+        band,
+        reach,
+        dl,
+        wp.static(bool(warn_overflow & OverflowType.BROADPHASE)),
+        overflow_out,
+        ncand_out,
+        cand_type_out,
+        cand_idx_out,
+        cand_geom_out,
+        cand_ld0_out,
+      )
 
   return kernel
 
@@ -1387,14 +1638,9 @@ def ipc_cand_geom_edge_edge_kernel(warn_overflow: int):
   @wp.kernel(module="unique", enable_backward=False)
   def kernel(
     # Model:
-    nexclude: int,
-    opt_disableflags: int,
-    body_parentid: wp.array[int],
-    body_weldid: wp.array[int],
     geom_type: wp.array[int],
     geom_contype: wp.array[int],
     geom_conaffinity: wp.array[int],
-    geom_bodyid: wp.array[int],
     geom_size: wp.array2d[wp.vec3],
     flex_contype: wp.array[int],
     flex_conaffinity: wp.array[int],
@@ -1402,11 +1648,9 @@ def ipc_cand_geom_edge_edge_kernel(warn_overflow: int):
     flex_vertadr: wp.array[int],
     flex_elemnum: wp.array[int],
     flex_edge: wp.array[wp.vec2i],
-    exclude_signature: wp.array[int],
     flex_edgeflexid: wp.array[int],
     # In:
     rad: wp.array[float],
-    pbody: wp.array[int],
     nge: wp.array[int],
     geom_edges: wp.array3d[wp.vec3],
     edge_geom: wp.array2d[int],
@@ -1425,71 +1669,67 @@ def ipc_cand_geom_edge_edge_kernel(warn_overflow: int):
     cand_geom_out: wp.array2d[int],
     cand_ld0_out: wp.array2d[float],
   ):
-    """Discovers GEOM_EDGE_EDGE candidates between static geom edges and 2D flex edges."""
-    worldid, e_i, fe = wp.tid()
-    if world_done[worldid] != 0 or e_i >= wp.min(nge[worldid], geom_edges.shape[1]):
+    """Discovers GEOM_EDGE_EDGE candidates between static geom edges and a 2D flex edge."""
+    worldid, fe = wp.tid()
+    if world_done[worldid] != 0:
       return
     f = flex_edgeflexid[fe]
     if flex_dim[f] != 2 or flex_elemnum[f] <= 0:
-      return
-    gi = edge_geom[worldid, e_i]
-    if _mask_filtered(flex_contype[f], flex_conaffinity[f], geom_contype[gi], geom_conaffinity[gi]):
       return
 
     va = flex_vertadr[f]
     ev = flex_edge[fe]
     v0 = va + ev[0]
     v1 = va + ev[1]
+    fc = flex_contype[f]
+    fa = flex_conaffinity[f]
 
-    bid_g = geom_bodyid[gi]
-    if _body_pair_filtered(
-      nexclude, opt_disableflags, body_parentid, body_weldid, exclude_signature, pbody[v0], bid_g
-    ) and _body_pair_filtered(nexclude, opt_disableflags, body_parentid, body_weldid, exclude_signature, pbody[v1], bid_g):
-      return
-
-    idx = wp.vec4i(e_i, v0, v1, 0)
-    bo_band = pair_bo_and_band(int(FlexPairType.GEOM_EDGE_EDGE), idx, rad, ghat)
-    bo = bo_band[0]
-    band = bo_band[1]
-    reach = thresh_geom + fsweep[worldid, f]
-    fr = feat_radius(geom_type[gi], geom_size[worldid % geom_size.shape[0], gi])
-    eg0 = geom_edges[worldid, e_i, 0]
-    eg1 = geom_edges[worldid, e_i, 1]
     p1 = x[worldid, v0]
     p2 = x[worldid, v1]
+    seg_min = wp.min(p1, p2)
+    seg_max = wp.max(p1, p2)
+    reach = thresh_geom + fsweep[worldid, f]
+    sz_w = worldid % geom_size.shape[0]
 
-    if _aabb_separated(wp.min(eg0, eg1), wp.max(eg0, eg1), wp.min(p1, p2), wp.max(p1, p2), bo + reach + fr):
-      return
+    ne = wp.min(nge[worldid], geom_edges.shape[1])
+    for e_i in range(ne):
+      gi = edge_geom[worldid, e_i]
+      if _mask_filtered(fc, fa, geom_contype[gi], geom_conaffinity[gi]):
+        continue
 
-    d_val, _cp1, _cp2, _s, _t = seg_seg_dist(eg0, eg1, p1, p2)
-    dd = d_val - fr
+      idx = wp.vec4i(e_i, v0, v1, 0)
+      bo_band = _pair_bo_and_band(int(FlexPairType.GEOM_EDGE_EDGE), idx, rad, ghat)
+      bo = bo_band[0]
+      band = bo_band[1]
+      fr = _feat_radius(geom_type[gi], geom_size[sz_w, gi])
+      eg0 = geom_edges[worldid, e_i, 0]
+      eg1 = geom_edges[worldid, e_i, 1]
 
-    _add_cand_geom(
-      worldid,
-      int(FlexPairType.GEOM_EDGE_EDGE),
-      idx,
-      gi,
-      dd,
-      bo,
-      band,
-      reach,
-      dl,
-      wp.static(bool(warn_overflow & OverflowType.BROADPHASE)),
-      overflow_out,
-      ncand_out,
-      cand_type_out,
-      cand_idx_out,
-      cand_geom_out,
-      cand_ld0_out,
-    )
+      if _aabb_separated(wp.min(eg0, eg1), wp.max(eg0, eg1), seg_min, seg_max, bo + reach + fr):
+        continue
+
+      d_val, _cp1, _cp2, _s, _t = seg_seg_dist(eg0, eg1, p1, p2)
+
+      _add_cand_geom(
+        worldid,
+        int(FlexPairType.GEOM_EDGE_EDGE),
+        idx,
+        gi,
+        d_val - fr,
+        bo,
+        band,
+        reach,
+        dl,
+        wp.static(bool(warn_overflow & OverflowType.BROADPHASE)),
+        overflow_out,
+        ncand_out,
+        cand_type_out,
+        cand_idx_out,
+        cand_geom_out,
+        cand_ld0_out,
+      )
 
   return kernel
-
-
-@wp.func
-def _same_body(flex_vertbodyid: wp.array[int], a: int, b: int) -> bool:
-  ba = flex_vertbodyid[a]
-  return ba >= 0 and ba == flex_vertbodyid[b]
 
 
 @cache_kernel
@@ -1526,64 +1766,32 @@ def ipc_cand_vert_tri_kernel(warn_overflow: int):
     cand_geom_out: wp.array2d[int],
     cand_ld0_out: wp.array2d[float],
   ):
-    """Discovers FLEX_VERT_TRI candidates between 2D flex vertices and triangles."""
+    """Discovers FLEX_VERT_TRI candidates by testing every vertex-triangle pair."""
     worldid, v, e = wp.tid()
     if world_done[worldid] != 0:
       return
-    f1 = flex_vertflexid[v]
-    f2 = flex_elemflexid[e]
-    if not ipc_owns_flex_flex(flex_dim, f1, f2):
-      return
-    fc1 = flex_contype[f1]
-    fa1 = flex_conaffinity[f1]
-    if f1 == f2:
-      if flex_selfcollide[f1] == 0 or (fc1 & fa1) == 0:
-        return
-    elif _mask_filtered(fc1, fa1, flex_contype[f2], flex_conaffinity[f2]):
-      return
-
-    eadr = flex_elemdataadr[f2] + 3 * (e - flex_elemadr[f2])
-    va2 = flex_vertadr[f2]
-    v0 = va2 + flex_elem[eadr]
-    v1 = va2 + flex_elem[eadr + 1]
-    v2 = va2 + flex_elem[eadr + 2]
-    if (
-      v == v0
-      or v == v1
-      or v == v2
-      or _same_body(flex_vertbodyid, v, v0)
-      or _same_body(flex_vertbodyid, v, v1)
-      or _same_body(flex_vertbodyid, v, v2)
-    ):
-      return
-
-    idx = wp.vec4i(v, v0, v1, v2)
-    bo_band = pair_bo_and_band(int(FlexPairType.FLEX_VERT_TRI), idx, rad, ghat)
-    bo = bo_band[0]
-    band = bo_band[1]
-    reach = 3.0 * band + dl[worldid, v] + fsweep[worldid, f2]
-    p0 = x[worldid, v]
-    p1 = x[worldid, v0]
-    p2 = x[worldid, v1]
-    p3 = x[worldid, v2]
-
-    if _aabb_separated(p0, p0, wp.min(wp.min(p1, p2), p3), wp.max(wp.max(p1, p2), p3), bo + reach):
-      return
-
-    dd, _cp, _w = pt_tri_dist(p0, p1, p2, p3)
-
-    _add_cand(
-      worldid,
-      int(FlexPairType.FLEX_VERT_TRI),
-      idx,
-      -1,
-      dd,
-      bo,
-      band,
-      reach,
+    _flex_vert_tri_pair(
+      flex_contype,
+      flex_conaffinity,
+      flex_selfcollide,
+      flex_dim,
+      flex_vertadr,
+      flex_elemadr,
+      flex_elemdataadr,
+      flex_vertbodyid,
+      flex_elem,
+      flex_elemflexid,
+      flex_vertflexid,
+      rad,
+      x,
       dfrom,
       dto,
       dl,
+      fsweep,
+      ghat,
+      worldid,
+      v,
+      e,
       wp.static(bool(warn_overflow & OverflowType.BROADPHASE)),
       overflow_out,
       ncand_out,
@@ -1627,77 +1835,29 @@ def ipc_cand_flex_edge_edge_kernel(warn_overflow: int):
     cand_geom_out: wp.array2d[int],
     cand_ld0_out: wp.array2d[float],
   ):
-    """Discovers FLEX_EDGE_EDGE candidates between non-adjacent 2D flex edges."""
-    worldid, p = wp.tid()
-    if world_done[worldid] != 0:
+    """Discovers FLEX_EDGE_EDGE candidates by testing every edge pair e1 < e2."""
+    worldid, e1, e2 = wp.tid()
+    if world_done[worldid] != 0 or e2 <= e1:
       return
-    e2 = int((1.0 + wp.sqrt(1.0 + 8.0 * float(p))) * 0.5)
-    while e2 * (e2 - 1) // 2 > p:
-      e2 -= 1
-    while (e2 + 1) * e2 // 2 <= p:
-      e2 += 1
-    e1 = p - e2 * (e2 - 1) // 2
-    f1 = flex_edgeflexid[e1]
-    f2 = flex_edgeflexid[e2]
-    if not ipc_owns_flex_flex(flex_dim, f1, f2):
-      return
-    fc1 = flex_contype[f1]
-    fa1 = flex_conaffinity[f1]
-    if f1 == f2:
-      if flex_selfcollide[f1] == 0 or (fc1 & fa1) == 0:
-        return
-    elif _mask_filtered(fc1, fa1, flex_contype[f2], flex_conaffinity[f2]):
-      return
-
-    va1 = flex_vertadr[f1]
-    ev1 = flex_edge[e1]
-    a1 = va1 + ev1[0]
-    b1 = va1 + ev1[1]
-
-    va2 = flex_vertadr[f2]
-    ev2 = flex_edge[e2]
-    a2 = va2 + ev2[0]
-    b2 = va2 + ev2[1]
-
-    if (
-      a1 == a2
-      or a1 == b2
-      or b1 == a2
-      or b1 == b2
-      or _same_body(flex_vertbodyid, a1, a2)
-      or _same_body(flex_vertbodyid, a1, b2)
-      or _same_body(flex_vertbodyid, b1, a2)
-      or _same_body(flex_vertbodyid, b1, b2)
-    ):
-      return
-
-    idx = wp.vec4i(a1, b1, a2, b2)
-    bo_band = pair_bo_and_band(int(FlexPairType.FLEX_EDGE_EDGE), idx, rad, ghat)
-    bo = bo_band[0]
-    band = bo_band[1]
-    reach = 3.0 * band + wp.max(dl[worldid, a1], dl[worldid, b1]) + fsweep[worldid, f2]
-    p0 = x[worldid, a1]
-    p1 = x[worldid, b1]
-    p2 = x[worldid, a2]
-    p3 = x[worldid, b2]
-
-    if _aabb_separated(wp.min(p0, p1), wp.max(p0, p1), wp.min(p2, p3), wp.max(p2, p3), bo + reach):
-      return
-
-    dd, _cp1, _cp2, _s, _t = seg_seg_dist(p0, p1, p2, p3)
-
-    _add_cand(
-      worldid,
-      int(FlexPairType.FLEX_EDGE_EDGE),
-      idx,
-      -1,
-      dd,
-      bo,
-      band,
-      reach,
+    _flex_edge_edge_pair(
+      flex_contype,
+      flex_conaffinity,
+      flex_selfcollide,
+      flex_dim,
+      flex_vertadr,
+      flex_vertbodyid,
+      flex_edge,
+      flex_edgeflexid,
+      rad,
+      x,
       dfrom,
       dto,
       dl,
+      fsweep,
+      ghat,
+      worldid,
+      e1,
+      e2,
       wp.static(bool(warn_overflow & OverflowType.BROADPHASE)),
       overflow_out,
       ncand_out,
@@ -1710,10 +1870,428 @@ def ipc_cand_flex_edge_edge_kernel(warn_overflow: int):
   return kernel
 
 
+def ipc_flex_grid(m: Model, nworld: int) -> bool:
+  """Whether flex-flex candidates use the hash grid rather than testing all pairs."""
+  npair = m.nflexedge * (m.nflexedge - 1) // 2 + m.nflexvert * m.nflexelem
+  return nworld * npair > BP_GRID_MIN_PAIRS
+
+
+@wp.kernel
+def _bp_init_kernel(
+  # In:
+  world_done: wp.array[int],
+  # Out:
+  bp_bound_out: wp.array3d[float],
+):
+  worldid, fam = wp.tid()
+  if world_done[worldid] != 0:
+    return
+  for a in range(3):
+    bp_bound_out[worldid, fam, a] = wp.inf
+    bp_bound_out[worldid, fam, 3 + a] = -wp.inf
+  bp_bound_out[worldid, fam, 6] = 0.0
+
+
+@wp.kernel
+def _bp_edge_box_kernel(
+  # Model:
+  flex_dim: wp.array[int],
+  flex_vertadr: wp.array[int],
+  flex_edge: wp.array[wp.vec2i],
+  flex_edgeflexid: wp.array[int],
+  # In:
+  rad: wp.array[float],
+  world_done: wp.array[int],
+  x: wp.array2d[wp.vec3],
+  dl: wp.array2d[float],
+  fsweep: wp.array2d[float],
+  ghat: float,
+  # Out:
+  bp_bound_out: wp.array3d[float],
+  bp_lo_out: wp.array2d[wp.vec3],
+  bp_hi_out: wp.array2d[wp.vec3],
+):
+  """Inflated box of 2D flex edge e."""
+  worldid, e = wp.tid()
+  if world_done[worldid] != 0:
+    return
+  f = flex_edgeflexid[e]
+  if flex_dim[f] != 2:
+    return
+  ev = flex_edge[e]
+  a = flex_vertadr[f] + ev[0]
+  b = flex_vertadr[f] + ev[1]
+  pa = x[worldid, a]
+  pb = x[worldid, b]
+  lo = wp.min(pa, pb)
+  hi = wp.max(pa, pb)
+  h = _bp_pad(rad[a], ghat, wp.max(wp.max(dl[worldid, a], dl[worldid, b]), fsweep[worldid, f]), lo, hi)
+  lo -= wp.vec3(h)
+  hi += wp.vec3(h)
+  bp_lo_out[worldid, e] = lo
+  bp_hi_out[worldid, e] = hi
+  _bp_grow(worldid, BP_EDGE, lo, hi, bp_bound_out)
+
+
+@wp.kernel
+def _bp_tri_box_kernel(
+  # Model:
+  flex_dim: wp.array[int],
+  flex_vertadr: wp.array[int],
+  flex_elemadr: wp.array[int],
+  flex_elemdataadr: wp.array[int],
+  flex_elem: wp.array[int],
+  flex_elemflexid: wp.array[int],
+  # In:
+  rad: wp.array[float],
+  world_done: wp.array[int],
+  x: wp.array2d[wp.vec3],
+  fsweep: wp.array2d[float],
+  ghat: float,
+  # Out:
+  bp_bound_out: wp.array3d[float],
+  bp_lo_out: wp.array2d[wp.vec3],
+  bp_hi_out: wp.array2d[wp.vec3],
+):
+  """Inflated box of 2D flex triangle e."""
+  worldid, e = wp.tid()
+  if world_done[worldid] != 0:
+    return
+  f = flex_elemflexid[e]
+  if flex_dim[f] != 2:
+    return
+  eadr = flex_elemdataadr[f] + 3 * (e - flex_elemadr[f])
+  va = flex_vertadr[f]
+  v0 = va + flex_elem[eadr]
+  p0 = x[worldid, v0]
+  p1 = x[worldid, va + flex_elem[eadr + 1]]
+  p2 = x[worldid, va + flex_elem[eadr + 2]]
+  lo = wp.min(wp.min(p0, p1), p2)
+  hi = wp.max(wp.max(p0, p1), p2)
+  h = _bp_pad(rad[v0], ghat, fsweep[worldid, f], lo, hi)
+  lo -= wp.vec3(h)
+  hi += wp.vec3(h)
+  bp_lo_out[worldid, e] = lo
+  bp_hi_out[worldid, e] = hi
+  _bp_grow(worldid, BP_TRI, lo, hi, bp_bound_out)
+
+
+@wp.kernel
+def _bp_vert_box_kernel(
+  # Model:
+  flex_dim: wp.array[int],
+  flex_vertflexid: wp.array[int],
+  # In:
+  rad: wp.array[float],
+  world_done: wp.array[int],
+  x: wp.array2d[wp.vec3],
+  dl: wp.array2d[float],
+  ghat: float,
+  # Out:
+  bp_bound_out: wp.array3d[float],
+  bp_lo_out: wp.array2d[wp.vec3],
+  bp_hi_out: wp.array2d[wp.vec3],
+):
+  """Inflated box of 2D flex vertex v, binned with the triangles."""
+  worldid, v = wp.tid()
+  if world_done[worldid] != 0:
+    return
+  if flex_dim[flex_vertflexid[v]] != 2:
+    return
+  lo, hi = _bp_vert_box(rad, x, dl, ghat, worldid, v)
+  bp_lo_out[worldid, v] = lo
+  bp_hi_out[worldid, v] = hi
+  _bp_grow(worldid, BP_TRI, lo, hi, bp_bound_out)
+
+
+@cache_kernel
+def _bp_insert_kernel(fill: bool):
+  FILL = fill
+
+  @wp.kernel(module="unique", enable_backward=False)
+  def kernel(
+    # In:
+    fam: int,
+    owned: wp.array[int],
+    flexdim: wp.array[int],
+    world_done: wp.array[int],
+    bp_bound_in: wp.array3d[float],
+    bp_lo_in: wp.array2d[wp.vec3],
+    bp_hi_in: wp.array2d[wp.vec3],
+    bp_end_in: wp.array[int],
+    # Out:
+    bp_count_out: wp.array[int],
+    bp_item_out: wp.array[int],
+    bp_key_out: wp.array[wp.vec3i],
+  ):
+    """Counts (or, with fill, stores) item i in each grid cell its box covers."""
+    worldid, i = wp.tid()
+    if world_done[worldid] != 0:
+      return
+    if flexdim[owned[i]] != 2:
+      return
+    nbucket = bp_count_out.shape[0] // world_done.shape[0]
+    bmin, inv_c = _bp_cell_size(bp_bound_in, worldid, fam)
+    clo = _bp_cell(bmin, inv_c, bp_lo_in[worldid, i])
+    chi = _bp_cell(bmin, inv_c, bp_hi_in[worldid, i])
+    for ix in range(clo[0], chi[0] + 1):
+      for iy in range(clo[1], chi[1] + 1):
+        for iz in range(clo[2], chi[2] + 1):
+          cell = wp.vec3i(ix, iy, iz)
+          g = worldid * nbucket + _bp_bucket(cell, nbucket)
+          if wp.static(FILL):
+            slot = bp_end_in[g] - wp.atomic_sub(bp_count_out, g, 1)
+            bp_item_out[slot] = i
+            bp_key_out[slot] = cell
+          else:
+            wp.atomic_add(bp_count_out, g, 1)
+
+  return kernel
+
+
+@cache_kernel
+def ipc_bp_edge_edge_kernel(warn_overflow: int):
+  @wp.kernel(module="unique", enable_backward=False)
+  def kernel(
+    # Model:
+    flex_contype: wp.array[int],
+    flex_conaffinity: wp.array[int],
+    flex_selfcollide: wp.array[int],
+    flex_dim: wp.array[int],
+    flex_vertadr: wp.array[int],
+    flex_vertbodyid: wp.array[int],
+    flex_edge: wp.array[wp.vec2i],
+    flex_edgeflexid: wp.array[int],
+    # In:
+    rad: wp.array[float],
+    world_done: wp.array[int],
+    x: wp.array2d[wp.vec3],
+    dfrom: wp.array2d[wp.vec3],
+    dto: wp.array2d[wp.vec3],
+    dl: wp.array2d[float],
+    fsweep: wp.array2d[float],
+    ghat: float,
+    bp_bound: wp.array3d[float],
+    bp_lo: wp.array2d[wp.vec3],
+    bp_hi: wp.array2d[wp.vec3],
+    bp_end: wp.array[int],
+    bp_item: wp.array[int],
+    bp_key: wp.array[wp.vec3i],
+    # Data out:
+    overflow_out: wp.array[int],
+    # Out:
+    ncand_out: wp.array[int],
+    cand_type_out: wp.array2d[int],
+    cand_idx_out: wp.array2d[wp.vec4i],
+    cand_geom_out: wp.array2d[int],
+    cand_ld0_out: wp.array2d[float],
+  ):
+    """Discovers FLEX_EDGE_EDGE candidates for grid entry s against edges e2 > e1 in its cell."""
+    worldid, k = wp.tid()
+    if world_done[worldid] != 0:
+      return
+    nbucket = bp_end.shape[0] // world_done.shape[0]
+    s = bp_item.shape[0] // world_done.shape[0] * worldid + k
+    if s >= bp_end[worldid * nbucket + nbucket - 1]:
+      return
+    e1 = bp_item[s]
+    cell = bp_key[s]
+    bmin, inv_c = _bp_cell_size(bp_bound, worldid, BP_EDGE)
+    lo1 = bp_lo[worldid, e1]
+    hi1 = bp_hi[worldid, e1]
+    g = worldid * nbucket + _bp_bucket(cell, nbucket)
+    start = bp_item.shape[0] // world_done.shape[0] * worldid
+    if g > worldid * nbucket:
+      start = bp_end[g - 1]
+    for t in range(start, bp_end[g]):
+      e2 = bp_item[t]
+      if e2 <= e1 or not _bp_same(bp_key[t], cell):
+        continue
+      lo2 = bp_lo[worldid, e2]
+      hi2 = bp_hi[worldid, e2]
+      if not _bp_overlap(lo1, hi1, lo2, hi2):
+        continue
+      if not _bp_same(_bp_cell(bmin, inv_c, wp.max(lo1, lo2)), cell):
+        continue
+      _flex_edge_edge_pair(
+        flex_contype,
+        flex_conaffinity,
+        flex_selfcollide,
+        flex_dim,
+        flex_vertadr,
+        flex_vertbodyid,
+        flex_edge,
+        flex_edgeflexid,
+        rad,
+        x,
+        dfrom,
+        dto,
+        dl,
+        fsweep,
+        ghat,
+        worldid,
+        e1,
+        e2,
+        wp.static(bool(warn_overflow & OverflowType.BROADPHASE)),
+        overflow_out,
+        ncand_out,
+        cand_type_out,
+        cand_idx_out,
+        cand_geom_out,
+        cand_ld0_out,
+      )
+
+  return kernel
+
+
+@cache_kernel
+def ipc_bp_vert_tri_kernel(warn_overflow: int):
+  @wp.kernel(module="unique", enable_backward=False)
+  def kernel(
+    # Model:
+    flex_contype: wp.array[int],
+    flex_conaffinity: wp.array[int],
+    flex_selfcollide: wp.array[int],
+    flex_dim: wp.array[int],
+    flex_vertadr: wp.array[int],
+    flex_elemadr: wp.array[int],
+    flex_elemdataadr: wp.array[int],
+    flex_vertbodyid: wp.array[int],
+    flex_elem: wp.array[int],
+    flex_elemflexid: wp.array[int],
+    flex_vertflexid: wp.array[int],
+    # In:
+    rad: wp.array[float],
+    world_done: wp.array[int],
+    x: wp.array2d[wp.vec3],
+    dfrom: wp.array2d[wp.vec3],
+    dto: wp.array2d[wp.vec3],
+    dl: wp.array2d[float],
+    fsweep: wp.array2d[float],
+    ghat: float,
+    bp_bound: wp.array3d[float],
+    bp_lo: wp.array2d[wp.vec3],
+    bp_hi: wp.array2d[wp.vec3],
+    bp_end: wp.array[int],
+    bp_item: wp.array[int],
+    bp_key: wp.array[wp.vec3i],
+    bp_vlo: wp.array2d[wp.vec3],
+    bp_vhi: wp.array2d[wp.vec3],
+    bp_vend: wp.array[int],
+    bp_vitem: wp.array[int],
+    bp_vkey: wp.array[wp.vec3i],
+    # Data out:
+    overflow_out: wp.array[int],
+    # Out:
+    ncand_out: wp.array[int],
+    cand_type_out: wp.array2d[int],
+    cand_idx_out: wp.array2d[wp.vec4i],
+    cand_geom_out: wp.array2d[int],
+    cand_ld0_out: wp.array2d[float],
+  ):
+    """Discovers FLEX_VERT_TRI candidates for vertex grid entry s against triangles in its cell."""
+    worldid, k = wp.tid()
+    if world_done[worldid] != 0:
+      return
+    nbucket = bp_end.shape[0] // world_done.shape[0]
+    s = bp_vitem.shape[0] // world_done.shape[0] * worldid + k
+    if s >= bp_vend[worldid * nbucket + nbucket - 1]:
+      return
+    v = bp_vitem[s]
+    cell = bp_vkey[s]
+    bmin, inv_c = _bp_cell_size(bp_bound, worldid, BP_TRI)
+    lo1 = bp_vlo[worldid, v]
+    hi1 = bp_vhi[worldid, v]
+    g = worldid * nbucket + _bp_bucket(cell, nbucket)
+    start = bp_item.shape[0] // world_done.shape[0] * worldid
+    if g > worldid * nbucket:
+      start = bp_end[g - 1]
+    for t in range(start, bp_end[g]):
+      e = bp_item[t]
+      if not _bp_same(bp_key[t], cell):
+        continue
+      lo2 = bp_lo[worldid, e]
+      hi2 = bp_hi[worldid, e]
+      if not _bp_overlap(lo1, hi1, lo2, hi2):
+        continue
+      if not _bp_same(_bp_cell(bmin, inv_c, wp.max(lo1, lo2)), cell):
+        continue
+      _flex_vert_tri_pair(
+        flex_contype,
+        flex_conaffinity,
+        flex_selfcollide,
+        flex_dim,
+        flex_vertadr,
+        flex_elemadr,
+        flex_elemdataadr,
+        flex_vertbodyid,
+        flex_elem,
+        flex_elemflexid,
+        flex_vertflexid,
+        rad,
+        x,
+        dfrom,
+        dto,
+        dl,
+        fsweep,
+        ghat,
+        worldid,
+        v,
+        e,
+        wp.static(bool(warn_overflow & OverflowType.BROADPHASE)),
+        overflow_out,
+        ncand_out,
+        cand_type_out,
+        cand_idx_out,
+        cand_geom_out,
+        cand_ld0_out,
+      )
+
+  return kernel
+
+
+@wp.kernel(module="unique", enable_backward=False)
+def _bp_scan_kernel(
+  # In:
+  nbucket: int,
+  nentry: int,
+  bp_count_in: wp.array[int],
+  # Out:
+  bp_end_out: wp.array[int],
+):
+  """Inclusive bucket ends of a world's grid, offset to the world's segment of nentry entries."""
+  worldid, tid = wp.tid()
+  running = nentry * worldid
+  for c0 in range(0, nbucket, wp.block_dim()):
+    b = c0 + tid
+    v = int(0)
+    if b < nbucket:
+      v = bp_count_in[worldid * nbucket + b]
+    scan = wp.tile_scan_inclusive(wp.tile(v))
+    if b < nbucket:
+      bp_end_out[worldid * nbucket + b] = running + scan[tid]
+    running += scan[wp.block_dim() - 1]
+
+
+def _bp_build(m: Model, ws: "IpcWorkspace", fam: int, owned: wp.array, lo: wp.array, hi: wp.array, count, end, item, key):
+  """Bins family fam's boxes into its hash grid: count, scan, then fill (leaving count zero)."""
+  nworld = ws.world_done.shape[0]
+  inputs = [fam, owned, m.flex_dim, ws.world_done, ws.bp_bound, lo, hi, end]
+  wp.launch(_bp_insert_kernel(False), dim=(nworld, lo.shape[1]), inputs=inputs, outputs=[count, item, key])
+  wp.launch_tiled(
+    _bp_scan_kernel,
+    dim=nworld,
+    inputs=[count.shape[0] // nworld, item.shape[0] // nworld, count],
+    outputs=[end],
+    block_dim=m.block_dim.ipc_bp_scan,
+  )
+  wp.launch(_bp_insert_kernel(True), dim=(nworld, lo.shape[1]), inputs=inputs, outputs=[count, item, key])
+
+
 def ipc_discover_candidates(
   m: Model,
   d: Data,
-  ws: Any,
+  ws: "IpcWorkspace",
   x: wp.array2d[wp.vec3],
   dfrom: wp.array2d[wp.vec3],
   dto: wp.array2d[wp.vec3],
@@ -1749,9 +2327,6 @@ def ipc_discover_candidates(
     ipc_cand_vert_geom_kernel(warn_overflow),
     dim=(nworld, m.nflexvert, m.ngeom),
     inputs=[
-      m.nexclude,
-      m.opt.disableflags,
-      m.body_parentid,
       m.body_weldid,
       m.geom_type,
       m.geom_contype,
@@ -1771,14 +2346,12 @@ def ipc_discover_candidates(
       m.mesh_polyvertadr,
       m.mesh_polyvertnum,
       m.mesh_polyvert,
-      m.exclude_signature,
       m.flex_vertflexid,
       d.geom_xpos,
       d.geom_xmat,
       ws.fidx,
       ws.pin_has_chain,
       ws.rad,
-      ws.pbody,
       ws.geom_aabb_min,
       ws.geom_aabb_max,
       ws.world_done,
@@ -1791,16 +2364,11 @@ def ipc_discover_candidates(
   )
   wp.launch(
     ipc_cand_corner_tri_kernel(warn_overflow),
-    dim=(nworld, ws.max_ngv, m.nflexelem),
+    dim=(nworld, m.nflexelem),
     inputs=[
-      m.nexclude,
-      m.opt.disableflags,
-      m.body_parentid,
-      m.body_weldid,
       m.geom_type,
       m.geom_contype,
       m.geom_conaffinity,
-      m.geom_bodyid,
       m.geom_size,
       m.flex_contype,
       m.flex_conaffinity,
@@ -1809,10 +2377,8 @@ def ipc_discover_candidates(
       m.flex_elemadr,
       m.flex_elemdataadr,
       m.flex_elem,
-      m.exclude_signature,
       m.flex_elemflexid,
       ws.rad,
-      ws.pbody,
       ws.ngv,
       ws.geom_corners,
       ws.corner_geom,
@@ -1827,16 +2393,11 @@ def ipc_discover_candidates(
   )
   wp.launch(
     ipc_cand_geom_edge_edge_kernel(warn_overflow),
-    dim=(nworld, ws.max_nge, m.nflexedge),
+    dim=(nworld, m.nflexedge),
     inputs=[
-      m.nexclude,
-      m.opt.disableflags,
-      m.body_parentid,
-      m.body_weldid,
       m.geom_type,
       m.geom_contype,
       m.geom_conaffinity,
-      m.geom_bodyid,
       m.geom_size,
       m.flex_contype,
       m.flex_conaffinity,
@@ -1844,10 +2405,8 @@ def ipc_discover_candidates(
       m.flex_vertadr,
       m.flex_elemnum,
       m.flex_edge,
-      m.exclude_signature,
       m.flex_edgeflexid,
       ws.rad,
-      ws.pbody,
       ws.nge,
       ws.geom_edges,
       ws.edge_geom,
@@ -1860,10 +2419,84 @@ def ipc_discover_candidates(
     ],
     outputs=common_outputs,
   )
-  if m.has_flex_selfcollide or m.nflex > 1:
+  if (m.has_flex_selfcollide or m.nflex > 1) and not ipc_flex_grid(m, nworld):
+    brute_inputs = [ws.rad, ws.world_done, x, dfrom, dto, ws.dl, ws.fsweep, ghat]
     wp.launch(
       ipc_cand_vert_tri_kernel(warn_overflow),
       dim=(nworld, m.nflexvert, m.nflexelem),
+      inputs=[
+        m.flex_contype,
+        m.flex_conaffinity,
+        m.flex_selfcollide,
+        m.flex_dim,
+        m.flex_vertadr,
+        m.flex_elemadr,
+        m.flex_elemdataadr,
+        m.flex_vertbodyid,
+        m.flex_elem,
+        m.flex_elemflexid,
+        m.flex_vertflexid,
+      ]
+      + brute_inputs,
+      outputs=common_outputs,
+    )
+    wp.launch(
+      ipc_cand_flex_edge_edge_kernel(warn_overflow),
+      dim=(nworld, m.nflexedge, m.nflexedge),
+      inputs=[
+        m.flex_contype,
+        m.flex_conaffinity,
+        m.flex_selfcollide,
+        m.flex_dim,
+        m.flex_vertadr,
+        m.flex_vertbodyid,
+        m.flex_edge,
+        m.flex_edgeflexid,
+      ]
+      + brute_inputs,
+      outputs=common_outputs,
+    )
+  elif m.has_flex_selfcollide or m.nflex > 1:
+    wp.launch(_bp_init_kernel, dim=(nworld, 2), inputs=[ws.world_done], outputs=[ws.bp_bound])
+    wp.launch(
+      _bp_edge_box_kernel,
+      dim=(nworld, m.nflexedge),
+      inputs=[m.flex_dim, m.flex_vertadr, m.flex_edge, m.flex_edgeflexid, ws.rad, ws.world_done, x, ws.dl, ws.fsweep, ghat],
+      outputs=[ws.bp_bound, ws.bp_edge_lo, ws.bp_edge_hi],
+    )
+    wp.launch(
+      _bp_tri_box_kernel,
+      dim=(nworld, m.nflexelem),
+      inputs=[
+        m.flex_dim,
+        m.flex_vertadr,
+        m.flex_elemadr,
+        m.flex_elemdataadr,
+        m.flex_elem,
+        m.flex_elemflexid,
+        ws.rad,
+        ws.world_done,
+        x,
+        ws.fsweep,
+        ghat,
+      ],
+      outputs=[ws.bp_bound, ws.bp_tri_lo, ws.bp_tri_hi],
+    )
+    wp.launch(
+      _bp_vert_box_kernel,
+      dim=(nworld, m.nflexvert),
+      inputs=[m.flex_dim, m.flex_vertflexid, ws.rad, ws.world_done, x, ws.dl, ghat],
+      outputs=[ws.bp_bound, ws.bp_vert_lo, ws.bp_vert_hi],
+    )
+    edge = [ws.bp_edge_count, ws.bp_edge_end, ws.bp_edge_item, ws.bp_edge_key]
+    tri = [ws.bp_tri_count, ws.bp_tri_end, ws.bp_tri_item, ws.bp_tri_key]
+    vert = [ws.bp_vert_count, ws.bp_vert_end, ws.bp_vert_item, ws.bp_vert_key]
+    _bp_build(m, ws, BP_EDGE, m.flex_edgeflexid, ws.bp_edge_lo, ws.bp_edge_hi, *edge)
+    _bp_build(m, ws, BP_TRI, m.flex_elemflexid, ws.bp_tri_lo, ws.bp_tri_hi, *tri)
+    _bp_build(m, ws, BP_TRI, m.flex_vertflexid, ws.bp_vert_lo, ws.bp_vert_hi, *vert)
+    wp.launch(
+      ipc_bp_vert_tri_kernel(warn_overflow),
+      dim=(nworld, ws.bp_vert_item.shape[0] // nworld),
       inputs=[
         m.flex_contype,
         m.flex_conaffinity,
@@ -1884,12 +2517,23 @@ def ipc_discover_candidates(
         ws.dl,
         ws.fsweep,
         ghat,
+        ws.bp_bound,
+        ws.bp_tri_lo,
+        ws.bp_tri_hi,
+        ws.bp_tri_end,
+        ws.bp_tri_item,
+        ws.bp_tri_key,
+        ws.bp_vert_lo,
+        ws.bp_vert_hi,
+        ws.bp_vert_end,
+        ws.bp_vert_item,
+        ws.bp_vert_key,
       ],
       outputs=common_outputs,
     )
     wp.launch(
-      ipc_cand_flex_edge_edge_kernel(warn_overflow),
-      dim=(nworld, m.nflexedge * (m.nflexedge - 1) // 2),
+      ipc_bp_edge_edge_kernel(warn_overflow),
+      dim=(nworld, ws.bp_edge_item.shape[0] // nworld),
       inputs=[
         m.flex_contype,
         m.flex_conaffinity,
@@ -1907,6 +2551,12 @@ def ipc_discover_candidates(
         ws.dl,
         ws.fsweep,
         ghat,
+        ws.bp_bound,
+        ws.bp_edge_lo,
+        ws.bp_edge_hi,
+        ws.bp_edge_end,
+        ws.bp_edge_item,
+        ws.bp_edge_key,
       ],
       outputs=common_outputs,
     )
@@ -2017,7 +2667,7 @@ def ipc_eval_toi_kernel(
     cand_toi_out[worldid, c] = -1.0
     return
 
-  gt, gsz, feat_rad, gp, gR, corner, eg0, eg1, va, pa, pn = unpack_pair_geom(
+  gt, gsz, feat_rad, gp, gR, corner, eg0, eg1, va, pa, pn = _unpack_pair_geom(
     geom_type,
     geom_dataid,
     geom_size,
@@ -2079,7 +2729,7 @@ def ipc_eval_toi_kernel(
     wp.atomic_min(alpha_min_out, worldid, t)
 
 
-def ipc_advance(m: Model, d: Data, ws: Any):
+def ipc_advance(m: Model, d: Data, ws: "IpcWorkspace"):
   """Evaluates conservative advancement time-of-impact and reduces alpha_min (mjc_advance)."""
   ws.alpha_min.fill_(1.0)
   wp.launch(

@@ -4252,20 +4252,17 @@ class FlexContactParityTest(parameterized.TestCase):
       <mujoco>
         <option integrator="discrete" solver="CG" ccd_tolerance="1e-8"/>
         <asset>
-          <mesh name="box_mesh" vertex="-0.02 -0.02 -0.02  0.02 -0.02 -0.02  0.02 0.02 -0.02  -0.02 0.02 -0.02
-                                        -0.02 -0.02 0.02   0.02 -0.02 0.02   0.02 0.02 0.02   -0.02 0.02 0.02"/>
+          <mesh name="box_mesh" vertex="-0.02 -0.02 -0.02  0.02 -0.02 -0.02  0.02 0.02 -0.02  -0.02 0.02 -0.02  -0.02 -0.02 0.02  0.02 -0.02 0.02  0.02 0.02 0.02  -0.02 0.02 0.02"/>
         </asset>
         <worldbody>
           <geom name="sph" size="0.02" pos="-0.033 -0.033 0.054"/>
           <geom name="ell" type="ellipsoid" size="0.025 0.02 0.015" pos="0.033 0.033 0.049"/>
           <geom name="msh" type="mesh" mesh="box_mesh" pos="0.05 -0.05 0.059"/>
-          <flexcomp name="cloth0" type="grid" count="3 3 1" spacing="0.05 0.05 0.05" pos="2.0 0 0.5"
-                    radius="0.005" dim="2" mass="0.2">
+          <flexcomp name="cloth0" type="grid" count="3 3 1" spacing="0.05 0.05 0.05" pos="2.0 0 0.5" radius="0.005" dim="2" mass="0.2">
             <contact passive="true" selfcollide="none"/>
             <elasticity young="1e3" damping="0.01"/>
           </flexcomp>
-          <flexcomp name="cloth1" type="grid" count="3 3 1" spacing="0.05 0.05 0.05" pos="0 0 0.03"
-                    radius="0.005" dim="2" mass="0.2">
+          <flexcomp name="cloth1" type="grid" count="3 3 1" spacing="0.05 0.05 0.05" pos="0 0 0.03" radius="0.005" dim="2" mass="0.2">
             <contact passive="true" selfcollide="none"/>
             <elasticity young="1e3" damping="0.01"/>
           </flexcomp>
@@ -4314,6 +4311,71 @@ class FlexContactParityTest(parameterized.TestCase):
       self.assertFalse(np.allclose(d.qfrc_passive.numpy()[0], d.qfrc_passive.numpy()[1]))
 
   @parameterized.parameters(1, 2)
+  def test_contact_flex_clears_stale_efc_address(self, nworld):
+    """Flex contacts clear efc_address so a slot reused with a smaller condim keeps its rows."""
+    mjm, mjd, m, d = test_data.fixture(
+      xml="""
+      <mujoco>
+        <option jacobian="sparse"/>
+        <worldbody>
+          <geom size="0.05" pos="0 0 -0.04"/>
+          <geom size="0.01" pos="5 5 5" condim="6" contype="0" conaffinity="0"/>
+          <flexcomp name="cloth" type="grid" count="3 3 1" spacing="0.05 0.05 0.05" dim="2" radius="0.002" mass="0.1">
+            <contact selfcollide="none"/>
+            <edge equality="true"/>
+          </flexcomp>
+        </worldbody>
+      </mujoco>
+      """,
+      nworld=nworld,
+    )
+    if nworld == 2:
+      qpos = d.qpos.numpy()
+      qpos[1, 2::3] -= 0.002
+      d.qpos.assign(qpos)
+
+    # stale rows from a previous contact with a larger condim: point every dim at row 0
+    self.assertEqual(d.contact.efc_address.shape[1], 10)
+    d.contact.efc_address.fill_(0)
+    d.nacon.fill_(-1)
+    d.nefc.fill_(-1)
+    mjw.forward(m, d)
+
+    nacon = int(d.nacon.numpy()[0])
+    self.assertGreater(nacon, 0)
+    dim = d.contact.dim.numpy()[:nacon]
+    efc_address = d.contact.efc_address.numpy()[:nacon]
+    flex = d.contact.flex.numpy()[:nacon]
+    for i in range(nacon):
+      self.assertGreaterEqual(flex[i].max(), 0)
+      ndim = 1 if dim[i] == 1 else 2 * (dim[i] - 1)
+      np.testing.assert_array_equal(efc_address[i, ndim:], -1)
+
+    # every contact row's Jacobian touches only its own element's vertices
+    efc_id = d.efc.id.numpy()
+    efc_type = d.efc.type.numpy()
+    rowadr = d.efc.J_rowadr.numpy()
+    rownnz = d.efc.J_rownnz.numpy()
+    colind = d.efc.J_colind.numpy()[:, 0]
+    jval = d.efc.J.numpy()[:, 0]
+    elem = d.contact.elem.numpy()[:nacon]
+    worldid = d.contact.worldid.numpy()[:nacon]
+    ea = mjm.flex_elemdataadr[0]
+    for w in range(nworld):
+      for r in range(d.nefc.numpy()[w]):
+        if efc_type[w, r] != mujoco.mjtConstraint.mjCNSTR_CONTACT_PYRAMIDAL:
+          continue
+        i = efc_id[w, r]
+        self.assertEqual(worldid[i], w)
+        dofs = set()
+        for v in mjm.flex_elem[ea + 3 * elem[i][1] : ea + 3 * elem[i][1] + 3]:
+          b = mjm.flex_vertbodyid[v]
+          dofs |= set(range(mjm.body_dofadr[b], mjm.body_dofadr[b] + mjm.body_dofnum[b]))
+        sl = slice(rowadr[w, r], rowadr[w, r] + rownnz[w, r])
+        nz = set(colind[w, sl][jval[w, sl] != 0.0].tolist())
+        self.assertTrue(nz <= dofs, f"row {r} of contact {i} touches dofs outside its element")
+
+  @parameterized.parameters(1, 2)
   def test_contact_cylinder_cloth_parity(self, nworld):
     """Test contact parity for 2D cloth triangle colliding with a flat cylinder cap."""
     mjm, mjd, m, d = test_data.fixture(
@@ -4321,9 +4383,7 @@ class FlexContactParityTest(parameterized.TestCase):
       <mujoco>
         <worldbody>
           <geom type="cylinder" size="0.1 0.008" pos="0 0 0.008"/>
-          <flexcomp name="cloth" type="direct" dim="2" radius="0.002" mass="0.1"
-                    point="0.04 0.0 0.0165  0.06 0.0 0.022  0.05 0.02 0.022"
-                    element="0 1 2">
+          <flexcomp name="cloth" type="direct" dim="2" radius="0.002" mass="0.1" point="0.04 0.0 0.0165  0.06 0.0 0.022  0.05 0.02 0.022" element="0 1 2">
             <contact selfcollide="none"/>
           </flexcomp>
         </worldbody>
@@ -4376,8 +4436,7 @@ class FlexContactParityTest(parameterized.TestCase):
         <option integrator="discrete" solver="CG"/>
         <worldbody>
           <geom size="0.1" pos="0 0 -0.095"/>
-          <flexcomp name="cloth" type="grid" count="3 3 1" spacing="0.05 0.05 0.05"
-                    radius="0.01" dim="2" mass="0.2">
+          <flexcomp name="cloth" type="grid" count="3 3 1" spacing="0.05 0.05 0.05" radius="0.01" dim="2" mass="0.2">
             <contact passive="true" selfcollide="none"/>
             <elasticity young="1e3" damping="0.01"/>
           </flexcomp>
