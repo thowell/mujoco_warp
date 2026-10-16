@@ -27,10 +27,11 @@ from mujoco_warp._src import math
 from mujoco_warp._src import sensor
 from mujoco_warp._src import smooth
 from mujoco_warp._src import solver
-from mujoco_warp._src.collision_continuous import FlexPairType
+from mujoco_warp._src.collision_continuous import BP_CELL_MAX
 from mujoco_warp._src.collision_continuous import eval_pair_gap
 from mujoco_warp._src.collision_continuous import ipc_advance
 from mujoco_warp._src.collision_continuous import ipc_discover_candidates
+from mujoco_warp._src.collision_continuous import ipc_flex_grid
 from mujoco_warp._src.collision_continuous import ipc_init_geom_features_kernel
 from mujoco_warp._src.collision_continuous import ipc_update_geom_features
 from mujoco_warp._src.collision_continuous import pair_vert_range
@@ -61,6 +62,10 @@ IPC_DELTACAP = 0.001
 IPC_GHAT = 3.0 * IPC_DELTACAP
 IPC_VEL_TOL = 0.05
 FLEXCONTACT_OMEGA2 = 5e7
+IPC_WS_ROUNDS = 8
+IPC_LS_ITERATIONS = 8
+IPC_OUTER_ITERATIONS = 1024
+IPC_STATIC_OUTER_ITERATIONS = 32
 
 
 @dataclasses.dataclass
@@ -73,7 +78,6 @@ class IpcWorkspace:
   ddw: wp.array2d  # (nworld, nv) float
   da: wp.array2d  # (nworld, nv) float
   M_da: wp.array2d  # (nworld, nv) float
-  qvel_old: wp.array2d  # (nworld, nv) float
   wn: wp.array2d  # (nworld, nv) float
 
   xold: wp.array2d  # (nworld, nfv) vec3
@@ -111,11 +115,12 @@ class IpcWorkspace:
   isflexdof: wp.array  # (nv,) bool
   isartictree: wp.array  # (ntree,) bool
   is_throttled: wp.array  # (nv,) bool
-  max_chain: int
   pin_has_chain: wp.array  # (nfv,) bool
   pin_num_chain: wp.array  # (nfv,) int
-  pin_chain_dof: wp.array2d  # (nfv, max_chain) int
-  pin_chain_axis: wp.array3d  # (nworld, nfv, max_chain) vec3
+  pin_chain_adr: wp.array  # (nfv,) int
+  pin_chain_dof: wp.array  # (max_pin_dofs,) int
+  npin_dofs: wp.array  # (1,) int
+  pin_dof_axis: wp.array2d  # (nworld, nv) vec3
 
   max_ngv: int
   max_nge: int
@@ -142,14 +147,15 @@ class IpcWorkspace:
   aset_lam: wp.array2d  # (nworld, max_aset) float
   aset_cnt: wp.array2d  # (nworld, max_aset) int
 
+  # active-set merge scratch, aliases pair_* and aset_ld0 (disjoint lifetimes)
   nret: wp.array  # (nworld,) int
-  ret_type: wp.array2d  # (nworld, max_aset) int
-  ret_idx: wp.array2d  # (nworld, max_aset) vec4i
-  ret_geom: wp.array2d  # (nworld, max_aset) int
-  ret_standoff: wp.array2d  # (nworld, max_aset) float
-  ret_mu: wp.array2d  # (nworld, max_aset) float
-  ret_lam: wp.array2d  # (nworld, max_aset) float
-  ret_cnt: wp.array2d  # (nworld, max_aset) int
+  ret_type: wp.array2d  # (nworld, max_aset) int, aliases pair_lniv
+  ret_idx: wp.array2d  # (nworld, max_aset) vec4i, aliases pair_liv
+  ret_geom: wp.array2d  # (nworld, max_aset) int, aliases pair_rownnz
+  ret_lam: wp.array2d  # (nworld, max_aset) float, aliases aset_ld0
+  ret_cnt: wp.array2d  # (nworld, max_aset) int, aliases pair_in_ws
+  sort_key: wp.array  # (2 * nworld * max_aset,) int, radix sort keys
+  sort_val: wp.array  # (2 * nworld * max_aset,) int, radix sort permutation
 
   ncand: wp.array  # (nworld,) int
   cand_type: wp.array2d  # (nworld, max_cand) int
@@ -166,7 +172,7 @@ class IpcWorkspace:
   pair_in_ws: wp.array2d  # (nworld, max_aset) int
 
   alpha_min: wp.array  # (nworld,) float
-  vmin: wp.array2d  # (nworld, nfv) float
+  vmin: wp.array2d  # (nworld, nfv) float, aliases dl
   ws_nadd: wp.array  # (nworld,) int
   ws_done: wp.array  # (nworld,) int
   qfrc_rows: wp.array2d  # (nworld, nv) float
@@ -180,489 +186,31 @@ class IpcWorkspace:
   init_ncand: wp.array  # (nworld,) int
   dl: wp.array2d  # (nworld, nfv) float
   fsweep: wp.array2d  # (nworld, nflex) float
-  solver_ctx: Optional[SolverContext] = None
+  bp_bound: wp.array3d  # (nworld, 2, 7) float, flex broadphase grid min, max, largest box per family
+  bp_edge_lo: wp.array2d  # (nworld, nflexedge) vec3
+  bp_edge_hi: wp.array2d  # (nworld, nflexedge) vec3
+  bp_edge_count: wp.array  # (nworld * nbucket_edge,) int, zero between builds
+  bp_edge_end: wp.array  # (nworld * nbucket_edge,) int, inclusive bucket ends
+  bp_edge_item: wp.array  # (nworld * nflexedge * BP_CELL_MAX,) int
+  bp_edge_key: wp.array  # (nworld * nflexedge * BP_CELL_MAX,) vec3i cell
+  bp_tri_lo: wp.array2d  # (nworld, nflexelem) vec3
+  bp_tri_hi: wp.array2d  # (nworld, nflexelem) vec3
+  bp_tri_count: wp.array  # (nworld * nbucket_tri,) int, zero between builds
+  bp_tri_end: wp.array  # (nworld * nbucket_tri,) int, inclusive bucket ends
+  bp_tri_item: wp.array  # (nworld * nflexelem * BP_CELL_MAX,) int
+  bp_tri_key: wp.array  # (nworld * nflexelem * BP_CELL_MAX,) vec3i cell
+  bp_vert_lo: wp.array2d  # (nworld, nflexvert) vec3
+  bp_vert_hi: wp.array2d  # (nworld, nflexvert) vec3
+  bp_vert_count: wp.array  # (nworld * nbucket_tri,) int, zero between builds
+  bp_vert_end: wp.array  # (nworld * nbucket_tri,) int, inclusive bucket ends
+  bp_vert_item: wp.array  # (nworld * nflexvert * BP_CELL_MAX,) int
+  bp_vert_key: wp.array  # (nworld * nflexvert * BP_CELL_MAX,) vec3i cell
+  solver_ctx: SolverContext
 
 
 def ipc_skip_constraint(m: Model) -> bool:
   """Returns True if the constraint stage should be skipped during forward dynamics."""
   return bool((m.opt.enableflags & EnableBit.IPC) and m.opt.integrator == IntegratorType.DISCRETE and m.has_2d_flex)
-
-
-@wp.kernel
-def ipc_count_body_verts_kernel(
-  # Model:
-  flex_vertbodyid: wp.array[int],
-  # Out:
-  nvertbody_out: wp.array[int],
-):
-  """Counts how many flex vertices belong to each body."""
-  vg = wp.tid()
-  bid = flex_vertbodyid[vg]
-  if bid >= 0:
-    wp.atomic_add(nvertbody_out, bid, 1)
-
-
-@wp.kernel
-def ipc_init_verts_and_bodies_kernel(
-  # Model:
-  body_jntnum: wp.array[int],
-  body_jntadr: wp.array[int],
-  body_dofadr: wp.array[int],
-  body_mass: wp.array2d[float],
-  body_subtreemass: wp.array2d[float],
-  jnt_type: wp.array[int],
-  dof_armature: wp.array2d[float],
-  flex_dim: wp.array[int],
-  flex_vertbodyid: wp.array[int],
-  flex_vert: wp.array[wp.vec3],
-  flex_radius: wp.array[float],
-  flex_centered: wp.array[bool],
-  flex_vertflexid: wp.array[int],
-  # In:
-  nvertbody: wp.array[int],
-  # Out:
-  dofadr_out: wp.array[int],
-  fidx_out: wp.array[int],
-  mass_out: wp.array2d[float],
-  rad_out: wp.array[float],
-  pbody_out: wp.array[int],
-  isflexvert_body_out: wp.array[int],
-  own_out: wp.array[bool],
-  isflexdof_out: wp.array[bool],
-):
-  """Initializes per-vertex IPC attributes and identifies free 3-slide flex vertices."""
-  vg = wp.tid()
-  f = flex_vertflexid[vg]
-  if flex_dim[f] != 2:
-    dofadr_out[vg] = -1
-    fidx_out[vg] = -1
-    for w in range(mass_out.shape[0]):
-      mass_out[w, vg] = 0.0
-    rad_out[vg] = 0.0
-    pbody_out[vg] = -1
-    return
-
-  bid = flex_vertbodyid[vg]
-  rad_out[vg] = flex_radius[f]
-  pbody_out[vg] = bid
-  ja = body_jntadr[bid]
-  lv = flex_vert[vg]
-  at_origin = flex_centered[f] or (lv[0] == 0.0 and lv[1] == 0.0 and lv[2] == 0.0)
-  slides = (
-    body_jntnum[bid] == 3
-    and jnt_type[ja] == int(JointType.SLIDE)
-    and jnt_type[ja + 1] == int(JointType.SLIDE)
-    and jnt_type[ja + 2] == int(JointType.SLIDE)
-    and nvertbody[bid] == 1
-    and at_origin
-  )
-  if slides:
-    da = body_dofadr[bid]
-    dofadr_out[vg] = da
-    fidx_out[vg] = vg
-    for w in range(mass_out.shape[0]):
-      bm = body_mass[w % body_mass.shape[0], bid]
-      m_base = bm if bm > 0.0 else body_subtreemass[w % body_subtreemass.shape[0], bid]
-      mass_out[w, vg] = m_base + dof_armature[w % dof_armature.shape[0], da]
-    isflexvert_body_out[bid] = 1
-    own_out[da] = True
-    own_out[da + 1] = True
-    own_out[da + 2] = True
-    isflexdof_out[da] = True
-    isflexdof_out[da + 1] = True
-    isflexdof_out[da + 2] = True
-  else:
-    dofadr_out[vg] = -1
-    fidx_out[vg] = -1
-    for w in range(mass_out.shape[0]):
-      mass_out[w, vg] = 0.0
-
-
-@wp.kernel
-def ipc_init_trees_kernel(
-  # Model:
-  body_dofnum: wp.array[int],
-  body_dofadr: wp.array[int],
-  dof_treeid: wp.array[int],
-  tree_dofadr: wp.array[int],
-  tree_dofnum: wp.array[int],
-  # In:
-  isflexvert_body: wp.array[int],
-  # Out:
-  isartictree_out: wp.array[bool],
-  own_out: wp.array[bool],
-):
-  """Identifies non-flex articulated trees and marks their DOFs as owned by IPC."""
-  b = wp.tid()
-  if b == 0 or body_dofnum[b] == 0 or isflexvert_body[b] != 0:
-    return
-  t = dof_treeid[body_dofadr[b]]
-  isartictree_out[t] = True
-  t_da = tree_dofadr[t]
-  t_dn = tree_dofnum[t]
-  for i in range(t_dn):
-    own_out[t_da + i] = True
-
-
-@wp.kernel
-def ipc_init_pins_kernel(
-  # Model:
-  body_parentid: wp.array[int],
-  body_jntnum: wp.array[int],
-  body_jntadr: wp.array[int],
-  body_treeid: wp.array[int],
-  jnt_type: wp.array[int],
-  jnt_dofadr: wp.array[int],
-  flex_dim: wp.array[int],
-  flex_vertflexid: wp.array[int],
-  # In:
-  max_chain: int,
-  fidx: wp.array[int],
-  pbody: wp.array[int],
-  isartictree: wp.array[bool],
-  # Out:
-  pin_has_chain_out: wp.array[bool],
-  pin_num_chain_out: wp.array[int],
-  pin_chain_dof_out: wp.array2d[int],
-  own_out: wp.array[bool],
-  apinned_out: wp.array[int],
-  npin_out: wp.array[int],
-):
-  """Extracts slide joint chains for pinned 2D flex vertices on articulated bodies."""
-  vg = wp.tid()
-  f = flex_vertflexid[vg]
-  if flex_dim[f] != 2 or fidx[vg] >= 0:
-    return
-  b = pbody[vg]
-  if b <= 0:
-    return
-  t = body_treeid[b]
-  if t < 0 or not isartictree[t]:
-    return
-
-  curr = b
-  cnt = int(0)
-  while curr > 0:
-    jn = body_jntnum[curr]
-    ja = body_jntadr[curr]
-    for j in range(jn):
-      jid = ja + j
-      if jnt_type[jid] == int(JointType.SLIDE) and cnt < max_chain:
-        da = jnt_dofadr[jid]
-        pin_chain_dof_out[vg, cnt] = da
-        own_out[da] = True
-        cnt += 1
-    curr = body_parentid[curr]
-
-  if cnt > 0:
-    for k in range(cnt // 2):
-      tmp = pin_chain_dof_out[vg, k]
-      pin_chain_dof_out[vg, k] = pin_chain_dof_out[vg, cnt - 1 - k]
-      pin_chain_dof_out[vg, cnt - 1 - k] = tmp
-    pin_has_chain_out[vg] = True
-    pin_num_chain_out[vg] = cnt
-    apinned_out[t] = 1
-    wp.atomic_add(npin_out, b, 1)
-
-
-@wp.kernel
-def ipc_finalize_meta_kernel(
-  # Model:
-  nv: int,
-  nflexvert: int,
-  body_subtreemass: wp.array2d[float],
-  dof_treeid: wp.array[int],
-  # In:
-  isflexdof: wp.array[bool],
-  apinned: wp.array[int],
-  pin_has_chain: wp.array[bool],
-  pbody: wp.array[int],
-  npin: wp.array[int],
-  # Out:
-  is_throttled_out: wp.array[bool],
-  mass_out: wp.array2d[float],
-):
-  """Sets per-DOF CCD throttling flags and distributes carrier subtree mass to pinned vertices."""
-  tid = wp.tid()
-  if tid < nv:
-    treeid = dof_treeid[tid]
-    is_throttled_out[tid] = isflexdof[tid] or (treeid >= 0 and apinned[treeid] != 0)
-  if tid < nflexvert:
-    if pin_has_chain[tid]:
-      b = pbody[tid]
-      np_b = npin[b]
-      if np_b > 0:
-        inv_np = 1.0 / float(np_b)
-        for w in range(mass_out.shape[0]):
-          mass_out[w, tid] = body_subtreemass[w % body_subtreemass.shape[0], b] * inv_np
-
-
-def ipc_init_topology(m: Model, ws: IpcWorkspace):
-  """Populates IPC vertex, DOF, pinned-chain, and static geom topology arrays on GPU."""
-  ws.nvertbody.zero_()
-  ws.isflexvert_body.zero_()
-  ws.npin.zero_()
-  ws.apinned.zero_()
-  ws.own.zero_()
-  ws.isflexdof.zero_()
-  ws.isartictree.zero_()
-  ws.is_throttled.zero_()
-  ws.pin_has_chain.zero_()
-  ws.pin_num_chain.zero_()
-
-  wp.launch(
-    ipc_count_body_verts_kernel,
-    dim=m.nflexvert,
-    inputs=[m.flex_vertbodyid],
-    outputs=[ws.nvertbody],
-  )
-  wp.launch(
-    ipc_init_verts_and_bodies_kernel,
-    dim=m.nflexvert,
-    inputs=[
-      m.body_jntnum,
-      m.body_jntadr,
-      m.body_dofadr,
-      m.body_mass,
-      m.body_subtreemass,
-      m.jnt_type,
-      m.dof_armature,
-      m.flex_dim,
-      m.flex_vertbodyid,
-      m.flex_vert,
-      m.flex_radius,
-      m.flex_centered,
-      m.flex_vertflexid,
-      ws.nvertbody,
-    ],
-    outputs=[
-      ws.dofadr,
-      ws.fidx,
-      ws.mass,
-      ws.rad,
-      ws.pbody,
-      ws.isflexvert_body,
-      ws.own,
-      ws.isflexdof,
-    ],
-  )
-  wp.launch(
-    ipc_init_trees_kernel,
-    dim=m.nbody,
-    inputs=[
-      m.body_dofnum,
-      m.body_dofadr,
-      m.dof_treeid,
-      m.tree_dofadr,
-      m.tree_dofnum,
-      ws.isflexvert_body,
-    ],
-    outputs=[ws.isartictree, ws.own],
-  )
-  wp.launch(
-    ipc_init_pins_kernel,
-    dim=m.nflexvert,
-    inputs=[
-      m.body_parentid,
-      m.body_jntnum,
-      m.body_jntadr,
-      m.body_treeid,
-      m.jnt_type,
-      m.jnt_dofadr,
-      m.flex_dim,
-      m.flex_vertflexid,
-      ws.max_chain,
-      ws.fidx,
-      ws.pbody,
-      ws.isartictree,
-    ],
-    outputs=[
-      ws.pin_has_chain,
-      ws.pin_num_chain,
-      ws.pin_chain_dof,
-      ws.own,
-      ws.apinned,
-      ws.npin,
-    ],
-  )
-  wp.launch(
-    ipc_finalize_meta_kernel,
-    dim=max(m.nv, m.nflexvert, 1),
-    inputs=[
-      m.nv,
-      m.nflexvert,
-      m.body_subtreemass,
-      m.dof_treeid,
-      ws.isflexdof,
-      ws.apinned,
-      ws.pin_has_chain,
-      ws.pbody,
-      ws.npin,
-    ],
-    outputs=[ws.is_throttled, ws.mass],
-  )
-  wp.launch(
-    ipc_init_geom_features_kernel,
-    dim=ws.ngv.shape[0],
-    inputs=[
-      m.ngeom,
-      m.nmesh,
-      m.body_weldid,
-      m.geom_type,
-      m.geom_contype,
-      m.geom_conaffinity,
-      m.geom_bodyid,
-      m.geom_dataid,
-      m.mesh_vertadr,
-      m.mesh_vertnum,
-      m.mesh_graphadr,
-      m.mesh_vert,
-      m.mesh_polynum,
-      m.mesh_polyadr,
-      m.mesh_polyvertadr,
-      m.mesh_polyvertnum,
-      m.mesh_polyvert,
-    ],
-    outputs=[
-      ws.ngv,
-      ws.nge,
-      ws.geom_corner_loc,
-      ws.corner_geom,
-      ws.geom_edge_loc,
-      ws.edge_geom,
-    ],
-  )
-
-
-def get_ipc_workspace(
-  m: Model,
-  d: Data,
-  device: Optional[wp.Device] = None,
-) -> IpcWorkspace:
-  """Allocates GPU workspace arrays for IPC and initializes static topology."""
-  device = device or d.qacc.device
-  nworld = d.nworld
-  nv = max(m.nv, 1)
-  nbody = max(m.nbody, 1)
-  ntree = max(m.ntree, 1)
-  ngeom = max(m.ngeom, 1)
-  nfv = max(m.nflexvert, 1)
-  nflex = max(m.nflex, 1)
-  nconmax = max(d.naconmax // nworld, 1)
-  nccdmax = max(d.naccdmax // nworld, 1)
-  max_chain = max(min(m.njnt, m.nv), 1)
-  max_ngv = max(m.ngeom * max(8, m.nmeshvert), 1)
-  max_nge = max(m.ngeom * max(12, m.nmeshpolyvert), 1)
-  max_aset = nconmax if m.nflexvert > 0 else 1
-  max_cand = nccdmax if m.nflexvert > 0 else 1
-
-  ws = IpcWorkspace(
-    w=wp.empty((nworld, nv), dtype=float, device=device),
-    wfree=wp.empty((nworld, nv), dtype=float, device=device),
-    wtil=wp.empty((nworld, nv), dtype=float, device=device),
-    ddw=wp.empty((nworld, nv), dtype=float, device=device),
-    da=wp.empty((nworld, nv), dtype=float, device=device),
-    M_da=wp.empty((nworld, nv), dtype=float, device=device),
-    qvel_old=wp.empty((nworld, nv), dtype=float, device=device),
-    wn=wp.empty((nworld, nv), dtype=float, device=device),
-    xold=wp.empty((nworld, nfv), dtype=wp.vec3, device=device),
-    x=wp.empty((nworld, nfv), dtype=wp.vec3, device=device),
-    xtil=wp.empty((nworld, nfv), dtype=wp.vec3, device=device),
-    xfree=wp.empty((nworld, nfv), dtype=wp.vec3, device=device),
-    xn=wp.empty((nworld, nfv), dtype=wp.vec3, device=device),
-    pvel=wp.empty((nworld, nfv), dtype=wp.vec3, device=device),
-    beta=wp.zeros(nworld, dtype=float, device=device),
-    world_done=wp.zeros(nworld, dtype=int, device=device),
-    stall=wp.zeros(nworld, dtype=int, device=device),
-    saved_nefc=wp.zeros(nworld, dtype=int, device=device),
-    active_count=wp.zeros(nworld, dtype=int, device=device),
-    active_nnz=wp.zeros(nworld, dtype=int, device=device),
-    total_solver_niter=wp.zeros(nworld, dtype=int, device=device),
-    newton_converged=wp.zeros(nworld, dtype=int, device=device),
-    last_ls_alpha=wp.zeros(nworld, dtype=float, device=device),
-    ls_done=wp.zeros(nworld, dtype=int, device=device),
-    ls_accept=wp.zeros(nworld, dtype=int, device=device),
-    merit_energy=wp.zeros(nworld, dtype=float, device=device),
-    merit_energy_trial=wp.zeros(nworld, dtype=float, device=device),
-    nvertbody=wp.zeros(nbody, dtype=int, device=device),
-    isflexvert_body=wp.zeros(nbody, dtype=int, device=device),
-    npin=wp.zeros(nbody, dtype=int, device=device),
-    apinned=wp.zeros(ntree, dtype=int, device=device),
-    dofadr=wp.empty(nfv, dtype=int, device=device),
-    fidx=wp.empty(nfv, dtype=int, device=device),
-    mass=wp.empty((nworld, nfv), dtype=float, device=device),
-    rad=wp.empty(nfv, dtype=float, device=device),
-    pbody=wp.empty(nfv, dtype=int, device=device),
-    own=wp.zeros(nv, dtype=bool, device=device),
-    isflexdof=wp.zeros(nv, dtype=bool, device=device),
-    isartictree=wp.zeros(ntree, dtype=bool, device=device),
-    is_throttled=wp.zeros(nv, dtype=bool, device=device),
-    max_chain=max_chain,
-    pin_has_chain=wp.zeros(nfv, dtype=bool, device=device),
-    pin_num_chain=wp.zeros(nfv, dtype=int, device=device),
-    pin_chain_dof=wp.zeros((nfv, max_chain), dtype=int, device=device),
-    pin_chain_axis=wp.empty((nworld, nfv, max_chain), dtype=wp.vec3, device=device),
-    max_ngv=max_ngv,
-    max_nge=max_nge,
-    ngv=wp.zeros(nworld, dtype=int, device=device),
-    nge=wp.zeros(nworld, dtype=int, device=device),
-    geom_corner_loc=wp.empty((nworld, max_ngv), dtype=wp.vec3, device=device),
-    geom_corners=wp.empty((nworld, max_ngv), dtype=wp.vec3, device=device),
-    corner_geom=wp.empty((nworld, max_ngv), dtype=int, device=device),
-    geom_edge_loc=wp.empty((nworld, max_nge, 2), dtype=wp.vec3, device=device),
-    geom_edges=wp.empty((nworld, max_nge, 2), dtype=wp.vec3, device=device),
-    edge_geom=wp.empty((nworld, max_nge), dtype=int, device=device),
-    geom_aabb_min=wp.empty((nworld, ngeom), dtype=wp.vec3, device=device),
-    geom_aabb_max=wp.empty((nworld, ngeom), dtype=wp.vec3, device=device),
-    max_aset=max_aset,
-    max_cand=max_cand,
-    naset=wp.zeros(nworld, dtype=int, device=device),
-    aset_type=wp.empty((nworld, max_aset), dtype=int, device=device),
-    aset_idx=wp.empty((nworld, max_aset), dtype=wp.vec4i, device=device),
-    aset_geom=wp.empty((nworld, max_aset), dtype=int, device=device),
-    aset_standoff=wp.empty((nworld, max_aset), dtype=float, device=device),
-    aset_mu=wp.empty((nworld, max_aset), dtype=float, device=device),
-    aset_ld0=wp.empty((nworld, max_aset), dtype=float, device=device),
-    aset_lam=wp.empty((nworld, max_aset), dtype=float, device=device),
-    aset_cnt=wp.empty((nworld, max_aset), dtype=int, device=device),
-    nret=wp.zeros(nworld, dtype=int, device=device),
-    ret_type=wp.empty((nworld, max_aset), dtype=int, device=device),
-    ret_idx=wp.empty((nworld, max_aset), dtype=wp.vec4i, device=device),
-    ret_geom=wp.empty((nworld, max_aset), dtype=int, device=device),
-    ret_standoff=wp.empty((nworld, max_aset), dtype=float, device=device),
-    ret_mu=wp.empty((nworld, max_aset), dtype=float, device=device),
-    ret_lam=wp.empty((nworld, max_aset), dtype=float, device=device),
-    ret_cnt=wp.empty((nworld, max_aset), dtype=int, device=device),
-    ncand=wp.zeros(nworld, dtype=int, device=device),
-    cand_type=wp.empty((nworld, max_cand), dtype=int, device=device),
-    cand_idx=wp.empty((nworld, max_cand), dtype=wp.vec4i, device=device),
-    cand_geom=wp.empty((nworld, max_cand), dtype=int, device=device),
-    cand_ld0=wp.empty((nworld, max_cand), dtype=float, device=device),
-    cand_toi=wp.empty((nworld, max_cand), dtype=float, device=device),
-    pair_ln=wp.empty((nworld, max_aset), dtype=wp.vec3, device=device),
-    pair_lcw=wp.empty((nworld, max_aset), dtype=wp.vec4, device=device),
-    pair_liv=wp.empty((nworld, max_aset), dtype=wp.vec4i, device=device),
-    pair_lniv=wp.empty((nworld, max_aset), dtype=int, device=device),
-    pair_rownnz=wp.empty((nworld, max_aset), dtype=int, device=device),
-    pair_in_ws=wp.empty((nworld, max_aset), dtype=int, device=device),
-    alpha_min=wp.zeros(nworld, dtype=float, device=device),
-    vmin=wp.empty((nworld, nfv), dtype=float, device=device),
-    ws_nadd=wp.zeros(nworld, dtype=int, device=device),
-    ws_done=wp.zeros(nworld, dtype=int, device=device),
-    qfrc_rows=wp.zeros((nworld, nv), dtype=float, device=device),
-    outer_cond=wp.zeros(1, dtype=int, device=device),
-    outer_iter=wp.zeros(1, dtype=int, device=device),
-    ws_cond=wp.zeros(1, dtype=int, device=device),
-    ws_iter=wp.zeros(1, dtype=int, device=device),
-    ls_cond=wp.zeros(1, dtype=int, device=device),
-    ls_iter=wp.zeros(1, dtype=int, device=device),
-    ws_entry=wp.empty((nworld, nv), dtype=float, device=device),
-    init_ncand=wp.zeros(nworld, dtype=int, device=device),
-    dl=wp.empty((nworld, nfv), dtype=float, device=device),
-    fsweep=wp.empty((nworld, nflex), dtype=float, device=device),
-  )
-  ipc_init_topology(m, ws)
-  return ws
 
 
 @wp.func
@@ -744,7 +292,7 @@ def _con_lam_and_age(
 
 
 @wp.func
-def pair_linear_gap(
+def _pair_linear_gap(
   # In:
   dd0: float,
   delta: float,
@@ -776,489 +324,6 @@ def _idx_cmp(idx_a: wp.vec4i, idx_b: wp.vec4i) -> int:
   if idx_a[3] != idx_b[3]:
     return -1 if idx_a[3] < idx_b[3] else 1
   return 0
-
-
-@wp.kernel
-def ipc_rank_sort_aset_kernel(
-  # In:
-  nret: wp.array[int],
-  ret_type: wp.array2d[int],
-  ret_idx: wp.array2d[wp.vec4i],
-  ret_geom: wp.array2d[int],
-  ret_standoff: wp.array2d[float],
-  ret_mu: wp.array2d[float],
-  ret_lam: wp.array2d[float],
-  ret_cnt: wp.array2d[int],
-  world_done: wp.array[int],
-  # Out:
-  naset_out: wp.array[int],
-  aset_type_out: wp.array2d[int],
-  aset_idx_out: wp.array2d[wp.vec4i],
-  aset_geom_out: wp.array2d[int],
-  aset_standoff_out: wp.array2d[float],
-  aset_mu_out: wp.array2d[float],
-  aset_lam_out: wp.array2d[float],
-  aset_cnt_out: wp.array2d[int],
-):
-  """Sorts active-set pairs into canonical order by (type, geom, idx)."""
-  worldid, i = wp.tid()
-  if world_done[worldid] != 0:
-    return
-  n = wp.min(nret[worldid], ret_type.shape[1])
-  if i == 0:
-    naset_out[worldid] = n
-  if i >= n:
-    return
-
-  ti = ret_type[worldid, i]
-  gi = ret_geom[worldid, i]
-  idxi = ret_idx[worldid, i]
-  rank = int(0)
-  for j in range(n):
-    tj = ret_type[worldid, j]
-    if tj != ti:
-      if tj < ti:
-        rank += 1
-      continue
-    gj = ret_geom[worldid, j]
-    if gj != gi:
-      if gj < gi:
-        rank += 1
-      continue
-    c = _idx_cmp(ret_idx[worldid, j], idxi)
-    if c < 0 or (c == 0 and j < i):
-      rank += 1
-
-  aset_type_out[worldid, rank] = ti
-  aset_idx_out[worldid, rank] = idxi
-  aset_geom_out[worldid, rank] = gi
-  aset_standoff_out[worldid, rank] = ret_standoff[worldid, i]
-  aset_mu_out[worldid, rank] = ret_mu[worldid, i]
-  aset_lam_out[worldid, rank] = ret_lam[worldid, i]
-  aset_cnt_out[worldid, rank] = ret_cnt[worldid, i]
-
-
-@cache_kernel
-def ipc_seed_active_set_kernel(warn_overflow: int):
-  @wp.kernel(module="unique", enable_backward=False)
-  def kernel(
-    # Data in:
-    flexvert_lambda_in: wp.array2d[float],
-    flexvert_conage_in: wp.array2d[int],
-    # In:
-    rad: wp.array[float],
-    mass: wp.array2d[float],
-    ncand: wp.array[int],
-    cand_type: wp.array2d[int],
-    cand_idx: wp.array2d[wp.vec4i],
-    cand_geom: wp.array2d[int],
-    world_done: wp.array[int],
-    # Data out:
-    overflow_out: wp.array[int],
-    # Out:
-    init_ncand_out: wp.array[int],
-    nret_out: wp.array[int],
-    ret_type_out: wp.array2d[int],
-    ret_idx_out: wp.array2d[wp.vec4i],
-    ret_geom_out: wp.array2d[int],
-    ret_standoff_out: wp.array2d[float],
-    ret_mu_out: wp.array2d[float],
-    ret_lam_out: wp.array2d[float],
-    ret_cnt_out: wp.array2d[int],
-  ):
-    """Seeds initial active-set scratch from step-start candidates (engine_ipc.c:902-933)."""
-    worldid, c = wp.tid()
-    if world_done[worldid] != 0:
-      return
-    n_raw = ncand[worldid]
-    n = wp.min(n_raw, cand_type.shape[1])
-    max_aset = ret_type_out.shape[1]
-    n_seed = wp.min(n, max_aset)
-    if c == 0:
-      init_ncand_out[worldid] = 1 if n > 0 else 0
-      nret_out[worldid] = n_seed
-      if n_raw > max_aset:
-        if wp.static(bool(warn_overflow & OverflowType.NARROWPHASE)):
-          wp.printf(
-            "IPC active set overflow - please increase nconmax beyond %u or naconmax beyond %u\n"
-            "To disable the print warning: m.opt.warn_overflow &= ~mjw.OverflowType.NARROWPHASE (or = 0 for all)\n",
-            max_aset,
-            max_aset * nret_out.shape[0],
-          )
-        wp.atomic_or(overflow_out, worldid, wp.static(OverflowType.NARROWPHASE))
-    if c >= n_seed:
-      return
-
-    pt = cand_type[worldid, c]
-    idx = cand_idx[worldid, c]
-    gi = cand_geom[worldid, c]
-    sm = _pair_standoff_and_mu(worldid, pt, idx, rad, mass)
-    lam, cnt = _con_lam_and_age(flexvert_lambda_in, flexvert_conage_in, worldid, pt, idx)
-
-    ret_type_out[worldid, c] = pt
-    ret_idx_out[worldid, c] = idx
-    ret_geom_out[worldid, c] = gi
-    ret_standoff_out[worldid, c] = sm[0]
-    ret_mu_out[worldid, c] = sm[1]
-    ret_lam_out[worldid, c] = lam
-    ret_cnt_out[worldid, c] = cnt
-
-  return kernel
-
-
-def ipc_seed_active_set(m: Model, d: Data, ws: IpcWorkspace):
-  """Seeds ws.ret from step-start candidates in ws.cand and rank-sorts into ws.aset."""
-  wp.launch(
-    ipc_seed_active_set_kernel(int(m.opt.warn_overflow)),
-    dim=(d.nworld, ws.max_aset),
-    inputs=[
-      d.flexvert_lambda,
-      d.flexvert_conage,
-      ws.rad,
-      ws.mass,
-      ws.ncand,
-      ws.cand_type,
-      ws.cand_idx,
-      ws.cand_geom,
-      ws.world_done,
-    ],
-    outputs=[
-      d.overflow,
-      ws.init_ncand,
-      ws.nret,
-      ws.ret_type,
-      ws.ret_idx,
-      ws.ret_geom,
-      ws.ret_standoff,
-      ws.ret_mu,
-      ws.ret_lam,
-      ws.ret_cnt,
-    ],
-  )
-  wp.launch(
-    ipc_rank_sort_aset_kernel,
-    dim=(d.nworld, ws.max_aset),
-    inputs=[
-      ws.nret,
-      ws.ret_type,
-      ws.ret_idx,
-      ws.ret_geom,
-      ws.ret_standoff,
-      ws.ret_mu,
-      ws.ret_lam,
-      ws.ret_cnt,
-      ws.world_done,
-    ],
-    outputs=[
-      ws.naset,
-      ws.aset_type,
-      ws.aset_idx,
-      ws.aset_geom,
-      ws.aset_standoff,
-      ws.aset_mu,
-      ws.aset_lam,
-      ws.aset_cnt,
-    ],
-  )
-
-
-@wp.kernel
-def ipc_compute_vmin_kernel(
-  # In:
-  ncand: wp.array[int],
-  cand_type: wp.array2d[int],
-  cand_idx: wp.array2d[wp.vec4i],
-  cand_toi: wp.array2d[float],
-  world_done: wp.array[int],
-  # Out:
-  vmin_out: wp.array2d[float],
-):
-  """Computes earliest time-of-impact per flex vertex across approaching candidates."""
-  worldid, c = wp.tid()
-  if world_done[worldid] != 0 or c >= wp.min(ncand[worldid], cand_type.shape[1]):
-    return
-  t = cand_toi[worldid, c]
-  if t < 0.0:
-    return
-  idx = cand_idx[worldid, c]
-  off, nv = pair_vert_range(cand_type[worldid, c])
-  for q in range(nv):
-    wp.atomic_min(vmin_out, worldid, idx[off + q], t)
-
-
-@cache_kernel
-def ipc_retain_active_set_kernel(warn_overflow: int):
-  @wp.kernel(module="unique", enable_backward=False)
-  def kernel(
-    # In:
-    naset: wp.array[int],
-    aset_type: wp.array2d[int],
-    aset_idx: wp.array2d[wp.vec4i],
-    aset_geom: wp.array2d[int],
-    aset_standoff: wp.array2d[float],
-    aset_mu: wp.array2d[float],
-    aset_lam: wp.array2d[float],
-    aset_cnt: wp.array2d[int],
-    world_done: wp.array[int],
-    # Data out:
-    overflow_out: wp.array[int],
-    # Out:
-    nret_out: wp.array[int],
-    ret_type_out: wp.array2d[int],
-    ret_idx_out: wp.array2d[wp.vec4i],
-    ret_geom_out: wp.array2d[int],
-    ret_standoff_out: wp.array2d[float],
-    ret_mu_out: wp.array2d[float],
-    ret_lam_out: wp.array2d[float],
-    ret_cnt_out: wp.array2d[int],
-  ):
-    """Compacts active-set pairs that pass retention criteria into ret buffer."""
-    worldid, s = wp.tid()
-    if world_done[worldid] != 0 or s >= wp.min(naset[worldid], aset_type.shape[1]):
-      return
-    lam = aset_lam[worldid, s]
-    cnt = aset_cnt[worldid, s]
-    if _aset_retained(lam, cnt):
-      r = wp.atomic_add(nret_out, worldid, 1)
-      max_aset = ret_type_out.shape[1]
-      if r >= max_aset:
-        if wp.static(bool(warn_overflow & OverflowType.NARROWPHASE)) and r == max_aset:
-          wp.printf(
-            "IPC active set overflow - please increase nconmax beyond %u or naconmax beyond %u\n"
-            "To disable the print warning: m.opt.warn_overflow &= ~mjw.OverflowType.NARROWPHASE (or = 0 for all)\n",
-            max_aset,
-            max_aset * nret_out.shape[0],
-          )
-        wp.atomic_or(overflow_out, worldid, wp.static(OverflowType.NARROWPHASE))
-        return
-      ret_type_out[worldid, r] = aset_type[worldid, s]
-      ret_idx_out[worldid, r] = aset_idx[worldid, s]
-      ret_geom_out[worldid, r] = aset_geom[worldid, s]
-      ret_standoff_out[worldid, r] = aset_standoff[worldid, s]
-      ret_mu_out[worldid, r] = aset_mu[worldid, s]
-      ret_lam_out[worldid, r] = lam
-      ret_cnt_out[worldid, r] = cnt
-
-  return kernel
-
-
-@cache_kernel
-def ipc_admit_candidates_kernel(warn_overflow: int):
-  @wp.kernel(module="unique", enable_backward=False)
-  def kernel(
-    # Data in:
-    flexvert_lambda_in: wp.array2d[float],
-    flexvert_conage_in: wp.array2d[int],
-    # In:
-    rad: wp.array[float],
-    mass: wp.array2d[float],
-    ncand: wp.array[int],
-    cand_type: wp.array2d[int],
-    cand_idx: wp.array2d[wp.vec4i],
-    cand_geom: wp.array2d[int],
-    cand_ld0: wp.array2d[float],
-    cand_toi: wp.array2d[float],
-    vmin: wp.array2d[float],
-    naset: wp.array[int],
-    aset_type: wp.array2d[int],
-    aset_idx: wp.array2d[wp.vec4i],
-    aset_geom: wp.array2d[int],
-    aset_lam: wp.array2d[float],
-    aset_cnt: wp.array2d[int],
-    world_done: wp.array[int],
-    # Data out:
-    overflow_out: wp.array[int],
-    # Out:
-    nret_out: wp.array[int],
-    ret_type_out: wp.array2d[int],
-    ret_idx_out: wp.array2d[wp.vec4i],
-    ret_geom_out: wp.array2d[int],
-    ret_standoff_out: wp.array2d[float],
-    ret_mu_out: wp.array2d[float],
-    ret_lam_out: wp.array2d[float],
-    ret_cnt_out: wp.array2d[int],
-  ):
-    """Merges newly admitted CCD candidates into ret, deduplicating retained pairs."""
-    worldid, c = wp.tid()
-    if world_done[worldid] != 0 or c >= wp.min(ncand[worldid], cand_type.shape[1]):
-      return
-
-    dd = cand_ld0[worldid, c]
-    if dd >= 1e20:
-      return
-
-    pt = cand_type[worldid, c]
-    idx = cand_idx[worldid, c]
-    gi = cand_geom[worldid, c]
-    t = cand_toi[worldid, c]
-
-    admit = int(0)
-    if dd <= 0.0:
-      admit = 1
-    elif t >= 0.0:
-      off, nv = pair_vert_range(pt)
-      for q in range(nv):
-        if t <= vmin[worldid, idx[off + q]] + 1e-12:
-          admit = 1
-          break
-
-    if admit == 0:
-      return
-
-    naset_w = wp.min(naset[worldid], aset_type.shape[1])
-    lo = int(0)
-    hi = naset_w - 1
-    while lo <= hi:
-      mid = (lo + hi) >> 1
-      tm = aset_type[worldid, mid]
-      if tm != pt:
-        cmp = -1 if tm < pt else 1
-      else:
-        gm = aset_geom[worldid, mid]
-        if gm != gi:
-          cmp = -1 if gm < gi else 1
-        else:
-          cmp = _idx_cmp(aset_idx[worldid, mid], idx)
-      if cmp < 0:
-        lo = mid + 1
-      elif cmp > 0:
-        hi = mid - 1
-      else:
-        if _aset_retained(aset_lam[worldid, mid], aset_cnt[worldid, mid]):
-          return
-        break
-
-    sm = _pair_standoff_and_mu(worldid, pt, idx, rad, mass)
-    lam, cnt = _con_lam_and_age(flexvert_lambda_in, flexvert_conage_in, worldid, pt, idx)
-
-    s = wp.atomic_add(nret_out, worldid, 1)
-    max_aset = ret_type_out.shape[1]
-    if s >= max_aset:
-      if wp.static(bool(warn_overflow & OverflowType.NARROWPHASE)) and s == max_aset:
-        wp.printf(
-          "IPC active set overflow - please increase nconmax beyond %u or naconmax beyond %u\n"
-          "To disable the print warning: m.opt.warn_overflow &= ~mjw.OverflowType.NARROWPHASE (or = 0 for all)\n",
-          max_aset,
-          max_aset * nret_out.shape[0],
-        )
-      wp.atomic_or(overflow_out, worldid, wp.static(OverflowType.NARROWPHASE))
-      return
-    ret_type_out[worldid, s] = pt
-    ret_idx_out[worldid, s] = idx
-    ret_geom_out[worldid, s] = gi
-    ret_standoff_out[worldid, s] = sm[0]
-    ret_mu_out[worldid, s] = sm[1]
-    ret_lam_out[worldid, s] = lam
-    ret_cnt_out[worldid, s] = cnt
-
-  return kernel
-
-
-def ipc_merge_active_set(m: Model, d: Data, ws: IpcWorkspace):
-  """Filters earliest-ToI candidates, retains contacts, and merges pairs (ipc_mergeActiveSet)."""
-  nworld = d.nworld
-  max_aset = ws.max_aset
-  warn_overflow = int(m.opt.warn_overflow)
-  ws.vmin.fill_(2.0)
-  wp.launch(
-    ipc_compute_vmin_kernel,
-    dim=(nworld, ws.max_cand),
-    inputs=[
-      ws.ncand,
-      ws.cand_type,
-      ws.cand_idx,
-      ws.cand_toi,
-      ws.world_done,
-    ],
-    outputs=[ws.vmin],
-  )
-  ws.nret.zero_()
-  wp.launch(
-    ipc_retain_active_set_kernel(warn_overflow),
-    dim=(nworld, max_aset),
-    inputs=[
-      ws.naset,
-      ws.aset_type,
-      ws.aset_idx,
-      ws.aset_geom,
-      ws.aset_standoff,
-      ws.aset_mu,
-      ws.aset_lam,
-      ws.aset_cnt,
-      ws.world_done,
-    ],
-    outputs=[
-      d.overflow,
-      ws.nret,
-      ws.ret_type,
-      ws.ret_idx,
-      ws.ret_geom,
-      ws.ret_standoff,
-      ws.ret_mu,
-      ws.ret_lam,
-      ws.ret_cnt,
-    ],
-  )
-  wp.launch(
-    ipc_admit_candidates_kernel(warn_overflow),
-    dim=(nworld, ws.max_cand),
-    inputs=[
-      d.flexvert_lambda,
-      d.flexvert_conage,
-      ws.rad,
-      ws.mass,
-      ws.ncand,
-      ws.cand_type,
-      ws.cand_idx,
-      ws.cand_geom,
-      ws.cand_ld0,
-      ws.cand_toi,
-      ws.vmin,
-      ws.naset,
-      ws.aset_type,
-      ws.aset_idx,
-      ws.aset_geom,
-      ws.aset_lam,
-      ws.aset_cnt,
-      ws.world_done,
-    ],
-    outputs=[
-      d.overflow,
-      ws.nret,
-      ws.ret_type,
-      ws.ret_idx,
-      ws.ret_geom,
-      ws.ret_standoff,
-      ws.ret_mu,
-      ws.ret_lam,
-      ws.ret_cnt,
-    ],
-  )
-  wp.launch(
-    ipc_rank_sort_aset_kernel,
-    dim=(nworld, max_aset),
-    inputs=[
-      ws.nret,
-      ws.ret_type,
-      ws.ret_idx,
-      ws.ret_geom,
-      ws.ret_standoff,
-      ws.ret_mu,
-      ws.ret_lam,
-      ws.ret_cnt,
-      ws.world_done,
-    ],
-    outputs=[
-      ws.naset,
-      ws.aset_type,
-      ws.aset_idx,
-      ws.aset_geom,
-      ws.aset_standoff,
-      ws.aset_mu,
-      ws.aset_lam,
-      ws.aset_cnt,
-    ],
-  )
 
 
 @wp.func
@@ -1337,6 +402,1110 @@ def _efc_elliptic_cost(
   dm = math.safe_div(D0, mu * mu * (1.0 + mu * mu))
   nmt = N - mu * T
   return 0.5 * dm * nmt * nmt
+
+
+@wp.func
+def _init_published_efc_row(
+  # In:
+  worldid: int,
+  s: int,
+  r: int,
+  timestep: wp.array[float],
+  aset_mu: wp.array2d[float],
+  aset_ld0: wp.array2d[float],
+  aset_standoff: wp.array2d[float],
+  aset_lam: wp.array2d[float],
+  aset_cnt: wp.array2d[int],
+  # Data out:
+  efc_type_out: wp.array2d[int],
+  efc_id_out: wp.array2d[int],
+  efc_D_out: wp.array2d[float],
+  efc_frictionloss_out: wp.array2d[float],
+  efc_force_out: wp.array2d[float],
+  efc_state_out: wp.array2d[int],
+):
+  """Initializes published EFC row metadata and returns (h, h2, refc)."""
+  h = timestep[worldid % timestep.shape[0]]
+  h2 = h * h
+  mu = aset_mu[worldid, s]
+  dd = aset_ld0[worldid, s]
+  delta = aset_standoff[worldid, s]
+  lam_over_mu = aset_lam[worldid, s] / wp.max(mu, 1e-12)
+
+  efc_type_out[worldid, r] = int(ConstraintType.CONTACT_FRICTIONLESS)
+  efc_id_out[worldid, r] = -1
+  efc_D_out[worldid, r] = _ipc_penalty_scale(mu, aset_cnt[worldid, s]) / h2
+  efc_frictionloss_out[worldid, r] = 0.0
+  efc_force_out[worldid, r] = 0.0
+  efc_state_out[worldid, r] = int(ConstraintState.SATISFIED)
+
+  refc = -(dd - delta) + lam_over_mu
+  return h, h2, refc
+
+
+@wp.kernel
+def ipc_count_body_verts_kernel(
+  # Model:
+  flex_vertbodyid: wp.array[int],
+  # Out:
+  nvertbody_out: wp.array[int],
+):
+  """Counts how many flex vertices belong to each body."""
+  vg = wp.tid()
+  bid = flex_vertbodyid[vg]
+  if bid >= 0:
+    wp.atomic_add(nvertbody_out, bid, 1)
+
+
+@wp.kernel
+def ipc_init_verts_and_bodies_kernel(
+  # Model:
+  body_jntnum: wp.array[int],
+  body_jntadr: wp.array[int],
+  body_dofadr: wp.array[int],
+  body_mass: wp.array2d[float],
+  body_subtreemass: wp.array2d[float],
+  jnt_type: wp.array[int],
+  dof_armature: wp.array2d[float],
+  flex_dim: wp.array[int],
+  flex_vertbodyid: wp.array[int],
+  flex_vert: wp.array[wp.vec3],
+  flex_radius: wp.array[float],
+  flex_centered: wp.array[bool],
+  flex_vertflexid: wp.array[int],
+  # In:
+  nvertbody: wp.array[int],
+  # Out:
+  dofadr_out: wp.array[int],
+  fidx_out: wp.array[int],
+  mass_out: wp.array2d[float],
+  rad_out: wp.array[float],
+  pbody_out: wp.array[int],
+  isflexvert_body_out: wp.array[int],
+  own_out: wp.array[bool],
+  isflexdof_out: wp.array[bool],
+):
+  """Initializes per-vertex IPC attributes and identifies free 3-slide flex vertices."""
+  vg = wp.tid()
+  f = flex_vertflexid[vg]
+  if flex_dim[f] != 2:
+    dofadr_out[vg] = -1
+    fidx_out[vg] = -1
+    for w in range(mass_out.shape[0]):
+      mass_out[w, vg] = 0.0
+    rad_out[vg] = 0.0
+    pbody_out[vg] = -1
+    return
+
+  bid = flex_vertbodyid[vg]
+  rad_out[vg] = flex_radius[f]
+  pbody_out[vg] = bid
+  ja = body_jntadr[bid]
+  lv = flex_vert[vg]
+  at_origin = flex_centered[f] or (lv[0] == 0.0 and lv[1] == 0.0 and lv[2] == 0.0)
+  slides = (
+    body_jntnum[bid] == 3
+    and jnt_type[ja] == int(JointType.SLIDE)
+    and jnt_type[ja + 1] == int(JointType.SLIDE)
+    and jnt_type[ja + 2] == int(JointType.SLIDE)
+    and nvertbody[bid] == 1
+    and at_origin
+  )
+  if slides:
+    da = body_dofadr[bid]
+    dofadr_out[vg] = da
+    fidx_out[vg] = vg
+    for w in range(mass_out.shape[0]):
+      bsm = body_subtreemass[w % body_subtreemass.shape[0], bid]
+      m_base = bsm if bsm > 0.0 else body_mass[w % body_mass.shape[0], bid]
+      mass_out[w, vg] = m_base + dof_armature[w % dof_armature.shape[0], da]
+    isflexvert_body_out[bid] = 1
+    own_out[da] = True
+    own_out[da + 1] = True
+    own_out[da + 2] = True
+    isflexdof_out[da] = True
+    isflexdof_out[da + 1] = True
+    isflexdof_out[da + 2] = True
+  else:
+    dofadr_out[vg] = -1
+    fidx_out[vg] = -1
+    for w in range(mass_out.shape[0]):
+      mass_out[w, vg] = 0.0
+
+
+@wp.kernel
+def ipc_init_trees_kernel(
+  # Model:
+  body_dofnum: wp.array[int],
+  body_dofadr: wp.array[int],
+  dof_treeid: wp.array[int],
+  tree_dofadr: wp.array[int],
+  tree_dofnum: wp.array[int],
+  # In:
+  isflexvert_body: wp.array[int],
+  # Out:
+  isartictree_out: wp.array[bool],
+  own_out: wp.array[bool],
+):
+  """Identifies non-flex articulated trees and marks their DOFs as owned by IPC."""
+  b = wp.tid()
+  if b == 0 or body_dofnum[b] == 0 or isflexvert_body[b] != 0:
+    return
+  t = dof_treeid[body_dofadr[b]]
+  isartictree_out[t] = True
+  t_da = tree_dofadr[t]
+  t_dn = tree_dofnum[t]
+  for i in range(t_dn):
+    own_out[t_da + i] = True
+
+
+@cache_kernel
+def ipc_init_pins_kernel(warn_overflow: int):
+  @wp.kernel(module="unique", enable_backward=False)
+  def kernel(
+    # Model:
+    body_parentid: wp.array[int],
+    body_jntnum: wp.array[int],
+    body_jntadr: wp.array[int],
+    body_treeid: wp.array[int],
+    jnt_type: wp.array[int],
+    jnt_dofadr: wp.array[int],
+    flex_dim: wp.array[int],
+    flex_vertflexid: wp.array[int],
+    # In:
+    fidx: wp.array[int],
+    pbody: wp.array[int],
+    isartictree: wp.array[bool],
+    # Data out:
+    overflow_out: wp.array[int],
+    # Out:
+    pin_has_chain_out: wp.array[bool],
+    pin_num_chain_out: wp.array[int],
+    pin_chain_adr_out: wp.array[int],
+    pin_chain_dof_out: wp.array[int],
+    npin_dofs_out: wp.array[int],
+    own_out: wp.array[bool],
+    apinned_out: wp.array[int],
+    npin_out: wp.array[int],
+  ):
+    """Extracts CSR slide joint chains for pinned 2D flex vertices on articulated bodies."""
+    vg = wp.tid()
+    f = flex_vertflexid[vg]
+    if flex_dim[f] != 2 or fidx[vg] >= 0:
+      return
+    b = pbody[vg]
+    if b <= 0:
+      return
+    t = body_treeid[b]
+    if t < 0 or not isartictree[t]:
+      return
+
+    cnt = int(0)
+    curr = b
+    while curr > 0:
+      ja = body_jntadr[curr]
+      for j in range(body_jntnum[curr]):
+        if jnt_type[ja + j] == int(JointType.SLIDE):
+          own_out[jnt_dofadr[ja + j]] = True
+          cnt += 1
+      curr = body_parentid[curr]
+    if cnt == 0:
+      return
+
+    adr = wp.atomic_add(npin_dofs_out, 0, cnt)
+    max_pin_dofs = pin_chain_dof_out.shape[0]
+    if adr + cnt > max_pin_dofs:
+      if wp.static(bool(warn_overflow & OverflowType.BROADPHASE)):
+        wp.printf(
+          "IPC pinned vertex chain overflow (%d > %d)\n"
+          "To disable the print warning: m.opt.warn_overflow &= ~mjw.OverflowType.BROADPHASE (or = 0 for all)\n",
+          adr + cnt,
+          max_pin_dofs,
+        )
+      for w in range(overflow_out.shape[0]):
+        wp.atomic_or(overflow_out, w, wp.static(OverflowType.BROADPHASE))
+      return
+
+    # chain dofs are stored in reverse traversal order (root first)
+    k = adr + cnt - 1
+    curr = b
+    while curr > 0:
+      ja = body_jntadr[curr]
+      for j in range(body_jntnum[curr]):
+        if jnt_type[ja + j] == int(JointType.SLIDE):
+          pin_chain_dof_out[k] = jnt_dofadr[ja + j]
+          k -= 1
+      curr = body_parentid[curr]
+
+    pin_has_chain_out[vg] = True
+    pin_num_chain_out[vg] = cnt
+    pin_chain_adr_out[vg] = adr
+    apinned_out[t] = 1
+    wp.atomic_add(npin_out, b, 1)
+
+  return kernel
+
+
+@wp.kernel
+def ipc_finalize_meta_kernel(
+  # Model:
+  nv: int,
+  nflexvert: int,
+  body_subtreemass: wp.array2d[float],
+  dof_treeid: wp.array[int],
+  # In:
+  isflexdof: wp.array[bool],
+  apinned: wp.array[int],
+  pin_has_chain: wp.array[bool],
+  pbody: wp.array[int],
+  npin: wp.array[int],
+  # Out:
+  is_throttled_out: wp.array[bool],
+  mass_out: wp.array2d[float],
+):
+  """Sets per-DOF CCD throttling flags and distributes carrier subtree mass to pinned vertices."""
+  tid = wp.tid()
+  if tid < nv:
+    treeid = dof_treeid[tid]
+    is_throttled_out[tid] = isflexdof[tid] or (treeid >= 0 and apinned[treeid] != 0)
+  if tid < nflexvert:
+    if pin_has_chain[tid]:
+      b = pbody[tid]
+      np_b = npin[b]
+      if np_b > 0:
+        inv_np = 1.0 / float(np_b)
+        for w in range(mass_out.shape[0]):
+          mass_out[w, tid] = body_subtreemass[w % body_subtreemass.shape[0], b] * inv_np
+
+
+def ipc_init_topology(m: Model, d: Data, ws: IpcWorkspace):
+  """Populates IPC vertex, DOF, pinned-chain, and static geom topology arrays on GPU."""
+  ws.nvertbody.zero_()
+  ws.isflexvert_body.zero_()
+  ws.npin.zero_()
+  ws.apinned.zero_()
+  ws.own.zero_()
+  ws.isflexdof.zero_()
+  ws.isartictree.zero_()
+  ws.pin_has_chain.zero_()
+  ws.pin_num_chain.zero_()
+  ws.npin_dofs.zero_()
+
+  wp.launch(
+    ipc_count_body_verts_kernel,
+    dim=m.nflexvert,
+    inputs=[m.flex_vertbodyid],
+    outputs=[ws.nvertbody],
+  )
+  wp.launch(
+    ipc_init_verts_and_bodies_kernel,
+    dim=m.nflexvert,
+    inputs=[
+      m.body_jntnum,
+      m.body_jntadr,
+      m.body_dofadr,
+      m.body_mass,
+      m.body_subtreemass,
+      m.jnt_type,
+      m.dof_armature,
+      m.flex_dim,
+      m.flex_vertbodyid,
+      m.flex_vert,
+      m.flex_radius,
+      m.flex_centered,
+      m.flex_vertflexid,
+      ws.nvertbody,
+    ],
+    outputs=[
+      ws.dofadr,
+      ws.fidx,
+      ws.mass,
+      ws.rad,
+      ws.pbody,
+      ws.isflexvert_body,
+      ws.own,
+      ws.isflexdof,
+    ],
+  )
+  wp.launch(
+    ipc_init_trees_kernel,
+    dim=m.nbody,
+    inputs=[
+      m.body_dofnum,
+      m.body_dofadr,
+      m.dof_treeid,
+      m.tree_dofadr,
+      m.tree_dofnum,
+      ws.isflexvert_body,
+    ],
+    outputs=[ws.isartictree, ws.own],
+  )
+  wp.launch(
+    ipc_init_pins_kernel(int(m.opt.warn_overflow)),
+    dim=m.nflexvert,
+    inputs=[
+      m.body_parentid,
+      m.body_jntnum,
+      m.body_jntadr,
+      m.body_treeid,
+      m.jnt_type,
+      m.jnt_dofadr,
+      m.flex_dim,
+      m.flex_vertflexid,
+      ws.fidx,
+      ws.pbody,
+      ws.isartictree,
+    ],
+    outputs=[
+      d.overflow,
+      ws.pin_has_chain,
+      ws.pin_num_chain,
+      ws.pin_chain_adr,
+      ws.pin_chain_dof,
+      ws.npin_dofs,
+      ws.own,
+      ws.apinned,
+      ws.npin,
+    ],
+  )
+  wp.launch(
+    ipc_finalize_meta_kernel,
+    dim=max(m.nv, m.nflexvert, 1),
+    inputs=[
+      m.nv,
+      m.nflexvert,
+      m.body_subtreemass,
+      m.dof_treeid,
+      ws.isflexdof,
+      ws.apinned,
+      ws.pin_has_chain,
+      ws.pbody,
+      ws.npin,
+    ],
+    outputs=[ws.is_throttled, ws.mass],
+  )
+  wp.launch(
+    ipc_init_geom_features_kernel,
+    dim=ws.ngv.shape[0],
+    inputs=[
+      m.ngeom,
+      m.nmesh,
+      m.body_weldid,
+      m.geom_type,
+      m.geom_contype,
+      m.geom_conaffinity,
+      m.geom_bodyid,
+      m.geom_dataid,
+      m.mesh_vertadr,
+      m.mesh_vertnum,
+      m.mesh_graphadr,
+      m.mesh_vert,
+      m.mesh_polynum,
+      m.mesh_polyadr,
+      m.mesh_polyvertadr,
+      m.mesh_polyvertnum,
+      m.mesh_polyvert,
+    ],
+    outputs=[
+      ws.ngv,
+      ws.nge,
+      ws.geom_corner_loc,
+      ws.corner_geom,
+      ws.geom_edge_loc,
+      ws.edge_geom,
+    ],
+  )
+
+
+# upper bound on slide joints in the carrier chain of a pinned flex vertex
+IPC_MAX_PIN_CHAIN = 16
+
+
+def get_ipc_workspace(m: Model, d: Data) -> IpcWorkspace:
+  """Allocates GPU workspace arrays for IPC and initializes static topology.
+
+  Each array is allocated once per call; arrays with disjoint lifetimes within a step share
+  storage (ret_* alias pair_* and aset_ld0, vmin aliases dl, and the free-flight velocity wtil
+  is reused for the merit acceleration and the committed velocity).
+  """
+  device = d.qacc.device
+  nworld = d.nworld
+  nv = max(m.nv, 1)
+  nbody = max(m.nbody, 1)
+  ntree = max(m.ntree, 1)
+  ngeom = max(m.ngeom, 1)
+  nfv = max(m.nflexvert, 1)
+  nflex = max(m.nflex, 1)
+  # flex broadphase hash grids (when used): power-of-two bucket counts, two buckets per element
+  grid = ipc_flex_grid(m, nworld)
+  nedge = max(m.nflexedge, 1) if grid else 1
+  nelem = max(m.nflexelem, 1) if grid else 1
+  nvert = nfv if grid else 1
+  nbucket_edge = 1 << max(5, (2 * nedge - 1).bit_length()) if grid else 1
+  nbucket_tri = 1 << max(5, (2 * nelem - 1).bit_length()) if grid else 1
+  nconmax = max(d.naconmax // nworld, 1)
+  nccdmax = max(d.naccdmax // nworld, 1)
+  max_pin_dofs = max(m.nflexvert * min(m.njnt, IPC_MAX_PIN_CHAIN), 1)
+  max_ngv = max(m.ngeom * max(8, m.nmeshvert), 1)
+  max_nge = max(m.ngeom * max(12, m.nmeshpolyvert), 1)
+  max_aset = nconmax if m.nflexvert > 0 else 1
+  max_cand = nccdmax if m.nflexvert > 0 else 1
+
+  def vec_nv():
+    return wp.empty((nworld, nv), dtype=float, device=device)
+
+  def vec3_nfv():
+    return wp.empty((nworld, nfv), dtype=wp.vec3, device=device)
+
+  def int_nworld():
+    return wp.zeros(nworld, dtype=int, device=device)
+
+  def float_nworld():
+    return wp.zeros(nworld, dtype=float, device=device)
+
+  def aset(dtype):
+    return wp.empty((nworld, max_aset), dtype=dtype, device=device)
+
+  def cand(dtype):
+    return wp.empty((nworld, max_cand), dtype=dtype, device=device)
+
+  def cond():
+    return wp.zeros(1, dtype=int, device=device)
+
+  aset_ld0 = aset(float)
+  pair_liv = aset(wp.vec4i)
+  pair_lniv = aset(int)
+  pair_rownnz = aset(int)
+  pair_in_ws = aset(int)
+  dl = wp.empty((nworld, nfv), dtype=float, device=device)
+
+  ws = IpcWorkspace(
+    w=vec_nv(),
+    wfree=vec_nv(),
+    wtil=vec_nv(),
+    ddw=vec_nv(),
+    da=vec_nv(),
+    M_da=vec_nv(),
+    wn=vec_nv(),
+    xold=vec3_nfv(),
+    x=vec3_nfv(),
+    xtil=vec3_nfv(),
+    xfree=vec3_nfv(),
+    xn=vec3_nfv(),
+    pvel=vec3_nfv(),
+    beta=float_nworld(),
+    world_done=int_nworld(),
+    stall=int_nworld(),
+    saved_nefc=int_nworld(),
+    active_count=int_nworld(),
+    active_nnz=int_nworld(),
+    total_solver_niter=int_nworld(),
+    newton_converged=int_nworld(),
+    last_ls_alpha=float_nworld(),
+    ls_done=int_nworld(),
+    ls_accept=int_nworld(),
+    merit_energy=float_nworld(),
+    merit_energy_trial=float_nworld(),
+    nvertbody=wp.empty(nbody, dtype=int, device=device),
+    isflexvert_body=wp.empty(nbody, dtype=int, device=device),
+    npin=wp.empty(nbody, dtype=int, device=device),
+    apinned=wp.empty(ntree, dtype=int, device=device),
+    dofadr=wp.empty(nfv, dtype=int, device=device),
+    fidx=wp.empty(nfv, dtype=int, device=device),
+    mass=wp.empty((nworld, nfv), dtype=float, device=device),
+    rad=wp.empty(nfv, dtype=float, device=device),
+    pbody=wp.empty(nfv, dtype=int, device=device),
+    own=wp.empty(nv, dtype=bool, device=device),
+    isflexdof=wp.empty(nv, dtype=bool, device=device),
+    isartictree=wp.empty(ntree, dtype=bool, device=device),
+    is_throttled=wp.empty(nv, dtype=bool, device=device),
+    pin_has_chain=wp.empty(nfv, dtype=bool, device=device),
+    pin_num_chain=wp.empty(nfv, dtype=int, device=device),
+    pin_chain_adr=wp.empty(nfv, dtype=int, device=device),
+    pin_chain_dof=wp.empty(max_pin_dofs, dtype=int, device=device),
+    npin_dofs=wp.empty(1, dtype=int, device=device),
+    pin_dof_axis=wp.empty((nworld, nv), dtype=wp.vec3, device=device),
+    max_ngv=max_ngv,
+    max_nge=max_nge,
+    ngv=int_nworld(),
+    nge=int_nworld(),
+    geom_corner_loc=wp.empty((nworld, max_ngv), dtype=wp.vec3, device=device),
+    geom_corners=wp.empty((nworld, max_ngv), dtype=wp.vec3, device=device),
+    corner_geom=wp.empty((nworld, max_ngv), dtype=int, device=device),
+    geom_edge_loc=wp.empty((nworld, max_nge, 2), dtype=wp.vec3, device=device),
+    geom_edges=wp.empty((nworld, max_nge, 2), dtype=wp.vec3, device=device),
+    edge_geom=wp.empty((nworld, max_nge), dtype=int, device=device),
+    geom_aabb_min=wp.empty((nworld, ngeom), dtype=wp.vec3, device=device),
+    geom_aabb_max=wp.empty((nworld, ngeom), dtype=wp.vec3, device=device),
+    max_aset=max_aset,
+    max_cand=max_cand,
+    naset=int_nworld(),
+    aset_type=aset(int),
+    aset_idx=aset(wp.vec4i),
+    aset_geom=aset(int),
+    aset_standoff=aset(float),
+    aset_mu=aset(float),
+    aset_ld0=aset_ld0,
+    aset_lam=aset(float),
+    aset_cnt=aset(int),
+    nret=int_nworld(),
+    ret_type=pair_lniv,
+    ret_idx=pair_liv,
+    ret_geom=pair_rownnz,
+    ret_lam=aset_ld0,
+    ret_cnt=pair_in_ws,
+    sort_key=wp.empty(2 * nworld * max_aset, dtype=int, device=device),
+    sort_val=wp.empty(2 * nworld * max_aset, dtype=int, device=device),
+    ncand=int_nworld(),
+    cand_type=cand(int),
+    cand_idx=cand(wp.vec4i),
+    cand_geom=cand(int),
+    cand_ld0=cand(float),
+    cand_toi=cand(float),
+    pair_ln=aset(wp.vec3),
+    pair_lcw=aset(wp.vec4),
+    pair_liv=pair_liv,
+    pair_lniv=pair_lniv,
+    pair_rownnz=pair_rownnz,
+    pair_in_ws=pair_in_ws,
+    alpha_min=float_nworld(),
+    vmin=dl,
+    ws_nadd=int_nworld(),
+    ws_done=int_nworld(),
+    qfrc_rows=wp.zeros((nworld, nv), dtype=float, device=device),
+    outer_cond=cond(),
+    outer_iter=cond(),
+    ws_cond=cond(),
+    ws_iter=cond(),
+    ls_cond=cond(),
+    ls_iter=cond(),
+    ws_entry=vec_nv(),
+    init_ncand=int_nworld(),
+    dl=dl,
+    fsweep=wp.empty((nworld, nflex), dtype=float, device=device),
+    bp_bound=wp.empty((nworld, 2, 7), dtype=float, device=device),
+    bp_edge_lo=wp.empty((nworld, nedge), dtype=wp.vec3, device=device),
+    bp_edge_hi=wp.empty((nworld, nedge), dtype=wp.vec3, device=device),
+    bp_edge_count=wp.zeros(nworld * nbucket_edge, dtype=int, device=device),
+    bp_edge_end=wp.empty(nworld * nbucket_edge, dtype=int, device=device),
+    bp_edge_item=wp.empty(nworld * nedge * BP_CELL_MAX, dtype=int, device=device),
+    bp_edge_key=wp.empty(nworld * nedge * BP_CELL_MAX, dtype=wp.vec3i, device=device),
+    bp_tri_lo=wp.empty((nworld, nelem), dtype=wp.vec3, device=device),
+    bp_tri_hi=wp.empty((nworld, nelem), dtype=wp.vec3, device=device),
+    bp_tri_count=wp.zeros(nworld * nbucket_tri, dtype=int, device=device),
+    bp_tri_end=wp.empty(nworld * nbucket_tri, dtype=int, device=device),
+    bp_tri_item=wp.empty(nworld * nelem * BP_CELL_MAX, dtype=int, device=device),
+    bp_tri_key=wp.empty(nworld * nelem * BP_CELL_MAX, dtype=wp.vec3i, device=device),
+    bp_vert_lo=wp.empty((nworld, nvert), dtype=wp.vec3, device=device),
+    bp_vert_hi=wp.empty((nworld, nvert), dtype=wp.vec3, device=device),
+    bp_vert_count=wp.zeros(nworld * nbucket_tri, dtype=int, device=device),
+    bp_vert_end=wp.empty(nworld * nbucket_tri, dtype=int, device=device),
+    bp_vert_item=wp.empty(nworld * nvert * BP_CELL_MAX, dtype=int, device=device),
+    bp_vert_key=wp.empty(nworld * nvert * BP_CELL_MAX, dtype=wp.vec3i, device=device),
+    solver_ctx=solver.create_solver_context(m, d),
+  )
+  ipc_init_topology(m, d, ws)
+  return ws
+
+
+# active-set sort key passes, least significant first
+_SORT_IDX23 = 0
+_SORT_IDX01 = 1
+_SORT_IDX3 = 2
+_SORT_IDX2 = 3
+_SORT_IDX1 = 4
+_SORT_IDX0 = 5
+_SORT_WORLD_TYPE_GEOM = 6
+_SORT_PAD = 2147483647
+
+
+@wp.kernel
+def _ipc_sort_aset_key_kernel(
+  # In:
+  mode: int,
+  idx_base: int,
+  geom_base: int,
+  nret: wp.array[int],
+  ret_type: wp.array2d[int],
+  ret_idx: wp.array2d[wp.vec4i],
+  ret_geom: wp.array2d[int],
+  # Out:
+  sort_key_out: wp.array[int],
+  sort_val_out: wp.array[int],
+):
+  """Key of slot k for one stable radix pass over the active-set scratch, all worlds at once.
+
+  The first pass seeds the permutation with the global scratch index, so equal keys keep the
+  scratch order; padding slots sort last within their world.
+  """
+  worldid, k = wp.tid()
+  cap = ret_type.shape[1]
+  slot = worldid * cap + k
+  if mode == _SORT_IDX23 or (mode == _SORT_IDX3 and idx_base == 0):
+    sort_val_out[slot] = slot
+  # the passes before the last mix the worlds: each slot holds a global scratch index
+  g = sort_val_out[slot]
+  w = g // cap
+  i = g - w * cap
+  n = wp.min(nret[w], cap)
+  key = int(_SORT_PAD)
+  if mode == _SORT_WORLD_TYPE_GEOM:
+    # world most significant, so each world's cap slots return in place
+    key = (w * 8 + 7) * geom_base
+    if i < n:
+      key = (w * 8 + ret_type[w, i]) * geom_base + ret_geom[w, i] + 1
+  elif i < n:
+    idx = ret_idx[w, i]
+    if mode == _SORT_IDX23:
+      key = idx[2] * idx_base + idx[3]
+    elif mode == _SORT_IDX01:
+      key = idx[0] * idx_base + idx[1]
+    elif mode == _SORT_IDX3:
+      key = idx[3]
+    elif mode == _SORT_IDX2:
+      key = idx[2]
+    elif mode == _SORT_IDX1:
+      key = idx[1]
+    else:
+      key = idx[0]
+  sort_key_out[slot] = key
+
+
+@wp.kernel
+def _ipc_sort_aset_write_kernel(
+  # In:
+  rad: wp.array[float],
+  mass: wp.array2d[float],
+  nret: wp.array[int],
+  ret_type: wp.array2d[int],
+  ret_idx: wp.array2d[wp.vec4i],
+  ret_geom: wp.array2d[int],
+  ret_lam: wp.array2d[float],
+  ret_cnt: wp.array2d[int],
+  sort_val: wp.array[int],
+  world_done: wp.array[int],
+  # Out:
+  naset_out: wp.array[int],
+  aset_type_out: wp.array2d[int],
+  aset_idx_out: wp.array2d[wp.vec4i],
+  aset_geom_out: wp.array2d[int],
+  aset_standoff_out: wp.array2d[float],
+  aset_mu_out: wp.array2d[float],
+  aset_lam_out: wp.array2d[float],
+  aset_cnt_out: wp.array2d[int],
+):
+  """Writes the active set in sorted order (type, geom, idx) and sets standoff and mu."""
+  worldid, rank = wp.tid()
+  if world_done[worldid] != 0:
+    return
+  cap = ret_type.shape[1]
+  n = wp.min(nret[worldid], cap)
+  if rank == 0:
+    naset_out[worldid] = n
+  if rank >= n:
+    return
+  i = sort_val[worldid * cap + rank] - worldid * cap
+  ti = ret_type[worldid, i]
+  idxi = ret_idx[worldid, i]
+  aset_type_out[worldid, rank] = ti
+  aset_idx_out[worldid, rank] = idxi
+  aset_geom_out[worldid, rank] = ret_geom[worldid, i]
+  sm = _pair_standoff_and_mu(worldid, ti, idxi, rad, mass)
+  aset_standoff_out[worldid, rank] = sm[0]
+  aset_mu_out[worldid, rank] = sm[1]
+  aset_lam_out[worldid, rank] = ret_lam[worldid, i]
+  aset_cnt_out[worldid, rank] = ret_cnt[worldid, i]
+
+
+def ipc_sort_aset(m: Model, d: Data, ws: IpcWorkspace):
+  """Sorts the active-set scratch into canonical (type, geom, idx) order by stable radix passes.
+
+  Index pairs share a pass when their key fits in 32 bits.
+  """
+  nworld = d.nworld
+  cap = ws.max_aset
+  idx_base = max(m.nflexvert, m.nflexedge, m.nflexelem, ws.max_ngv, ws.max_nge) + 1
+  geom_base = m.ngeom + 2
+  if idx_base * idx_base < _SORT_PAD:
+    modes = [_SORT_IDX23, _SORT_IDX01, _SORT_WORLD_TYPE_GEOM]
+  else:
+    modes = [_SORT_IDX3, _SORT_IDX2, _SORT_IDX1, _SORT_IDX0, _SORT_WORLD_TYPE_GEOM]
+    idx_base = 0
+  ret = [ws.nret, ws.ret_type, ws.ret_idx, ws.ret_geom]
+  for mode in modes:
+    wp.launch(
+      _ipc_sort_aset_key_kernel,
+      dim=(nworld, cap),
+      inputs=[mode, idx_base, geom_base] + ret,
+      outputs=[ws.sort_key, ws.sort_val],
+    )
+    wp.utils.radix_sort_pairs(ws.sort_key, ws.sort_val, nworld * cap)
+  wp.launch(
+    _ipc_sort_aset_write_kernel,
+    dim=(nworld, cap),
+    inputs=[ws.rad, ws.mass] + ret + [ws.ret_lam, ws.ret_cnt, ws.sort_val, ws.world_done],
+    outputs=[
+      ws.naset,
+      ws.aset_type,
+      ws.aset_idx,
+      ws.aset_geom,
+      ws.aset_standoff,
+      ws.aset_mu,
+      ws.aset_lam,
+      ws.aset_cnt,
+    ],
+  )
+
+
+@cache_kernel
+def ipc_seed_active_set_kernel(warn_overflow: int):
+  @wp.kernel(module="unique", enable_backward=False)
+  def kernel(
+    # Data in:
+    flexvert_lambda_in: wp.array2d[float],
+    flexvert_conage_in: wp.array2d[int],
+    # In:
+    rad: wp.array[float],
+    mass: wp.array2d[float],
+    ncand: wp.array[int],
+    cand_type: wp.array2d[int],
+    cand_idx: wp.array2d[wp.vec4i],
+    cand_geom: wp.array2d[int],
+    world_done: wp.array[int],
+    # Data out:
+    overflow_out: wp.array[int],
+    # Out:
+    init_ncand_out: wp.array[int],
+    nret_out: wp.array[int],
+    ret_type_out: wp.array2d[int],
+    ret_idx_out: wp.array2d[wp.vec4i],
+    ret_geom_out: wp.array2d[int],
+    ret_lam_out: wp.array2d[float],
+    ret_cnt_out: wp.array2d[int],
+  ):
+    """Seeds initial active-set scratch from step-start candidates (engine_ipc.c:902-933)."""
+    worldid, c = wp.tid()
+    if world_done[worldid] != 0:
+      return
+    n_raw = ncand[worldid]
+    n = wp.min(n_raw, cand_type.shape[1])
+    max_aset = ret_type_out.shape[1]
+    n_seed = wp.min(n, max_aset)
+    if c == 0:
+      init_ncand_out[worldid] = 1 if n > 0 else 0
+      nret_out[worldid] = n_seed
+      if n > max_aset:
+        if wp.static(bool(warn_overflow & OverflowType.NARROWPHASE)):
+          wp.printf(
+            "IPC active set overflow - please increase nconmax beyond %u or naconmax beyond %u\n"
+            "To disable the print warning: m.opt.warn_overflow &= ~mjw.OverflowType.NARROWPHASE (or = 0 for all)\n",
+            max_aset,
+            max_aset * nret_out.shape[0],
+          )
+        wp.atomic_or(overflow_out, worldid, wp.static(OverflowType.NARROWPHASE))
+    if c >= n_seed:
+      return
+
+    pt = cand_type[worldid, c]
+    idx = cand_idx[worldid, c]
+    gi = cand_geom[worldid, c]
+    lam, cnt = _con_lam_and_age(flexvert_lambda_in, flexvert_conage_in, worldid, pt, idx)
+
+    ret_type_out[worldid, c] = pt
+    ret_idx_out[worldid, c] = idx
+    ret_geom_out[worldid, c] = gi
+    ret_lam_out[worldid, c] = lam
+    ret_cnt_out[worldid, c] = cnt
+
+  return kernel
+
+
+def ipc_seed_active_set(m: Model, d: Data, ws: IpcWorkspace):
+  """Seeds ws.ret from step-start candidates in ws.cand and rank-sorts into ws.aset."""
+  wp.launch(
+    ipc_seed_active_set_kernel(int(m.opt.warn_overflow)),
+    dim=(d.nworld, ws.max_aset),
+    inputs=[
+      d.flexvert_lambda,
+      d.flexvert_conage,
+      ws.rad,
+      ws.mass,
+      ws.ncand,
+      ws.cand_type,
+      ws.cand_idx,
+      ws.cand_geom,
+      ws.world_done,
+    ],
+    outputs=[
+      d.overflow,
+      ws.init_ncand,
+      ws.nret,
+      ws.ret_type,
+      ws.ret_idx,
+      ws.ret_geom,
+      ws.ret_lam,
+      ws.ret_cnt,
+    ],
+  )
+  ipc_sort_aset(m, d, ws)
+
+
+@wp.kernel
+def ipc_compute_vmin_kernel(
+  # In:
+  ncand: wp.array[int],
+  cand_type: wp.array2d[int],
+  cand_idx: wp.array2d[wp.vec4i],
+  cand_toi: wp.array2d[float],
+  world_done: wp.array[int],
+  # Out:
+  vmin_out: wp.array2d[float],
+):
+  """Computes earliest time-of-impact per flex vertex across approaching candidates."""
+  worldid, c = wp.tid()
+  if world_done[worldid] != 0 or c >= wp.min(ncand[worldid], cand_type.shape[1]):
+    return
+  t = cand_toi[worldid, c]
+  if t < 0.0:
+    return
+  idx = cand_idx[worldid, c]
+  off, nv = pair_vert_range(cand_type[worldid, c])
+  for q in range(nv):
+    wp.atomic_min(vmin_out, worldid, idx[off + q], t)
+
+
+@cache_kernel
+def ipc_retain_active_set_kernel(warn_overflow: int):
+  @wp.kernel(module="unique", enable_backward=False)
+  def kernel(
+    # In:
+    naset: wp.array[int],
+    aset_type: wp.array2d[int],
+    aset_idx: wp.array2d[wp.vec4i],
+    aset_geom: wp.array2d[int],
+    aset_lam: wp.array2d[float],
+    aset_cnt: wp.array2d[int],
+    world_done: wp.array[int],
+    # Data out:
+    overflow_out: wp.array[int],
+    # Out:
+    nret_out: wp.array[int],
+    ret_type_out: wp.array2d[int],
+    ret_idx_out: wp.array2d[wp.vec4i],
+    ret_geom_out: wp.array2d[int],
+    ret_lam_out: wp.array2d[float],
+    ret_cnt_out: wp.array2d[int],
+  ):
+    """Compacts active-set pairs that pass retention criteria into ret buffer."""
+    worldid, s = wp.tid()
+    if world_done[worldid] != 0 or s >= wp.min(naset[worldid], aset_type.shape[1]):
+      return
+    lam = aset_lam[worldid, s]
+    cnt = aset_cnt[worldid, s]
+    if _aset_retained(lam, cnt):
+      r = wp.atomic_add(nret_out, worldid, 1)
+      max_aset = ret_type_out.shape[1]
+      if r >= max_aset:
+        if wp.static(bool(warn_overflow & OverflowType.NARROWPHASE)) and r == max_aset:
+          wp.printf(
+            "IPC active set overflow - please increase nconmax beyond %u or naconmax beyond %u\n"
+            "To disable the print warning: m.opt.warn_overflow &= ~mjw.OverflowType.NARROWPHASE (or = 0 for all)\n",
+            max_aset,
+            max_aset * nret_out.shape[0],
+          )
+        wp.atomic_or(overflow_out, worldid, wp.static(OverflowType.NARROWPHASE))
+        return
+      ret_type_out[worldid, r] = aset_type[worldid, s]
+      ret_idx_out[worldid, r] = aset_idx[worldid, s]
+      ret_geom_out[worldid, r] = aset_geom[worldid, s]
+      ret_lam_out[worldid, r] = lam
+      ret_cnt_out[worldid, r] = cnt
+
+  return kernel
+
+
+@cache_kernel
+def ipc_admit_candidates_kernel(warn_overflow: int):
+  @wp.kernel(module="unique", enable_backward=False)
+  def kernel(
+    # Data in:
+    flexvert_lambda_in: wp.array2d[float],
+    flexvert_conage_in: wp.array2d[int],
+    # In:
+    rad: wp.array[float],
+    mass: wp.array2d[float],
+    ncand: wp.array[int],
+    cand_type: wp.array2d[int],
+    cand_idx: wp.array2d[wp.vec4i],
+    cand_geom: wp.array2d[int],
+    cand_ld0: wp.array2d[float],
+    cand_toi: wp.array2d[float],
+    vmin: wp.array2d[float],
+    naset: wp.array[int],
+    aset_type: wp.array2d[int],
+    aset_idx: wp.array2d[wp.vec4i],
+    aset_geom: wp.array2d[int],
+    aset_lam: wp.array2d[float],
+    aset_cnt: wp.array2d[int],
+    world_done: wp.array[int],
+    # Data out:
+    overflow_out: wp.array[int],
+    # Out:
+    nret_out: wp.array[int],
+    ret_type_out: wp.array2d[int],
+    ret_idx_out: wp.array2d[wp.vec4i],
+    ret_geom_out: wp.array2d[int],
+    ret_lam_out: wp.array2d[float],
+    ret_cnt_out: wp.array2d[int],
+  ):
+    """Merges newly admitted CCD candidates into ret, deduplicating retained pairs."""
+    worldid, c = wp.tid()
+    if world_done[worldid] != 0 or c >= wp.min(ncand[worldid], cand_type.shape[1]):
+      return
+
+    dd = cand_ld0[worldid, c]
+    if dd >= 1e20:
+      return
+
+    pt = cand_type[worldid, c]
+    idx = cand_idx[worldid, c]
+    gi = cand_geom[worldid, c]
+    t = cand_toi[worldid, c]
+
+    admit = int(0)
+    if dd <= 0.0:
+      admit = 1
+    elif t >= 0.0:
+      off, nv = pair_vert_range(pt)
+      for q in range(nv):
+        if t <= vmin[worldid, idx[off + q]] + 1e-12:
+          admit = 1
+          break
+
+    if admit == 0:
+      return
+
+    naset_w = wp.min(naset[worldid], aset_type.shape[1])
+    lo = int(0)
+    hi = naset_w - 1
+    while lo <= hi:
+      mid = (lo + hi) >> 1
+      tm = aset_type[worldid, mid]
+      if tm != pt:
+        cmp = -1 if tm < pt else 1
+      else:
+        gm = aset_geom[worldid, mid]
+        if gm != gi:
+          cmp = -1 if gm < gi else 1
+        else:
+          cmp = _idx_cmp(aset_idx[worldid, mid], idx)
+      if cmp < 0:
+        lo = mid + 1
+      elif cmp > 0:
+        hi = mid - 1
+      else:
+        if _aset_retained(aset_lam[worldid, mid], aset_cnt[worldid, mid]):
+          return
+        break
+
+    lam, cnt = _con_lam_and_age(flexvert_lambda_in, flexvert_conage_in, worldid, pt, idx)
+
+    s = wp.atomic_add(nret_out, worldid, 1)
+    max_aset = ret_type_out.shape[1]
+    if s >= max_aset:
+      if wp.static(bool(warn_overflow & OverflowType.NARROWPHASE)) and s == max_aset:
+        wp.printf(
+          "IPC active set overflow - please increase nconmax beyond %u or naconmax beyond %u\n"
+          "To disable the print warning: m.opt.warn_overflow &= ~mjw.OverflowType.NARROWPHASE (or = 0 for all)\n",
+          max_aset,
+          max_aset * nret_out.shape[0],
+        )
+      wp.atomic_or(overflow_out, worldid, wp.static(OverflowType.NARROWPHASE))
+      return
+    ret_type_out[worldid, s] = pt
+    ret_idx_out[worldid, s] = idx
+    ret_geom_out[worldid, s] = gi
+    ret_lam_out[worldid, s] = lam
+    ret_cnt_out[worldid, s] = cnt
+
+  return kernel
+
+
+def ipc_merge_active_set(m: Model, d: Data, ws: IpcWorkspace):
+  """Filters earliest-ToI candidates, retains contacts, and merges pairs (ipc_mergeActiveSet)."""
+  nworld = d.nworld
+  max_aset = ws.max_aset
+  warn_overflow = int(m.opt.warn_overflow)
+  ws.vmin.fill_(2.0)
+  wp.launch(
+    ipc_compute_vmin_kernel,
+    dim=(nworld, ws.max_cand),
+    inputs=[
+      ws.ncand,
+      ws.cand_type,
+      ws.cand_idx,
+      ws.cand_toi,
+      ws.world_done,
+    ],
+    outputs=[ws.vmin],
+  )
+  ws.nret.zero_()
+  wp.launch(
+    ipc_retain_active_set_kernel(warn_overflow),
+    dim=(nworld, max_aset),
+    inputs=[
+      ws.naset,
+      ws.aset_type,
+      ws.aset_idx,
+      ws.aset_geom,
+      ws.aset_lam,
+      ws.aset_cnt,
+      ws.world_done,
+    ],
+    outputs=[
+      d.overflow,
+      ws.nret,
+      ws.ret_type,
+      ws.ret_idx,
+      ws.ret_geom,
+      ws.ret_lam,
+      ws.ret_cnt,
+    ],
+  )
+  wp.launch(
+    ipc_admit_candidates_kernel(warn_overflow),
+    dim=(nworld, ws.max_cand),
+    inputs=[
+      d.flexvert_lambda,
+      d.flexvert_conage,
+      ws.rad,
+      ws.mass,
+      ws.ncand,
+      ws.cand_type,
+      ws.cand_idx,
+      ws.cand_geom,
+      ws.cand_ld0,
+      ws.cand_toi,
+      ws.vmin,
+      ws.naset,
+      ws.aset_type,
+      ws.aset_idx,
+      ws.aset_geom,
+      ws.aset_lam,
+      ws.aset_cnt,
+      ws.world_done,
+    ],
+    outputs=[
+      d.overflow,
+      ws.nret,
+      ws.ret_type,
+      ws.ret_idx,
+      ws.ret_geom,
+      ws.ret_lam,
+      ws.ret_cnt,
+    ],
+  )
+  ipc_sort_aset(m, d, ws)
 
 
 @wp.kernel
@@ -1428,11 +1597,12 @@ def _ipc_init_verts_step_kernel(
   pbody: wp.array[int],
   pin_has_chain: wp.array[bool],
   pin_num_chain: wp.array[int],
-  pin_chain_dof: wp.array2d[int],
+  pin_chain_adr: wp.array[int],
+  pin_chain_dof: wp.array[int],
   wtil: wp.array2d[float],
   timestep: wp.array[float],
   # Out:
-  pin_chain_axis_out: wp.array3d[wp.vec3],
+  pin_dof_axis_out: wp.array2d[wp.vec3],
   pvel_out: wp.array2d[wp.vec3],
   xold_out: wp.array2d[wp.vec3],
   xfree_out: wp.array2d[wp.vec3],
@@ -1455,9 +1625,10 @@ def _ipc_init_verts_step_kernel(
     xtil_out[worldid, vg] = x0 + (R * wv) * h
   elif pin_has_chain[vg]:
     nchain = pin_num_chain[vg]
+    adr = pin_chain_adr[vg]
     disp = wp.vec3(0.0, 0.0, 0.0)
     for j in range(nchain):
-      da = pin_chain_dof[vg, j]
+      da = pin_chain_dof[adr + j]
       ax = wp.spatial_bottom(cdof_in[worldid, da])
       if wp.dot(ax, ax) < 1e-12:
         jid = dof_jntid[da]
@@ -1467,7 +1638,7 @@ def _ipc_init_verts_step_kernel(
         ax_len = wp.length(ax)
         if ax_len > 1e-12:
           ax = ax / ax_len
-      pin_chain_axis_out[worldid, vg, j] = ax
+      pin_dof_axis_out[worldid, da] = ax
       pv += ax * qvel_in[worldid, da]
       disp += ax * wtil[worldid, da]
     xtil_out[worldid, vg] = x0 + disp * h
@@ -1486,8 +1657,9 @@ def _ipc_points_kernel(
   pbody: wp.array[int],
   pin_has_chain: wp.array[bool],
   pin_num_chain: wp.array[int],
-  pin_chain_dof: wp.array2d[int],
-  pin_chain_axis: wp.array3d[wp.vec3],
+  pin_chain_adr: wp.array[int],
+  pin_chain_dof: wp.array[int],
+  pin_dof_axis: wp.array2d[wp.vec3],
   w_arr: wp.array2d[float],
   xold: wp.array2d[wp.vec3],
   timestep: wp.array[float],
@@ -1507,9 +1679,11 @@ def _ipc_points_kernel(
     x_out[worldid, pt] = x0 + (R * wv) * h
   elif pin_has_chain[pt]:
     nchain = pin_num_chain[pt]
+    adr = pin_chain_adr[pt]
     disp = wp.vec3(0.0, 0.0, 0.0)
     for j in range(nchain):
-      disp += pin_chain_axis[worldid, pt, j] * w_arr[worldid, pin_chain_dof[pt, j]]
+      jdof = pin_chain_dof[adr + j]
+      disp += pin_dof_axis[worldid, jdof] * w_arr[worldid, jdof]
     x_out[worldid, pt] = x0 + disp * h
   else:
     x_out[worldid, pt] = x0
@@ -1534,8 +1708,9 @@ def _points(
       ws.pbody,
       ws.pin_has_chain,
       ws.pin_num_chain,
+      ws.pin_chain_adr,
       ws.pin_chain_dof,
-      ws.pin_chain_axis,
+      ws.pin_dof_axis,
       w_arr,
       ws.xold,
       m.opt.timestep,
@@ -1605,36 +1780,50 @@ def _ipc_trial_w_kernel(
     wn_out[worldid, dofid] = 0.0
 
 
-@wp.kernel
-def _ipc_linesearch_eval_trial_kernel(
-  # In:
-  world_done: wp.array[int],
-  ls_done: wp.array[int],
-  ls_iter: wp.array[int],
-  merit_energy: wp.array[float],
-  merit_energy_trial: wp.array[float],
-  newton_converged: wp.array[int],
-  # Out:
-  ls_done_out: wp.array[int],
-  last_ls_alpha_out: wp.array[float],
-  ls_accept_out: wp.array[int],
-):
-  worldid = wp.tid()
-  if world_done[worldid] != 0 or ls_done[worldid] != 0:
-    ls_accept_out[worldid] = 0
-    return
-  it = ls_iter[0]
-  alpha = 1.0 / float(1 << it)
-  if merit_energy_trial[worldid] <= merit_energy[worldid] + 1e-12 or newton_converged[worldid] != 0:
-    ls_done_out[worldid] = 1
-    last_ls_alpha_out[worldid] = alpha
-    ls_accept_out[worldid] = 1
-  elif it >= 7:
-    ls_done_out[worldid] = 1
-    last_ls_alpha_out[worldid] = 0.5 * alpha
-    ls_accept_out[worldid] = 2
-  else:
-    ls_accept_out[worldid] = 0
+@cache_kernel
+def _ipc_linesearch_eval_trial_kernel(warn_overflow: int):
+  @wp.kernel(module="unique", enable_backward=False)
+  def kernel(
+    # In:
+    world_done: wp.array[int],
+    ls_done: wp.array[int],
+    ls_iter: wp.array[int],
+    merit_energy: wp.array[float],
+    merit_energy_trial: wp.array[float],
+    newton_converged: wp.array[int],
+    # Data out:
+    overflow_out: wp.array[int],
+    # Out:
+    ls_done_out: wp.array[int],
+    last_ls_alpha_out: wp.array[float],
+    ls_accept_out: wp.array[int],
+  ):
+    worldid = wp.tid()
+    if world_done[worldid] != 0 or ls_done[worldid] != 0:
+      ls_accept_out[worldid] = 0
+      return
+    it = ls_iter[0]
+    alpha = 1.0 / float(1 << it)
+    if merit_energy_trial[worldid] <= merit_energy[worldid] + 1e-12 or newton_converged[worldid] != 0:
+      ls_done_out[worldid] = 1
+      last_ls_alpha_out[worldid] = alpha
+      ls_accept_out[worldid] = 1
+    elif it >= IPC_LS_ITERATIONS - 1:
+      # matching engine_ipc.c, the final trial is accepted and alpha is halved once more
+      ls_done_out[worldid] = 1
+      last_ls_alpha_out[worldid] = 0.5 * alpha
+      ls_accept_out[worldid] = 1
+      if wp.static(bool(warn_overflow & OverflowType.LS_ITERATIONS)):
+        wp.printf(
+          "IPC line search iterations limit reached (world %d)\n"
+          "To disable the print warning: m.opt.warn_overflow &= ~mjw.OverflowType.LS_ITERATIONS (or = 0 for all)\n",
+          worldid,
+        )
+      wp.atomic_or(overflow_out, worldid, wp.static(OverflowType.LS_ITERATIONS))
+    else:
+      ls_accept_out[worldid] = 0
+
+  return kernel
 
 
 @wp.kernel
@@ -1657,17 +1846,11 @@ def _ipc_linesearch_commit_wx_kernel(
   ls_cond_out: wp.array[int],
 ):
   worldid, tid = wp.tid()
-  acc = accept[worldid]
-  if acc == 1:
+  if accept[worldid] != 0:
     if tid < nv:
       w_out[worldid, tid] = wn[worldid, tid]
     if tid < nfv:
       x_out[worldid, tid] = xn[worldid, tid]
-  elif acc == 2:
-    if tid < nv:
-      w_out[worldid, tid] = 0.5 * (w_out[worldid, tid] + wn[worldid, tid])
-    if tid < nfv:
-      x_out[worldid, tid] = 0.5 * (x_out[worldid, tid] + xn[worldid, tid])
   if worldid == 0 and tid == 0:
     it = ls_iter_out[0] + 1
     ls_iter_out[0] = it
@@ -1676,7 +1859,7 @@ def _ipc_linesearch_commit_wx_kernel(
       if world_done_in[w] == 0 and ls_done_in[w] == 0:
         all_done = int(0)
         break
-    ls_cond_out[0] = 0 if (all_done == 1 or it >= 8) else 1
+    ls_cond_out[0] = 0 if (all_done == 1 or it >= IPC_LS_ITERATIONS) else 1
 
 
 @wp.kernel(module="unique")
@@ -1711,7 +1894,7 @@ def _ipc_eval_merit_contact_kernel(
     lniv = pair_lniv[worldid, s]
     if lniv <= 0:
       continue
-    craw = pair_linear_gap(
+    craw = _pair_linear_gap(
       aset_ld0[worldid, s],
       aset_standoff[worldid, s],
       pair_ln[worldid, s],
@@ -1881,19 +2064,6 @@ def _ipc_eval_merit_native_efc_kernel(is_sparse: bool):
 
 
 @wp.kernel
-def _ipc_clear_qfrc_rows_kernel(
-  # In:
-  ws_done: wp.array[int],
-  # Out:
-  qfrc_rows_out: wp.array2d[float],
-):
-  worldid, dofid = wp.tid()
-  if ws_done[worldid] != 0:
-    return
-  qfrc_rows_out[worldid, dofid] = 0.0
-
-
-@wp.kernel
 def _ipc_eval_row_force_dense_kernel(
   # Data in:
   nefc_in: wp.array[int],
@@ -1934,33 +2104,30 @@ def _ipc_eval_row_force_sparse_kernel(
   # Out:
   qfrc_rows_out: wp.array2d[float],
 ):
-  worldid, r_idx = wp.tid()
+  worldid = wp.tid()
   if ws_done[worldid] != 0:
     return
+  for i in range(qfrc_rows_out.shape[1]):
+    qfrc_rows_out[worldid, i] = 0.0
   njmax = efc_force_in.shape[1]
   nefc0 = wp.min(saved_nefc[worldid], njmax)
   nefc1 = wp.min(nefc_in[worldid], njmax)
-  r = nefc0 + r_idx
-  if r >= nefc1:
-    return
-  f = efc_force_in[worldid, r]
-  if f == 0.0:
-    return
-  nnz = efc_J_rownnz_in[worldid, r]
-  adr = efc_J_rowadr_in[worldid, r]
-  for a in range(nnz):
-    col = efc_J_colind_in[worldid, 0, adr + a]
-    val = efc_J_in[worldid, 0, adr + a]
-    wp.atomic_add(qfrc_rows_out, worldid, col, val * f)
+  for r in range(nefc0, nefc1):
+    f = efc_force_in[worldid, r]
+    if f == 0.0:
+      continue
+    adr = efc_J_rowadr_in[worldid, r]
+    for a in range(efc_J_rownnz_in[worldid, r]):
+      col = efc_J_colind_in[worldid, 0, adr + a]
+      qfrc_rows_out[worldid, col] += efc_J_in[worldid, 0, adr + a] * f
 
 
 def _efc_row_force(m: Model, d: Data, ws: IpcWorkspace):
   """Accumulates generalized constraint forces from published IPC rows (ipc_efcRowForce)."""
   if m.is_sparse:
-    wp.launch(_ipc_clear_qfrc_rows_kernel, dim=(d.nworld, m.nv), inputs=[ws.ws_done], outputs=[ws.qfrc_rows])
     wp.launch(
       _ipc_eval_row_force_sparse_kernel,
-      dim=(d.nworld, d.njmax),
+      dim=d.nworld,
       inputs=[
         d.nefc,
         d.efc.J_rownnz,
@@ -2108,13 +2275,6 @@ def _ipc_eval_pairs_kernel(
     xf3,
   )
 
-  if pt <= int(FlexPairType.FLEX_EDGE_EDGE) and dd <= 0.0:
-    pair_in_ws_out[worldid, s] = 0
-    pair_lniv_out[worldid, s] = 0
-    pair_rownnz_out[worldid, s] = 0
-    aset_ld0_out[worldid, s] = float(1e30)
-    return
-
   row_entries = int(0)
   for k in range(lniv):
     vk = liv[k]
@@ -2205,7 +2365,7 @@ def ipc_check_omitted_pairs_kernel(
   lniv = pair_lniv[worldid, s]
   if lniv == 0:
     return
-  craw = pair_linear_gap(
+  craw = _pair_linear_gap(
     aset_ld0[worldid, s],
     aset_standoff[worldid, s],
     pair_ln[worldid, s],
@@ -2223,7 +2383,7 @@ def ipc_check_omitted_pairs_kernel(
 
 
 @wp.kernel
-def _ipc_init_ws_kernel(
+def ipc_init_ws_kernel(
   # Model:
   is_sparse: bool,
   # Data in:
@@ -2248,11 +2408,12 @@ def _ipc_init_ws_kernel(
     ws_done_out[worldid] = world_done_in[worldid]
     active_count_out[worldid] = 0
     if is_sparse:
+      # native rows are not ordered by rowadr, append after the largest row end
       snefc = wp.min(saved_nefc[worldid], efc_J_rowadr_in.shape[1])
-      if snefc > 0:
-        active_nnz_out[worldid] = efc_J_rowadr_in[worldid, snefc - 1] + efc_J_rownnz_in[worldid, snefc - 1]
-      else:
-        active_nnz_out[worldid] = 0
+      nnz = int(0)
+      for r in range(snefc):
+        nnz = wp.max(nnz, efc_J_rowadr_in[worldid, r] + efc_J_rownnz_in[worldid, r])
+      active_nnz_out[worldid] = nnz
     if worldid == 0:
       ws_cond_out[0] = 1
       ws_iter_out[0] = 0
@@ -2294,7 +2455,7 @@ def _ipc_warmstart_select_kernel(
 
 @cache_kernel
 def _ipc_publish_assign_rows_kernel(warn_overflow: int):
-  @wp.kernel(module="unique")
+  @wp.kernel(module="unique", enable_backward=False)
   def kernel(
     # Model:
     is_sparse: bool,
@@ -2315,16 +2476,62 @@ def _ipc_publish_assign_rows_kernel(warn_overflow: int):
     active_nnz_out: wp.array[int],
     pair_in_ws_out: wp.array2d[int],
   ):
-    worldid = wp.tid()
+    """Assigns rows to the working-set pairs in slot order, one block per world.
+
+    A block scan assigns them in parallel when every row fits; otherwise one thread assigns them in
+    order, skipping the rows that overflow.
+    """
+    worldid, tid = wp.tid()
     if ws_done[worldid] != 0:
       return
+    nthread = wp.block_dim()
     n = wp.min(naset[worldid], pair_in_ws_out.shape[1])
     snefc = wp.min(saved_nefc[worldid], njmax_in)
     act_cnt = active_count_out[worldid]
     act_nnz = active_nnz_out[worldid]
+
+    # rows and nonzeros of each thread's contiguous chunk of slots
+    chunk = (n + nthread - 1) // nthread
+    s0 = wp.min(tid * chunk, n)
+    s1 = wp.min(s0 + chunk, n)
+    cnt_local = int(0)
+    nnz_local = int(0)
+    for s in range(s0, s1):
+      if pair_in_ws_out[worldid, s] == 1:
+        row_entries = pair_rownnz[worldid, s]
+        if row_entries > 0:
+          cnt_local += 1
+          nnz_local += row_entries
+    cnt_pre = wp.untile(wp.tile_scan_exclusive(wp.tile(cnt_local)))
+    nnz_pre = wp.untile(wp.tile_scan_exclusive(wp.tile(nnz_local)))
+    cnt_tot = wp.tile_sum(wp.tile(cnt_local))[0]
+    nnz_tot = wp.tile_sum(wp.tile(nnz_local))[0]
+    fits = snefc + act_cnt + cnt_tot <= njmax_in and (not is_sparse or act_nnz + nnz_tot <= njmax_nnz_in)
+    if fits:
+      r = snefc + act_cnt + cnt_pre
+      adr = act_nnz + nnz_pre
+      for s in range(s0, s1):
+        if pair_in_ws_out[worldid, s] != 1:
+          continue
+        row_entries = pair_rownnz[worldid, s]
+        if row_entries == 0:
+          pair_in_ws_out[worldid, s] = 2
+          continue
+        if is_sparse:
+          efc_J_rowadr_out[worldid, r] = adr
+          adr += row_entries
+        pair_in_ws_out[worldid, s] = -(r + 1)
+        r += 1
+      if tid == 0:
+        active_count_out[worldid] = act_cnt + cnt_tot
+        active_nnz_out[worldid] = act_nnz + nnz_tot
+        nefc_out[worldid] = wp.min(snefc + act_cnt + cnt_tot, njmax_in)
+      return
+    if tid != 0:
+      return
+
     overflow_nefc = bool(False)
     overflow_nnz = bool(False)
-
     for s in range(n):
       if pair_in_ws_out[worldid, s] != 1:
         continue
@@ -2357,13 +2564,21 @@ def _ipc_publish_assign_rows_kernel(warn_overflow: int):
         pair_in_ws_out[worldid, s] = -(r + 1)
 
     if overflow_nefc:
-      if wp.static(warn_overflow):
-        wp.printf("Error: scalar constraints larger than maximum size (%d)\n", njmax_in)
-      wp.atomic_or(overflow_out, worldid, wp.static(OverflowType.NEFC))
+      if wp.static(bool(warn_overflow & OverflowType.NEFC)):
+        wp.printf(
+          "IPC constraint rows overflow - please increase njmax beyond %d\n"
+          "To disable the print warning: m.opt.warn_overflow &= ~mjw.OverflowType.NEFC (or = 0 for all)\n",
+          njmax_in,
+        )
+      overflow_out[worldid] = overflow_out[worldid] | wp.static(OverflowType.NEFC)
     if overflow_nnz:
-      if wp.static(warn_overflow):
-        wp.printf("Error: constraint Jacobian NNZ larger than maximum size (%d)\n", njmax_nnz_in)
-      wp.atomic_or(overflow_out, worldid, wp.static(OverflowType.NJMAX_NNZ))
+      if wp.static(bool(warn_overflow & OverflowType.NJMAX_NNZ)):
+        wp.printf(
+          "IPC constraint Jacobian nonzeros overflow - please increase njmax_nnz beyond %d\n"
+          "To disable the print warning: m.opt.warn_overflow &= ~mjw.OverflowType.NJMAX_NNZ (or = 0 for all)\n",
+          njmax_nnz_in,
+        )
+      overflow_out[worldid] = overflow_out[worldid] | wp.static(OverflowType.NJMAX_NNZ)
 
     active_count_out[worldid] = act_cnt
     active_nnz_out[worldid] = act_nnz
@@ -2391,45 +2606,6 @@ def _ipc_zero_dense_efc_rows_kernel(
   efc_J_out[worldid, r, c] = 0.0
 
 
-@wp.func
-def _init_published_efc_row(
-  # In:
-  worldid: int,
-  s: int,
-  r: int,
-  timestep: wp.array[float],
-  aset_mu: wp.array2d[float],
-  aset_ld0: wp.array2d[float],
-  aset_standoff: wp.array2d[float],
-  aset_lam: wp.array2d[float],
-  aset_cnt: wp.array2d[int],
-  # Data out:
-  efc_type_out: wp.array2d[int],
-  efc_id_out: wp.array2d[int],
-  efc_D_out: wp.array2d[float],
-  efc_frictionloss_out: wp.array2d[float],
-  efc_force_out: wp.array2d[float],
-  efc_state_out: wp.array2d[int],
-):
-  """Initializes published EFC row metadata and returns (h, h2, refc)."""
-  h = timestep[worldid % timestep.shape[0]]
-  h2 = h * h
-  mu = aset_mu[worldid, s]
-  dd = aset_ld0[worldid, s]
-  delta = aset_standoff[worldid, s]
-  lam_over_mu = aset_lam[worldid, s] / wp.max(mu, 1e-12)
-
-  efc_type_out[worldid, r] = int(ConstraintType.CONTACT_FRICTIONLESS)
-  efc_id_out[worldid, r] = -1
-  efc_D_out[worldid, r] = _ipc_penalty_scale(mu, aset_cnt[worldid, s]) / h2
-  efc_frictionloss_out[worldid, r] = 0.0
-  efc_force_out[worldid, r] = 0.0
-  efc_state_out[worldid, r] = int(ConstraintState.SATISFIED)
-
-  refc = -(dd - delta) + lam_over_mu
-  return h, h2, refc
-
-
 @wp.kernel
 def _ipc_publish_dense_pairs_kernel(
   # Data in:
@@ -2455,8 +2631,9 @@ def _ipc_publish_dense_pairs_kernel(
   timestep: wp.array[float],
   pin_has_chain: wp.array[bool],
   pin_num_chain: wp.array[int],
-  pin_chain_dof: wp.array2d[int],
-  pin_chain_axis: wp.array3d[wp.vec3],
+  pin_chain_adr: wp.array[int],
+  pin_chain_dof: wp.array[int],
+  pin_dof_axis: wp.array2d[wp.vec3],
   # Data out:
   efc_type_out: wp.array2d[int],
   efc_id_out: wp.array2d[int],
@@ -2518,9 +2695,10 @@ def _ipc_publish_dense_pairs_kernel(
     elif pin_has_chain[vk]:
       refc -= cwk * wp.dot(ln, xo_minus_xf + pvel[worldid, vk] * h)
       nchain = pin_num_chain[vk]
+      adr = pin_chain_adr[vk]
       for j in range(nchain):
-        jdof = pin_chain_dof[vk, j]
-        ax = pin_chain_axis[worldid, vk, j]
+        jdof = pin_chain_dof[adr + j]
+        ax = pin_dof_axis[worldid, jdof]
         efc_J_out[worldid, r, jdof] += cwk_h2 * wp.dot(ln, ax)
 
   efc_aref_out[worldid, r] = refc
@@ -2552,8 +2730,9 @@ def _ipc_publish_sparse_pairs_kernel(
   timestep: wp.array[float],
   pin_has_chain: wp.array[bool],
   pin_num_chain: wp.array[int],
-  pin_chain_dof: wp.array2d[int],
-  pin_chain_axis: wp.array3d[wp.vec3],
+  pin_chain_adr: wp.array[int],
+  pin_chain_dof: wp.array[int],
+  pin_dof_axis: wp.array2d[wp.vec3],
   # Data out:
   efc_type_out: wp.array2d[int],
   efc_id_out: wp.array2d[int],
@@ -2628,9 +2807,10 @@ def _ipc_publish_sparse_pairs_kernel(
     elif pin_has_chain[vk]:
       refc -= cwk * wp.dot(ln, xo_minus_xf + pvel[worldid, vk] * h)
       nchain = pin_num_chain[vk]
+      adr = pin_chain_adr[vk]
       for j in range(nchain):
-        jdof = pin_chain_dof[vk, j]
-        ax = pin_chain_axis[worldid, vk, j]
+        jdof = pin_chain_dof[adr + j]
+        ax = pin_dof_axis[worldid, jdof]
         efc_J_colind_out[worldid, 0, rowadr + cur] = jdof
         efc_J_out[worldid, 0, rowadr + cur] = cwk_h2 * wp.dot(ln, ax)
         cur += 1
@@ -2666,9 +2846,10 @@ def _ipc_publish_sparse_pairs_kernel(
 def _efc_publish(m: Model, d: Data, ws: IpcWorkspace, max_aset: int):
   """Assigns and populates EFC rows for newly added working-set pairs (ipc_efcPublish)."""
   nworld = d.nworld
-  wp.launch(
+  wp.launch_tiled(
     _ipc_publish_assign_rows_kernel(int(m.opt.warn_overflow)),
     dim=nworld,
+    block_dim=m.block_dim.ipc_publish,
     inputs=[
       m.is_sparse,
       d.njmax,
@@ -2714,8 +2895,9 @@ def _efc_publish(m: Model, d: Data, ws: IpcWorkspace, max_aset: int):
         m.opt.timestep,
         ws.pin_has_chain,
         ws.pin_num_chain,
+        ws.pin_chain_adr,
         ws.pin_chain_dof,
-        ws.pin_chain_axis,
+        ws.pin_dof_axis,
       ],
       outputs=[
         d.efc.type,
@@ -2767,8 +2949,9 @@ def _efc_publish(m: Model, d: Data, ws: IpcWorkspace, max_aset: int):
         m.opt.timestep,
         ws.pin_has_chain,
         ws.pin_num_chain,
+        ws.pin_chain_adr,
         ws.pin_chain_dof,
-        ws.pin_chain_axis,
+        ws.pin_dof_axis,
       ],
       outputs=[
         d.efc.type,
@@ -2862,33 +3045,41 @@ def _ipc_post_solve_kernel(
     ddw_out[worldid, dofid] = 0.0
 
 
-@wp.kernel
-def _ipc_update_and_check_ws_done_kernel(
-  # Data in:
-  nworld_in: int,
-  # In:
-  max_rounds: int,
-  ws_nadd_in: wp.array[int],
-  # Out:
-  ws_done_out: wp.array[int],
-  ws_iter_out: wp.array[int],
-  ws_cond_out: wp.array[int],
-):
-  worldid = wp.tid()
-  if ws_nadd_in[worldid] == 0:
-    ws_done_out[worldid] = 1
-  if worldid == 0:
-    it = ws_iter_out[0] + 1
-    ws_iter_out[0] = it
-    if it >= max_rounds:
-      ws_cond_out[0] = 0
-    else:
+@cache_kernel
+def ipc_update_and_check_ws_done_kernel(warn_overflow: int):
+  @wp.kernel(module="unique", enable_backward=False)
+  def kernel(
+    # In:
+    ws_nadd_in: wp.array[int],
+    # Data out:
+    overflow_out: wp.array[int],
+    # Out:
+    ws_done_out: wp.array[int],
+    ws_iter_out: wp.array[int],
+    ws_cond_out: wp.array[int],
+  ):
+    worldid = wp.tid()
+    if ws_nadd_in[worldid] == 0:
+      ws_done_out[worldid] = 1
+    if worldid == 0:
+      nworld = ws_nadd_in.shape[0]
+      it = ws_iter_out[0] + 1
+      ws_iter_out[0] = it
       has_added = int(0)
-      for w in range(nworld_in):
+      for w in range(nworld):
         if ws_nadd_in[w] > 0:
           has_added = int(1)
-          break
-      ws_cond_out[0] = 1 if has_added != 0 else 0
+          if it >= IPC_WS_ROUNDS:
+            if wp.static(bool(warn_overflow & OverflowType.ITERATIONS)):
+              wp.printf(
+                "IPC working set rounds limit reached (world %d)\n"
+                "To disable the print warning: m.opt.warn_overflow &= ~mjw.OverflowType.ITERATIONS (or = 0 for all)\n",
+                w,
+              )
+            overflow_out[w] = overflow_out[w] | wp.static(OverflowType.ITERATIONS)
+      ws_cond_out[0] = 0 if it >= IPC_WS_ROUNDS else has_added
+
+  return kernel
 
 
 @wp.kernel
@@ -2920,25 +3111,24 @@ def _ipc_update_lambda_kernel(
 
   lam = aset_lam_out[worldid, s]
   lniv = pair_lniv[worldid, s]
-  if lniv > 0:
-    dd0 = aset_ld0[worldid, s]
-    if dd0 < 1e20 or lam > 0.0:
-      mu = aset_mu[worldid, s]
-      craw = pair_linear_gap(
-        dd0,
-        aset_standoff[worldid, s],
-        pair_ln[worldid, s],
-        pair_liv[worldid, s],
-        pair_lcw[worldid, s],
-        lniv,
-        x,
-        xfree,
-        worldid,
-      )
-      active = craw - lam / mu <= 0.0
-      lam = lam - craw * mu if active else 0.0
-      aset_lam_out[worldid, s] = lam
-      aset_cnt_out[worldid, s] = _ipc_age_step(aset_cnt_out[worldid, s], active)
+  dd0 = aset_ld0[worldid, s]
+  if dd0 < 1e20 or lam > 0.0:
+    mu = aset_mu[worldid, s]
+    craw = _pair_linear_gap(
+      dd0,
+      aset_standoff[worldid, s],
+      pair_ln[worldid, s],
+      pair_liv[worldid, s],
+      pair_lcw[worldid, s],
+      lniv,
+      x,
+      xfree,
+      worldid,
+    )
+    active = craw - lam / mu <= 0.0
+    lam = lam - craw * mu if active else 0.0
+    aset_lam_out[worldid, s] = lam
+    aset_cnt_out[worldid, s] = _ipc_age_step(aset_cnt_out[worldid, s], active)
 
   if lam > 0.0:
     idx = aset_idx[worldid, s]
@@ -3064,7 +3254,7 @@ def _ipc_prepare_commit_kernel(warn_overflow: int):
     overflow_out: wp.array[int],
     # Out:
     wfree_out: wp.array2d[float],
-    qvel_old_out: wp.array2d[float],
+    qvel_new_out: wp.array2d[float],
   ):
     worldid, dofid = wp.tid()
     h = timestep[worldid % timestep.shape[0]]
@@ -3074,16 +3264,26 @@ def _ipc_prepare_commit_kernel(warn_overflow: int):
         overflow_out[worldid] = overflow_out[worldid] | wp.static(OverflowType.ITERATIONS)
         if wp.static(bool(warn_overflow & OverflowType.ITERATIONS)):
           if stall[worldid] >= IPC_STALL_MAX:
-            wp.printf("Warning: IPC stalled at beta=%.4f (world %d)\n", beta[worldid], worldid)
+            wp.printf(
+              "IPC stalled at beta=%.4f (world %d)\n"
+              "To disable the print warning: m.opt.warn_overflow &= ~mjw.OverflowType.ITERATIONS (or = 0 for all)\n",
+              beta[worldid],
+              worldid,
+            )
           else:
-            wp.printf("Warning: IPC outer-iteration limit reached at beta=%.4f (world %d)\n", beta[worldid], worldid)
+            wp.printf(
+              "IPC outer iterations limit reached at beta=%.4f (world %d)\n"
+              "To disable the print warning: m.opt.warn_overflow &= ~mjw.OverflowType.ITERATIONS (or = 0 for all)\n",
+              beta[worldid],
+              worldid,
+            )
     if own[dofid]:
       wf = wfree_out[worldid, dofid]
-      qvel_old_out[worldid, dofid] = wf
+      qvel_new_out[worldid, dofid] = wf
       qacc_out[worldid, dofid] = (wf - qvel_in[worldid, dofid]) / h
     else:
       wfree_out[worldid, dofid] = 0.0
-      qvel_old_out[worldid, dofid] = qvel_in[worldid, dofid]
+      qvel_new_out[worldid, dofid] = qvel_in[worldid, dofid]
       qacc_out[worldid, dofid] = qacc_smooth_in[worldid, dofid]
 
   return kernel
@@ -3166,9 +3366,8 @@ def _eval_gauss_and_efc_energy(
     d,
     ws.M_da,
     ws.da,
-    efm_con=sctx.efm_con if sctx is not None else None,
-    wvec=sctx.flex_wvec if sctx is not None else None,
-    wres=sctx.flex_wres if sctx is not None else None,
+    efm_con=sctx.efm_con,
+    flex_scratch=sctx.flex_scratch,
   )
   wp.launch_tiled(
     _ipc_eval_gauss_energy_kernel,
@@ -3213,7 +3412,7 @@ def _eval_merit_energy(
 ):
   """Evaluates total augmented-Lagrangian merit energy (Gauss + native EFC + contact)."""
   out_energy.zero_()
-  qacc_eval = ws.qvel_old
+  qacc_eval = ws.wtil
   wp.launch(
     _ipc_tangent_da_kernel,
     dim=(d.nworld, m.nv),
@@ -3267,8 +3466,6 @@ def ipc(m: Model, d: Data, ws: Optional[IpcWorkspace] = None):
 
   ipc_update_geom_features(m, d, ws)
 
-  if ws.solver_ctx is None:
-    ws.solver_ctx = solver.create_solver_context(m, d)
   ctx = ws.solver_ctx
   solver.prepare_solver_context(m, d, ctx)
 
@@ -3317,12 +3514,13 @@ def ipc(m: Model, d: Data, ws: Optional[IpcWorkspace] = None):
       ws.pbody,
       ws.pin_has_chain,
       ws.pin_num_chain,
+      ws.pin_chain_adr,
       ws.pin_chain_dof,
       ws.wtil,
       m.opt.timestep,
     ],
     outputs=[
-      ws.pin_chain_axis,
+      ws.pin_dof_axis,
       ws.pvel,
       ws.xold,
       ws.xfree,
@@ -3348,8 +3546,12 @@ def ipc(m: Model, d: Data, ws: Optional[IpcWorkspace] = None):
   )
 
   # Outer loop
-  use_graph_cond = bool(m.opt.graph_conditional and wp.get_device().is_cuda)
-  outer_cap = 1024 if use_graph_cond else 32
+  # wp.capture_while exits on convergence when eager (host readback) or captured with graph
+  # conditionals; a capture without graph conditionals requires static loops
+  device = d.qacc.device
+  use_while = bool(m.opt.graph_conditional or not (device.is_cuda and device.is_capturing))
+  outer_cap = IPC_OUTER_ITERATIONS if use_while else IPC_STATIC_OUTER_ITERATIONS
+  warn_overflow = int(m.opt.warn_overflow)
 
   def _ipc_outer_iteration():
     # Linearize active set (aset) at xfree and build initial working set
@@ -3400,7 +3602,7 @@ def ipc(m: Model, d: Data, ws: Optional[IpcWorkspace] = None):
 
     # Initialize working-set rounds, warmstart, and incremental EFC publishing state
     wp.launch(
-      _ipc_init_ws_kernel,
+      ipc_init_ws_kernel,
       dim=(nworld, nv),
       inputs=[
         m.is_sparse,
@@ -3428,6 +3630,7 @@ def ipc(m: Model, d: Data, ws: Optional[IpcWorkspace] = None):
 
       # Solve coupled subproblem on GPU across all worlds
       solver.solve(m, d, ctx=ctx, skip=ws.ws_done)
+      forward.launch_discrete_free_gyro(m, d, d.qacc, d.qacc, False, skip=ws.ws_done)
       _efc_row_force(m, d, ws)
 
       # Post solve: compute proposal velocity in ws.wn, ddw, and update qacc_warmstart
@@ -3468,24 +3671,16 @@ def ipc(m: Model, d: Data, ws: Optional[IpcWorkspace] = None):
         outputs=[ws.pair_in_ws, ws.ws_nadd],
       )
       wp.launch(
-        _ipc_update_and_check_ws_done_kernel,
+        ipc_update_and_check_ws_done_kernel(warn_overflow),
         dim=nworld,
-        inputs=[
-          nworld,
-          8,
-          ws.ws_nadd,
-        ],
-        outputs=[
-          ws.ws_done,
-          ws.ws_iter,
-          ws.ws_cond,
-        ],
+        inputs=[ws.ws_nadd],
+        outputs=[d.overflow, ws.ws_done, ws.ws_iter, ws.ws_cond],
       )
 
-    if use_graph_cond:
+    if use_while:
       wp.capture_while(ws.ws_cond, while_body=_ipc_ws_round)
     else:
-      for _ in range(8):
+      for _ in range(IPC_WS_ROUNDS):
         _ipc_ws_round()
 
     # Restore qacc_warmstart and nefc, and initialize line-search state
@@ -3518,7 +3713,7 @@ def ipc(m: Model, d: Data, ws: Optional[IpcWorkspace] = None):
       _eval_merit_energy(m, d, ws, ws.wn, ws.xn, ws.merit_energy_trial, ws.ls_done)
 
       wp.launch(
-        _ipc_linesearch_eval_trial_kernel,
+        _ipc_linesearch_eval_trial_kernel(warn_overflow),
         dim=nworld,
         inputs=[
           ws.world_done,
@@ -3529,6 +3724,7 @@ def ipc(m: Model, d: Data, ws: Optional[IpcWorkspace] = None):
           ws.newton_converged,
         ],
         outputs=[
+          d.overflow,
           ws.ls_done,
           ws.last_ls_alpha,
           ws.ls_accept,
@@ -3555,10 +3751,10 @@ def ipc(m: Model, d: Data, ws: Optional[IpcWorkspace] = None):
         ],
       )
 
-    if use_graph_cond:
+    if use_while:
       wp.capture_while(ws.ls_cond, while_body=_ipc_ls_round)
     else:
-      for _ls in range(8):
+      for _ in range(IPC_LS_ITERATIONS):
         _ipc_ls_round()
 
     # Update persistent pair multipliers across active set and sink into flexvert_lambda
@@ -3618,15 +3814,15 @@ def ipc(m: Model, d: Data, ws: Optional[IpcWorkspace] = None):
       ],
     )
 
-  if use_graph_cond:
+  if use_while:
     wp.capture_while(ws.outer_cond, while_body=_ipc_outer_iteration)
   else:
-    for _outer in range(outer_cap):
+    for _ in range(outer_cap):
       _ipc_outer_iteration()
 
   # Prepare committed accelerations and velocities
   wp.launch(
-    _ipc_prepare_commit_kernel(int(m.opt.warn_overflow)),
+    _ipc_prepare_commit_kernel(warn_overflow),
     dim=(nworld, nv),
     inputs=[
       d.qvel,
@@ -3642,7 +3838,7 @@ def ipc(m: Model, d: Data, ws: Optional[IpcWorkspace] = None):
       d.qacc,
       d.overflow,
       ws.wfree,
-      ws.qvel_old,
+      ws.wtil,
     ],
   )
 
@@ -3662,5 +3858,5 @@ def ipc(m: Model, d: Data, ws: Optional[IpcWorkspace] = None):
 
   # Advance state and restore IPC velocities and warmstart
   forward.advance(m, d, d.qacc, ws.wfree)
-  wp.copy(d.qvel, ws.qvel_old)
+  wp.copy(d.qvel, ws.wtil)
   wp.copy(d.qacc_warmstart, ws.ws_entry)

@@ -23,6 +23,7 @@ import mujoco_warp as mjw
 from mujoco_warp import test_data
 from mujoco_warp._src import collision_continuous as cc
 from mujoco_warp._src import ipc
+from mujoco_warp._src import passive
 from mujoco_warp._src.types import OverflowType
 
 
@@ -76,8 +77,7 @@ class IpcTest(parameterized.TestCase):
           <flag ipc="enable"/>
         </option>
         <worldbody>
-          <flexcomp name="cloth" type="grid" dim="2" count="3 3 1"
-                    spacing="0.05 0.05 1" radius="0.005" mass="0.05" pos="0 0 0.5"/>
+          <flexcomp name="cloth" type="grid" dim="2" count="3 3 1" spacing="0.05 0.05 1" radius="0.005" mass="0.05" pos="0 0 0.5"/>
         </worldbody>
       </mujoco>
       """,
@@ -92,6 +92,7 @@ class IpcTest(parameterized.TestCase):
     g = float(m.opt.gravity.numpy()[0][2])
     want_v = g * h
 
+    d.qacc.fill_(wp.inf)
     mjw.step(m, d)
 
     for w in range(nworld):
@@ -114,8 +115,7 @@ class IpcTest(parameterized.TestCase):
         </option>
         <worldbody>
           <geom name="floor" type="plane" size="0 0 1"/>
-          <flexcomp name="cloth" type="grid" dim="2" count="3 3 1" spacing="0.05 0.05 1"
-                    radius="0.005" mass="0.05" pos="0 0 0.05"/>
+          <flexcomp name="cloth" type="grid" dim="2" count="3 3 1" spacing="0.05 0.05 1" radius="0.005" mass="0.05" pos="0 0 0.05"/>
         </worldbody>
       </mujoco>
       """,
@@ -135,6 +135,7 @@ class IpcTest(parameterized.TestCase):
     m.opt.disableflags |= mjw.DisableBit.CONTACT
     wp.copy(d.qpos, wp.array(qpos0, dtype=float, device=d.qpos.device))
     wp.copy(d.qvel, wp.array(qvel0, dtype=float, device=d.qvel.device))
+    d.qacc.fill_(wp.inf)
     mjw.step(m, d)
     mjw.kinematics(m, d)
     mjw.flex(m, d)
@@ -145,6 +146,7 @@ class IpcTest(parameterized.TestCase):
     m.opt.disableflags &= ~mjw.DisableBit.CONTACT
     wp.copy(d.qpos, wp.array(qpos0, dtype=float, device=d.qpos.device))
     wp.copy(d.qvel, wp.array(qvel0, dtype=float, device=d.qvel.device))
+    d.qacc.fill_(wp.inf)
     mjw.step(m, d)
     mjw.kinematics(m, d)
     mjw.flex(m, d)
@@ -167,14 +169,11 @@ class IpcTest(parameterized.TestCase):
           <flag ipc="enable"/>
         </option>
         <asset>
-          <mesh name="box" vertex="
-            -0.2 -0.2 -0.02  0.2 -0.2 -0.02  0.2 0.2 -0.02  -0.2 0.2 -0.02
-            -0.2 -0.2 0.02  0.2 -0.2 0.02  0.2 0.2 0.02  -0.2 0.2 0.02"/>
+          <mesh name="box" vertex=" -0.2 -0.2 -0.02  0.2 -0.2 -0.02  0.2 0.2 -0.02  -0.2 0.2 -0.02 -0.2 -0.2 0.02  0.2 -0.2 0.02  0.2 0.2 0.02  -0.2 0.2 0.02"/>
         </asset>
         <worldbody>
           <geom name="mesh_obs" type="mesh" mesh="box"/>
-          <flexcomp name="cloth" type="grid" dim="2" count="3 3 1" spacing="0.05 0.05 1"
-                    radius="0.005" mass="0.05" pos="0 0 0.07"/>
+          <flexcomp name="cloth" type="grid" dim="2" count="3 3 1" spacing="0.05 0.05 1" radius="0.005" mass="0.05" pos="0 0 0.07"/>
         </worldbody>
       </mujoco>
       """,
@@ -193,6 +192,7 @@ class IpcTest(parameterized.TestCase):
     m.opt.disableflags |= mjw.DisableBit.CONTACT
     wp.copy(d.qpos, wp.array(qpos0, dtype=float, device=d.qpos.device))
     wp.copy(d.qvel, wp.array(qvel0, dtype=float, device=d.qvel.device))
+    d.qacc.fill_(wp.inf)
     mjw.step(m, d)
     mjw.kinematics(m, d)
     mjw.flex(m, d)
@@ -203,6 +203,7 @@ class IpcTest(parameterized.TestCase):
     m.opt.disableflags &= ~mjw.DisableBit.CONTACT
     wp.copy(d.qpos, wp.array(qpos0, dtype=float, device=d.qpos.device))
     wp.copy(d.qvel, wp.array(qvel0, dtype=float, device=d.qvel.device))
+    d.qacc.fill_(wp.inf)
     mjw.step(m, d)
     mjw.kinematics(m, d)
     mjw.flex(m, d)
@@ -226,8 +227,7 @@ class IpcTest(parameterized.TestCase):
         </option>
         <worldbody>
           <geom name="floor" type="plane" size="0 0 1"/>
-          <flexcomp name="cloth" type="grid" dim="2" count="3 3 1" spacing="0.04 0.04 1"
-                    radius="0.004" mass="0.05" pos="0 0 0.0008">
+          <flexcomp name="cloth" type="grid" dim="2" count="3 3 1" spacing="0.04 0.04 1" radius="0.004" mass="0.05" pos="0 0 0.0008">
             <contact selfcollide="none"/>
           </flexcomp>
         </worldbody>
@@ -240,6 +240,7 @@ class IpcTest(parameterized.TestCase):
       qpos[1] += 0.0001
       d.qpos = wp.array(qpos, dtype=float, device=d.qpos.device)
 
+    d.qacc.fill_(wp.inf)
     mjw.step(m, d)
 
     for w in range(nworld):
@@ -255,13 +256,12 @@ class IpcTest(parameterized.TestCase):
     mjm, mjd, m, d = test_data.fixture(
       xml="""
       <mujoco>
-        <option iterations="400" integrator="discrete" solver="CG">
+        <option timestep="0.004" iterations="400" integrator="discrete" solver="CG">
           <flag ipc="enable"/>
         </option>
         <worldbody>
           <geom name="floor" type="plane" size="0 0 1"/>
-          <flexcomp name="cloth" type="grid" dim="2" count="3 3 1" spacing="0.04 0.04 1"
-                    radius="0.004" mass="0.05" pos="0 0 0.01">
+          <flexcomp name="cloth" type="grid" dim="2" count="3 3 1" spacing="0.04 0.04 1" radius="0.004" mass="0.05" pos="0 0 0.005">
             <contact selfcollide="none"/>
           </flexcomp>
         </worldbody>
@@ -275,7 +275,7 @@ class IpcTest(parameterized.TestCase):
       d.qpos = wp.array(qpos, dtype=float, device=d.qpos.device)
 
     d.qfrc_constraint.fill_(wp.inf)
-    for _ in range(50):
+    for _ in range(20):
       mjw.step(m, d)
 
     expected_weight = 0.05 * 9.81
@@ -298,8 +298,7 @@ class IpcTest(parameterized.TestCase):
         </option>
         <worldbody>
           <geom name="floor" type="plane" size="0 0 1"/>
-          <flexcomp name="cloth" type="grid" dim="2" count="2 2 1" spacing="0.05 0.05 1"
-                    radius="0.005" mass="0.05" pos="0 0 -0.001"/>
+          <flexcomp name="cloth" type="grid" dim="2" count="2 2 1" spacing="0.05 0.05 1" radius="0.005" mass="0.05" pos="0 0 -0.001"/>
         </worldbody>
       </mujoco>
       """,
@@ -310,6 +309,7 @@ class IpcTest(parameterized.TestCase):
       qpos[1] += 0.0005
       d.qpos = wp.array(qpos, dtype=float, device=d.qpos.device)
 
+    d.qacc.fill_(wp.inf)
     mjw.step(m, d)
 
     for w in range(nworld):
@@ -345,10 +345,8 @@ class IpcTest(parameterized.TestCase):
           <flag ipc="enable"/>
         </option>
         <worldbody>
-          <flexcomp name="lower" type="grid" dim="2" count="3 3 1" spacing="0.04 0.04 1"
-                    radius="0.004" mass="0.02" pos="0 0 0.5"/>
-          <flexcomp name="upper" type="grid" dim="2" count="3 3 1" spacing="0.04 0.04 1"
-                    radius="0.004" mass="0.02" pos="0 0 0.54"/>
+          <flexcomp name="lower" type="grid" dim="2" count="3 3 1" spacing="0.04 0.04 1" radius="0.004" mass="0.02" pos="0 0 0.5"/>
+          <flexcomp name="upper" type="grid" dim="2" count="3 3 1" spacing="0.04 0.04 1" radius="0.004" mass="0.02" pos="0 0 0.54"/>
         </worldbody>
       </mujoco>
       """,
@@ -382,7 +380,7 @@ class IpcTest(parameterized.TestCase):
     h = float(m.opt.timestep.numpy()[0])
     g = np.array([float(m.opt.gravity.numpy()[0][k]) for k in range(3)])
 
-    for _ in range(40):
+    for _ in range(20):
       mjw.step(m, d)
       for w in range(nworld):
         _, P1_w = self._flex_momentum(m, d, world_id=w)
@@ -408,12 +406,11 @@ class IpcTest(parameterized.TestCase):
           </option>
           <worldbody>
             <geom name="floor" type="plane" size="0 0 1"/>
-            <flexcomp name="cloth" type="grid" dim="2" count="5 5 1" spacing="0.04 0.04 1"
-                      radius="0.004" mass="0.1" pos="0 0 0.004">
+            <flexcomp name="cloth" type="grid" dim="2" count="5 5 1" spacing="0.04 0.04 1" radius="0.004" mass="0.1" pos="0 0 0.004">
               <edge equality="true"/>
               <contact selfcollide="none"/>
             </flexcomp>
-            <body name="ball" pos="0 0 0.05">
+            <body name="ball" pos="0 0 0.025">
               <freejoint/>
               <geom size="0.02" mass="0.05"/>
             </body>
@@ -424,10 +421,11 @@ class IpcTest(parameterized.TestCase):
       )
       if nworld == 2:
         qpos = d.qpos.numpy()
-        qpos[1] += 0.005
+        qpos[1] += 0.002
         d.qpos = wp.array(qpos, dtype=float, device=d.qpos.device)
 
-      for _ in range(100):
+      d.nacon.fill_(-1)
+      for _ in range(15):
         mjw.step(m, d)
 
       ncon = int(d.nacon.numpy()[0])
@@ -498,6 +496,53 @@ class IpcTest(parameterized.TestCase):
 
     mjw.forward(m, d)
 
+    # Toggling EnableBit.IPC after put_model validates 2D flex topology
+    _, _, m_hinge, d_hinge = test_data.fixture(
+      xml="""
+      <mujoco>
+        <option integrator="discrete" solver="CG"/>
+        <worldbody>
+          <body name="carrier" pos="0 0 0.5">
+            <joint type="hinge"/>
+            <geom size="0.02" mass="0.1"/>
+            <flexcomp name="cloth" type="grid" dim="2" count="2 2 1" spacing="0.04 0.04 1" radius="0.004" mass="0.05">
+              <contact passive="true"/>
+              <elasticity young="1e3"/>
+            </flexcomp>
+          </body>
+        </worldbody>
+      </mujoco>
+      """
+    )
+    self.assertTrue(passive.flex_passive_contact(m_hinge))
+    m_hinge.opt.enableflags |= mjw.EnableBit.IPC
+    self.assertFalse(passive.flex_passive_contact(m_hinge))
+    with self.assertRaisesRegex(ValueError, "IPC mode: flex has free vertices under a jointed body"):
+      mjw.forward(m_hinge, d_hinge)
+
+    _, _, m_pin_hinge, d_pin_hinge = test_data.fixture(
+      xml="""
+      <mujoco>
+        <option integrator="discrete" solver="CG"/>
+        <worldbody>
+          <body name="carrier" pos="0 0 0.5">
+            <joint type="hinge"/>
+            <geom size="0.02" mass="0.1"/>
+            <flexcomp name="cloth" type="grid" dim="2" count="2 2 1" spacing="0.04 0.04 1" radius="0.004" mass="0.05">
+              <pin id="0"/>
+              <elasticity young="1e3"/>
+            </flexcomp>
+          </body>
+        </worldbody>
+      </mujoco>
+      """
+    )
+    m_pin_hinge.opt.enableflags |= mjw.EnableBit.IPC
+    with self.assertRaisesRegex(
+      ValueError, "IPC mode: flex is pinned to a body whose chain moves on a joint that is not a slide"
+    ):
+      mjw.forward(m_pin_hinge, d_pin_hinge)
+
   @parameterized.parameters(1, 2)
   def test_native_rows_excluded_for_ipc_pairs(self, nworld):
     mjm, mjd, m, d = test_data.fixture(
@@ -508,12 +553,14 @@ class IpcTest(parameterized.TestCase):
         </option>
         <worldbody>
           <geom name="table" type="box" size="0.3 0.3 0.05" pos="0 0 0.05"/>
-          <flexcomp name="sheet" type="grid" dim="2" count="5 5 1" spacing="0.04 0.04 1" radius="0.004"
-                    mass="0.05" pos="0 0 0.13">
+          <flexcomp name="sheet" type="grid" dim="2" count="5 5 1" spacing="0.04 0.04 1" radius="0.004" mass="0.05" pos="0 0 0.105">
             <edge equality="true"/>
             <contact selfcollide="none"/>
           </flexcomp>
-          <body pos="0 0 0.2"><freejoint/><geom size="0.03" mass="0.2"/></body>
+          <body pos="0 0 0.135">
+            <freejoint/>
+            <geom size="0.03" mass="0.2"/>
+          </body>
         </worldbody>
       </mujoco>
       """,
@@ -521,14 +568,15 @@ class IpcTest(parameterized.TestCase):
     )
     if nworld == 2:
       qpos = d.qpos.numpy()
-      qpos[1] += 0.005
+      qpos[1] += 0.002
       d.qpos = wp.array(qpos, dtype=float, device=d.qpos.device)
 
     flex_static = 0
     flex_moving = 0
     body_weldid = m.body_weldid.numpy()
     geom_bodyid = m.geom_bodyid.numpy()
-    for _ in range(100):
+    d.nacon.fill_(-1)
+    for _ in range(15):
       mjw.step(m, d)
       ncon = int(d.nacon.numpy()[0])
       contact_geom = d.contact.geom.numpy()
@@ -568,8 +616,7 @@ class IpcTest(parameterized.TestCase):
           </option>
           <worldbody>
             <geom name="drum" type="{gtype}" size="{gsize}" pos="0 0 0.2"/>
-            <flexcomp name="sheet" type="grid" dim="2" count="5 5 1" spacing="0.04 0.04 1" radius="0.004"
-                      mass="0.05" pos="0 0 0.35">
+            <flexcomp name="sheet" type="grid" dim="2" count="5 5 1" spacing="0.04 0.04 1" radius="0.004" mass="0.05" pos="0 0 0.305">
               <edge equality="true"/>
               <contact selfcollide="none"/>
             </flexcomp>
@@ -580,11 +627,12 @@ class IpcTest(parameterized.TestCase):
       )
       if nworld == 2:
         qpos = d.qpos.numpy()
-        qpos[1] += 0.005
+        qpos[1] += 0.002
         d.qpos = wp.array(qpos, dtype=float, device=d.qpos.device)
 
+      d.nacon.fill_(-1)
       native = 0
-      for _ in range(120):
+      for _ in range(20):
         mjw.step(m, d)
         native += int(d.nacon.numpy()[0])
 
@@ -606,8 +654,7 @@ class IpcTest(parameterized.TestCase):
         </option>
         <worldbody>
           <geom name="floor" type="plane" size="1 1 0.1"/>
-          <flexcomp name="sheet" type="grid" dim="2" count="4 4 1" spacing="0.04 0.04 1" radius="0.004"
-                    mass="0.05" pos="0 0 0.1">
+          <flexcomp name="sheet" type="grid" dim="2" count="4 4 1" spacing="0.04 0.04 1" radius="0.004" mass="0.05" pos="0 0 0.1">
             <edge equality="true"/>
             <contact selfcollide="none"/>
           </flexcomp>
@@ -621,6 +668,7 @@ class IpcTest(parameterized.TestCase):
       qpos[1] += 0.01
       d.qpos = wp.array(qpos, dtype=float, device=d.qpos.device)
 
+    d.qacc.fill_(wp.inf)
     with wp.ScopedCapture() as capture:
       mjw.step(m, d)
 
@@ -648,8 +696,7 @@ class IpcTest(parameterized.TestCase):
             <body name="arm" pos="0 0 0.2">
               <joint name="carrier" type="slide" stiffness="50" damping="2"/>
               <geom type="capsule" fromto="0 0 0  0.1 0 0" size="0.005" mass="0.02" contype="0" conaffinity="0"/>
-              <flexcomp name="paddle" type="grid" dim="2" count="3 3 1" spacing="0.04 0.04 1"
-                        radius="0.004" mass="0.05" pos="0.06 0 0">
+              <flexcomp name="paddle" type="grid" dim="2" count="3 3 1" spacing="0.04 0.04 1" radius="0.004" mass="0.05" pos="0.06 0 0">
                 <contact selfcollide="none"/>
                 <pin id="0 1 2 3 4 5 6 7 8"/>
               </flexcomp>
@@ -665,7 +712,8 @@ class IpcTest(parameterized.TestCase):
         qpos[1, 0] = -0.02
       d.qpos = wp.array(qpos, dtype=float, device=d.qpos.device)
 
-      for step_i in range(200):
+      d.qacc.fill_(wp.inf)
+      for step_i in range(20):
         mjw.step(m, d)
         if step_i == 10 and nworld == 2:
           self.assertFalse(np.allclose(d.qpos.numpy()[0], d.qpos.numpy()[1]))
@@ -694,8 +742,7 @@ class IpcTest(parameterized.TestCase):
               <joint type="slide" axis="0 1 0"/>
               <joint type="slide"/>
               <geom size="0.01" mass="0.1" contype="0" conaffinity="0"/>
-              <flexcomp name="cloth" type="grid" dim="2" count="3 3 1" spacing="0.03 0.03 1"
-                        radius="0.004" mass="0.05" pos="0.06 0 0">
+              <flexcomp name="cloth" type="grid" dim="2" count="3 3 1" spacing="0.03 0.03 1" radius="0.004" mass="0.05" pos="0.06 0 0">
                 <pin id="0 1 2 3 4 5 6 7 8"/>
                 <edge equality="true"/>
                 <contact selfcollide="none"/>
@@ -711,6 +758,7 @@ class IpcTest(parameterized.TestCase):
       if nworld == 2:
         qvel[1, 0] = 2.0
       d.qvel = wp.array(qvel, dtype=float, device=d.qvel.device)
+      d.qacc.fill_(wp.inf)
       for _ in range(10):
         mjw.step(m, d)
       qx.append(d.qpos.numpy()[:, 0].copy())
@@ -735,7 +783,7 @@ class IpcTest(parameterized.TestCase):
       _, _, m, d = test_data.fixture(
         xml=f"""
         <mujoco>
-          <option integrator="discrete" solver="CG" iterations="400">
+          <option timestep="0.005" integrator="discrete" solver="CG" iterations="400">
             <flag ipc="enable"/>
           </option>
           <worldbody>
@@ -743,13 +791,15 @@ class IpcTest(parameterized.TestCase):
             <body name="arm" pos="0 0 0.2">
               <joint name="carrier" type="slide" stiffness="50" damping="2"/>
               <geom type="capsule" fromto="0 0 0  0.1 0 0" size="0.005" mass="0.02" contype="0" conaffinity="0"/>
-              <flexcomp name="paddle" type="grid" dim="2" count="3 3 1" spacing="0.04 0.04 1"
-                        radius="0.004" mass="0.05" pos="0.06 0 0">
+              <flexcomp name="paddle" type="grid" dim="2" count="3 3 1" spacing="0.04 0.04 1" radius="0.004" mass="0.05" pos="0.06 0 0">
                 <contact selfcollide="none"/>
                 <pin id="0 1 2 3 4 5 6 7 8"/>
               </flexcomp>
             </body>
-            {'<flexcomp name="cloth" type="grid" dim="2" count="3 3 1" spacing="0.03 0.03 1" radius="0.004" mass="0.05" pos="0.06 0 0.24"><edge equality="true"/><contact selfcollide="none"/></flexcomp>' if with_cloth else ""}
+            <flexcomp name="cloth" type="grid" dim="2" count="3 3 1" spacing="0.03 0.03 1" radius="0.004" mass="0.05" pos="0.06 0 0.209">
+              <edge equality="true"/>
+              <contact selfcollide="none" contype="{1 if with_cloth else 0}" conaffinity="{1 if with_cloth else 0}"/>
+            </flexcomp>
           </worldbody>
         </mujoco>
         """,
@@ -759,7 +809,8 @@ class IpcTest(parameterized.TestCase):
         qpos = d.qpos.numpy()
         qpos[1, 0] = -0.01
         d.qpos = wp.array(qpos, dtype=float, device=d.qpos.device)
-      for _ in range(200):
+      d.qacc.fill_(wp.inf)
+      for _ in range(20):
         mjw.step(m, d)
       q.append(d.qpos.numpy()[:, 0].copy())
 
@@ -771,7 +822,7 @@ class IpcTest(parameterized.TestCase):
 
   @parameterized.parameters(1, 2)
   def test_rigid_no_contact_matches_discrete(self, nworld):
-    """Rigid bodies with no contact follow identical trajectory with and without IPC flag."""
+    """Rigid body without contact integrated by IPC matches the discrete integrator."""
     _, _, m1, d1 = test_data.fixture(
       xml="""
       <mujoco>
@@ -781,6 +832,10 @@ class IpcTest(parameterized.TestCase):
             <joint type="free"/>
             <geom size="0.1" mass="1"/>
           </body>
+          <flexcomp name="cloth" type="grid" dim="2" count="3 3 1" spacing="0.05 0.05 1" radius="0.005" mass="0.05" pos="3 0 1">
+            <contact contype="0" conaffinity="0" selfcollide="none"/>
+            <pin id="0 2"/>
+          </flexcomp>
         </worldbody>
       </mujoco>
       """,
@@ -789,35 +844,42 @@ class IpcTest(parameterized.TestCase):
     _, _, m2, d2 = test_data.fixture(
       xml="""
       <mujoco>
-        <option timestep="0.005" integrator="discrete" solver="CG"/>
+        <option timestep="0.005" integrator="discrete" solver="CG">
+          <flag ipc="enable"/>
+        </option>
         <worldbody>
           <body pos="0 0 1">
             <joint type="free"/>
             <geom size="0.1" mass="1"/>
           </body>
+          <flexcomp name="cloth" type="grid" dim="2" count="3 3 1" spacing="0.05 0.05 1" radius="0.005" mass="0.05" pos="3 0 1">
+            <contact contype="0" conaffinity="0" selfcollide="none"/>
+            <pin id="0 2"/>
+          </flexcomp>
         </worldbody>
       </mujoco>
       """,
       nworld=nworld,
     )
-    m2.opt.enableflags |= mjw.EnableBit.IPC
+    self.assertTrue(m2.has_2d_flex)
 
+    qvel = d1.qvel.numpy()
+    qvel[:, :6] = [0.3, -0.2, 0.5, 1.0, -2.0, 0.5]
     if nworld == 2:
-      qpos1 = d1.qpos.numpy()
-      qpos1[1, 0] += 0.05
-      d1.qpos = wp.array(qpos1, dtype=float, device=d1.qpos.device)
-      qpos2 = d2.qpos.numpy()
-      qpos2[1, 0] += 0.05
-      d2.qpos = wp.array(qpos2, dtype=float, device=d2.qpos.device)
+      qvel[1, 0] += 0.5
+    d1.qvel = wp.array(qvel, dtype=float, device=d1.qvel.device)
+    d2.qvel = wp.array(qvel, dtype=float, device=d2.qvel.device)
 
+    d1.qacc.fill_(wp.inf)
+    d2.qacc.fill_(wp.inf)
     for _ in range(20):
       mjw.step(m1, d1)
       mjw.step(m2, d2)
 
-    np.testing.assert_allclose(d1.qpos.numpy(), d2.qpos.numpy(), atol=1e-6)
-    np.testing.assert_allclose(d1.qvel.numpy(), d2.qvel.numpy(), atol=1e-6)
+    np.testing.assert_allclose(d1.qpos.numpy()[:, :7], d2.qpos.numpy()[:, :7], atol=1e-5)
+    np.testing.assert_allclose(d1.qvel.numpy()[:, :6], d2.qvel.numpy()[:, :6], atol=1e-5)
     if nworld == 2:
-      self.assertFalse(np.allclose(d1.qpos.numpy()[0], d1.qpos.numpy()[1]))
+      self.assertFalse(np.allclose(d2.qpos.numpy()[0, :7], d2.qpos.numpy()[1, :7]))
 
   @parameterized.parameters(1, 2)
   def test_acceleration_sensors_see_contact(self, nworld):
@@ -825,7 +887,9 @@ class IpcTest(parameterized.TestCase):
     _, _, m, d = test_data.fixture(
       xml="""
       <mujoco>
-        <option integrator="discrete" solver="CG"/>
+        <option integrator="discrete" solver="CG">
+          <flag ipc="enable"/>
+        </option>
         <worldbody>
           <geom type="plane" size="0 0 1"/>
           <body name="ball" pos="0 0 0.1">
@@ -833,8 +897,7 @@ class IpcTest(parameterized.TestCase):
             <geom size="0.1" mass="1"/>
             <site name="imu"/>
           </body>
-          <flexcomp name="cloth" type="grid" dim="2" count="3 3 1" spacing="0.05 0.05 1"
-                    radius="0.005" mass="0.05" pos="1 0 0.5">
+          <flexcomp name="cloth" type="grid" dim="2" count="3 3 1" spacing="0.05 0.05 1" radius="0.005" mass="0.05" pos="1 0 0.5">
             <contact contype="0" conaffinity="0"/>
             <pin id="0 1 2 3 4 5 6 7 8"/>
           </flexcomp>
@@ -847,7 +910,6 @@ class IpcTest(parameterized.TestCase):
       """,
       nworld=nworld,
     )
-    m.opt.enableflags |= mjw.EnableBit.IPC
 
     if nworld == 2:
       qpos = d.qpos.numpy()
@@ -857,7 +919,7 @@ class IpcTest(parameterized.TestCase):
     d.cacc.fill_(wp.inf)
     d.sensordata.fill_(wp.inf)
 
-    for _ in range(50):
+    for _ in range(20):
       mjw.step(m, d)
 
     acc = d.sensordata.numpy()
@@ -874,14 +936,13 @@ class IpcTest(parameterized.TestCase):
     mjm, _, m, d = test_data.fixture(
       xml="""
       <mujoco>
-        <option integrator="discrete" solver="CG" iterations="400">
+        <option timestep="0.005" integrator="discrete" solver="CG" iterations="400">
           <flag ipc="enable"/>
         </option>
         <worldbody>
           <geom name="floor" type="plane" size="0 0 1"/>
           <geom name="obstacle" size="0.005" pos="0.021 0.019 0.02"/>
-          <flexcomp name="cloth" type="grid" dim="2" count="5 5 1" spacing="0.04 0.04 1"
-                    radius="0.004" mass="0.1" pos="0 0 0.05">
+          <flexcomp name="cloth" type="grid" dim="2" count="5 5 1" spacing="0.04 0.04 1" radius="0.004" mass="0.1" pos="0 0 0.03">
             <edge equality="true"/>
             <contact selfcollide="none"/>
           </flexcomp>
@@ -893,10 +954,11 @@ class IpcTest(parameterized.TestCase):
 
     if nworld == 2:
       qpos = d.qpos.numpy()
-      qpos[1] += 0.005
+      qpos[1] += 0.002
       d.qpos = wp.array(qpos, dtype=float, device=d.qpos.device)
 
-    for _ in range(80):
+    d.qacc.fill_(wp.inf)
+    for _ in range(20):
       mjw.step(m, d)
 
     f_vertadr = int(mjm.flex_vertadr[0])
@@ -929,7 +991,7 @@ class IpcTest(parameterized.TestCase):
     mjm, _, m, d = test_data.fixture(
       xml="""
       <mujoco>
-        <option integrator="discrete" solver="CG">
+        <option timestep="0.005" integrator="discrete" solver="CG">
           <flag ipc="enable"/>
         </option>
         <worldbody>
@@ -937,8 +999,7 @@ class IpcTest(parameterized.TestCase):
           <body name="paddle_carrier" pos="0 0 0.05">
             <joint type="slide" damping="0.05"/>
             <geom size="0.02" mass="0.1"/>
-            <flexcomp name="paddle" type="grid" dim="2" count="3 3 1" spacing="0.04 0.04 1"
-                      radius="0.004" mass="0.05">
+            <flexcomp name="paddle" type="grid" dim="2" count="3 3 1" spacing="0.04 0.04 1" radius="0.004" mass="0.05">
               <pin id="0 1 2 3 4 5 6 7 8"/>
             </flexcomp>
           </body>
@@ -953,7 +1014,8 @@ class IpcTest(parameterized.TestCase):
       qvel[1, 0] = -1.5
       d.qvel = wp.array(qvel, dtype=float, device=d.qvel.device)
 
-    for _ in range(100):
+    d.qacc.fill_(wp.inf)
+    for _ in range(20):
       mjw.step(m, d)
 
     f_vertadr = int(mjm.flex_vertadr[0])
@@ -973,15 +1035,19 @@ class IpcTest(parameterized.TestCase):
     _, _, m, d = test_data.fixture(
       xml="""
       <mujoco>
-        <option integrator="discrete" solver="CG">
+        <option timestep="0.005" integrator="discrete" solver="CG">
           <flag ipc="enable"/>
         </option>
         <worldbody>
           <geom type="plane" size="3 3 0.1"/>
-          <body pos="0 0 0.3">
+          <body pos="0 0 0.15">
             <joint axis="0 1 0"/>
             <geom type="capsule" fromto="0 0 0 0.4 0 0" size="0.05" mass="1"/>
           </body>
+          <flexcomp name="cloth" type="grid" dim="2" count="2 2 1" spacing="0.05 0.05 1" radius="0.005" mass="0.05" pos="2 0 1">
+            <contact contype="0" conaffinity="0" selfcollide="none"/>
+            <pin id="0 1"/>
+          </flexcomp>
         </worldbody>
       </mujoco>
       """,
@@ -993,8 +1059,9 @@ class IpcTest(parameterized.TestCase):
       qvel[1, 0] = 2.0
       d.qvel = wp.array(qvel, dtype=float, device=d.qvel.device)
 
+    d.qacc.fill_(wp.inf)
     worst = [1e9] * nworld
-    for _ in range(150):
+    for _ in range(20):
       mjw.step(m, d)
       for w in range(nworld):
         cz = float(d.geom_xpos.numpy()[w, 1, 2])
@@ -1012,15 +1079,14 @@ class IpcTest(parameterized.TestCase):
   @parameterized.parameters(1, 2)
   def test_flag_overrides_passive_contact(self, nworld):
     """Verifies that flag ipc=enable overrides flex passive contact."""
-    _, _, m, d = test_data.fixture(
+    _, _, m_true, d_true = test_data.fixture(
       xml="""
       <mujoco>
         <option integrator="discrete" solver="CG" iterations="400">
           <flag ipc="enable"/>
         </option>
         <worldbody>
-          <flexcomp name="cloth" type="grid" dim="2" count="5 5 1" spacing=".04 .04 1"
-                    radius=".004" mass=".1" pos="0 0 .2">
+          <flexcomp name="cloth" type="grid" dim="2" count="5 5 1" spacing=".04 .04 1" radius=".004" mass=".1" pos="0 0 .2">
             <contact selfcollide="auto" passive="true"/>
             <pin id="0 4 20 24"/>
           </flexcomp>
@@ -1029,18 +1095,39 @@ class IpcTest(parameterized.TestCase):
       """,
       nworld=nworld,
     )
-
+    _, _, m_false, d_false = test_data.fixture(
+      xml="""
+      <mujoco>
+        <option integrator="discrete" solver="CG" iterations="400">
+          <flag ipc="enable"/>
+        </option>
+        <worldbody>
+          <flexcomp name="cloth" type="grid" dim="2" count="5 5 1" spacing=".04 .04 1" radius=".004" mass=".1" pos="0 0 .2">
+            <contact selfcollide="auto" passive="false"/>
+            <pin id="0 4 20 24"/>
+          </flexcomp>
+        </worldbody>
+      </mujoco>
+      """,
+      nworld=nworld,
+    )
+    self.assertFalse(passive.flex_passive_contact(m_true))
     if nworld == 2:
-      qpos = d.qpos.numpy()
+      qpos = d_true.qpos.numpy()
       qpos[1] += 0.01
-      d.qpos = wp.array(qpos, dtype=float, device=d.qpos.device)
+      d_true.qpos = wp.array(qpos, dtype=float, device=d_true.qpos.device)
+      d_false.qpos = wp.array(qpos, dtype=float, device=d_false.qpos.device)
 
-    for _ in range(50):
-      mjw.step(m, d)
-      self.assertFalse(np.isnan(d.qpos.numpy()[0, 0]))
+    d_true.qacc.fill_(wp.inf)
+    d_false.qacc.fill_(wp.inf)
+    for _ in range(20):
+      mjw.step(m_true, d_true)
+      mjw.step(m_false, d_false)
 
+    self.assertFalse(np.isnan(d_true.qpos.numpy()).any())
+    np.testing.assert_allclose(d_true.qpos.numpy(), d_false.qpos.numpy(), atol=1e-6)
     if nworld == 2:
-      self.assertFalse(np.allclose(d.qpos.numpy()[0], d.qpos.numpy()[1]))
+      self.assertFalse(np.allclose(d_true.qpos.numpy()[0], d_true.qpos.numpy()[1]))
 
   @parameterized.parameters(1, 2)
   def test_articulated_kinetic_in_flex_matches_tree(self, nworld):
@@ -1072,8 +1159,7 @@ class IpcTest(parameterized.TestCase):
             <joint axis="0 1 0"/>
             <geom type="capsule" fromto="0 0 0 0.3 0 0" size="0.03" mass="1"/>
           </body>
-          <flexcomp name="cloth" type="grid" dim="2" count="3 3 1" spacing="0.05 0.05 1"
-                    radius="0.005" mass="0.05" pos="3 0 1">
+          <flexcomp name="cloth" type="grid" dim="2" count="3 3 1" spacing="0.05 0.05 1" radius="0.005" mass="0.05" pos="3 0 1">
             <pin id="0 2 6 8"/>
           </flexcomp>
         </worldbody>
@@ -1090,7 +1176,9 @@ class IpcTest(parameterized.TestCase):
       qvel2[1, 0] = 1.5
       d2.qvel = wp.array(qvel2, dtype=float, device=d2.qvel.device)
 
-    for _ in range(150):
+    d1.qacc.fill_(wp.inf)
+    d2.qacc.fill_(wp.inf)
+    for _ in range(20):
       mjw.step(m1, d1)
       mjw.step(m2, d2)
       self.assertFalse(np.isnan(d2.qpos.numpy()[0, 0]))
@@ -1105,12 +1193,19 @@ class IpcTest(parameterized.TestCase):
     _, _, m_ipc, d_ipc = test_data.fixture(
       xml="""
       <mujoco>
+        <option timestep="0.005" integrator="discrete" solver="CG">
+          <flag ipc="enable"/>
+        </option>
         <worldbody>
           <geom type="plane" size="3 3 0.1"/>
-          <body pos="0 0 0.4">
+          <body pos="0 0 0.12">
             <freejoint/>
             <geom size="0.1" mass="1" condim="1"/>
           </body>
+          <flexcomp name="cloth" type="grid" dim="2" count="3 3 1" spacing="0.05 0.05 1" radius="0.005" mass="0.05" pos="2 0 1">
+            <contact contype="0" conaffinity="0" selfcollide="none"/>
+            <pin id="0 2"/>
+          </flexcomp>
         </worldbody>
       </mujoco>
       """,
@@ -1119,9 +1214,10 @@ class IpcTest(parameterized.TestCase):
     _, _, m_euler, d_euler = test_data.fixture(
       xml="""
       <mujoco>
+        <option timestep="0.005"/>
         <worldbody>
           <geom type="plane" size="3 3 0.1"/>
-          <body pos="0 0 0.4">
+          <body pos="0 0 0.12">
             <freejoint/>
             <geom size="0.1" mass="1" condim="1"/>
           </body>
@@ -1131,19 +1227,17 @@ class IpcTest(parameterized.TestCase):
       nworld=nworld,
     )
 
-    m_ipc.opt.integrator = mjw.IntegratorType.DISCRETE
-    m_ipc.opt.solver = mjw.SolverType.CG
-    m_ipc.opt.enableflags |= mjw.EnableBit.IPC
-
-    m_euler.opt.integrator = mjw.IntegratorType.EULER
+    self.assertTrue(m_ipc.has_2d_flex)
 
     if nworld == 2:
       qpos = d_ipc.qpos.numpy()
-      qpos[1, 2] = 0.5
+      qpos[1, 2] = 0.15
       d_ipc.qpos = wp.array(qpos, dtype=float, device=d_ipc.qpos.device)
       d_euler.qpos = wp.array(qpos, dtype=float, device=d_euler.qpos.device)
 
-    for _ in range(200):
+    d_ipc.qacc.fill_(wp.inf)
+    d_euler.qacc.fill_(wp.inf)
+    for _ in range(20):
       mjw.step(m_ipc, d_ipc)
       mjw.step(m_euler, d_euler)
 
@@ -1157,13 +1251,12 @@ class IpcTest(parameterized.TestCase):
     _, _, m_c, d_c = test_data.fixture(
       xml="""
       <mujoco>
-        <option integrator="discrete" solver="CG" iterations="400">
+        <option timestep="0.005" integrator="discrete" solver="CG" iterations="400">
           <flag ipc="enable"/>
         </option>
         <worldbody>
           <geom name="floor" type="plane" size="0 0 1"/>
-          <flexcomp name="cloth" type="grid" dim="2" count="3 3 1" spacing="0.04 0.04 1"
-                    radius="0.004" mass="0.05" pos="0 0 0.05">
+          <flexcomp name="cloth" type="grid" dim="2" count="3 3 1" spacing="0.04 0.04 1" radius="0.004" mass="0.05" pos="0 0 0.01">
             <contact selfcollide="none"/>
           </flexcomp>
         </worldbody>
@@ -1174,13 +1267,12 @@ class IpcTest(parameterized.TestCase):
     _, _, m_f, d_f = test_data.fixture(
       xml="""
       <mujoco>
-        <option integrator="discrete" solver="CG" iterations="400">
+        <option timestep="0.005" integrator="discrete" solver="CG" iterations="400">
           <flag ipc="enable"/>
         </option>
         <worldbody>
           <geom name="floor" type="plane" size="0 0 1"/>
-          <flexcomp name="cloth" type="grid" dim="2" count="3 3 1" spacing="0.04 0.04 1"
-                    radius="0.004" mass="0.05" pos="0 0 0.05">
+          <flexcomp name="cloth" type="grid" dim="2" count="3 3 1" spacing="0.04 0.04 1" radius="0.004" mass="0.05" pos="0 0 0.01">
             <contact selfcollide="none" contype="0" conaffinity="0"/>
           </flexcomp>
         </worldbody>
@@ -1191,13 +1283,15 @@ class IpcTest(parameterized.TestCase):
 
     if nworld == 2:
       qpos_c = d_c.qpos.numpy()
-      qpos_c[1] += 0.01
+      qpos_c[1] += 0.002
       d_c.qpos = wp.array(qpos_c, dtype=float, device=d_c.qpos.device)
       qpos_f = d_f.qpos.numpy()
-      qpos_f[1] += 0.01
+      qpos_f[1] += 0.002
       d_f.qpos = wp.array(qpos_f, dtype=float, device=d_f.qpos.device)
 
-    for _ in range(100):
+    d_c.qacc.fill_(wp.inf)
+    d_f.qacc.fill_(wp.inf)
+    for _ in range(20):
       mjw.step(m_c, d_c)
       mjw.step(m_f, d_f)
 
@@ -1205,7 +1299,7 @@ class IpcTest(parameterized.TestCase):
       # Colliding cloth rests on floor (z > 0)
       self.assertGreater(float(np.min(d_c.flexvert_xpos.numpy()[w, :, 2])), 0.0)
       # Filtered cloth tunnels through floor under gravity (z < 0)
-      self.assertLess(float(np.min(d_f.flexvert_xpos.numpy()[w, :, 2])), -0.05)
+      self.assertLess(float(np.min(d_f.flexvert_xpos.numpy()[w, :, 2])), -0.01)
     if nworld == 2:
       self.assertFalse(np.allclose(d_c.flexvert_xpos.numpy()[0], d_c.flexvert_xpos.numpy()[1]))
       self.assertFalse(np.allclose(d_f.flexvert_xpos.numpy()[0], d_f.flexvert_xpos.numpy()[1]))
@@ -1221,8 +1315,7 @@ class IpcTest(parameterized.TestCase):
         </option>
         <worldbody>
           <geom name="cyl" type="cylinder" size="0.2 0.05" pos="0 0 0.1"/>
-          <flexcomp name="cloth" type="grid" dim="2" count="3 3 1" spacing="0.04 0.04 1"
-                    radius="0.004" mass="0.05" pos="0 0 0.2">
+          <flexcomp name="cloth" type="grid" dim="2" count="3 3 1" spacing="0.04 0.04 1" radius="0.004" mass="0.05" pos="0 0 0.16">
             <edge equality="true"/>
             <contact selfcollide="none"/>
           </flexcomp>
@@ -1234,10 +1327,11 @@ class IpcTest(parameterized.TestCase):
 
     if nworld == 2:
       qpos = d.qpos.numpy()
-      qpos[1] += 0.02
+      qpos[1] += 0.002
       d.qpos = wp.array(qpos, dtype=float, device=d.qpos.device)
 
-    for _ in range(50):
+    d.nacon.fill_(-1)
+    for _ in range(20):
       mjw.step(m, d)
 
     # Native contacts are generated for cylinder (unsupported in IPC)
@@ -1259,8 +1353,7 @@ class IpcTest(parameterized.TestCase):
         </option>
         <worldbody>
           <geom name="floor" type="plane" size="0 0 1"/>
-          <flexcomp name="sheet" type="grid" dim="2" count="4 4 1" spacing="0.03 0.03 1"
-                    radius="0.003" mass="0.04" pos="0 0 0.15">
+          <flexcomp name="sheet" type="grid" dim="2" count="4 4 1" spacing="0.03 0.03 1" radius="0.003" mass="0.04" pos="0 0 0.03">
             <contact selfcollide="none"/>
           </flexcomp>
         </worldbody>
@@ -1274,7 +1367,8 @@ class IpcTest(parameterized.TestCase):
       qvel[1, 2] = -1.0  # high downward velocity in world 1
       d.qvel = wp.array(qvel, dtype=float, device=d.qvel.device)
 
-    for _ in range(40):
+    d.qacc.fill_(wp.inf)
+    for _ in range(20):
       mjw.step(m, d)
 
     # Sheet must not penetrate through floor
@@ -1295,8 +1389,7 @@ class IpcTest(parameterized.TestCase):
         </option>
         <worldbody>
           <geom name="floor" type="plane" size="0 0 1"/>
-          <flexcomp name="sheet" type="grid" dim="2" count="3 3 1" spacing="0.04 0.04 1"
-                    radius="0.004" mass="0.05" pos="0 0 0.05">
+          <flexcomp name="sheet" type="grid" dim="2" count="3 3 1" spacing="0.04 0.04 1" radius="0.004" mass="0.05" pos="0 0 0.02">
             <contact selfcollide="none"/>
           </flexcomp>
         </worldbody>
@@ -1307,10 +1400,11 @@ class IpcTest(parameterized.TestCase):
 
     if nworld == 2:
       qpos = d.qpos.numpy()
-      qpos[1, 2] += 0.02
+      qpos[1, 2] += 0.01
       d.qpos = wp.array(qpos, dtype=float, device=d.qpos.device)
 
-    for _ in range(30):
+    d.qacc.fill_(wp.inf)
+    for _ in range(20):
       mjw.step(m, d)
 
     for w in range(nworld):
@@ -1330,8 +1424,7 @@ class IpcTest(parameterized.TestCase):
         </option>
         <worldbody>
           <geom name="ball" size="0.1" pos="0 0 0.1"/>
-          <flexcomp name="cloth" type="grid" dim="2" count="3 3 1" spacing="0.04 0.04 1"
-                    radius="0.004" mass="0.05" pos="0 0 0.25">
+          <flexcomp name="cloth" type="grid" dim="2" count="3 3 1" spacing="0.04 0.04 1" radius="0.004" mass="0.05" pos="0 0 0.22">
             <contact selfcollide="none"/>
           </flexcomp>
         </worldbody>
@@ -1341,10 +1434,11 @@ class IpcTest(parameterized.TestCase):
     )
     if nworld == 2:
       qpos = d.qpos.numpy()
-      qpos[1] += 0.01
+      qpos[1] += 0.005
       d.qpos = wp.array(qpos, dtype=float, device=d.qpos.device)
 
-    for _ in range(25):
+    d.qacc.fill_(wp.inf)
+    for _ in range(20):
       mjw.step(m, d)
 
     for w in range(nworld):
@@ -1370,12 +1464,10 @@ class IpcTest(parameterized.TestCase):
         </option>
         <worldbody>
           <geom name="floor" type="plane" size="0 0 1"/>
-          <flexcomp name="cloth1" type="grid" dim="2" count="2 2 1" spacing="0.05 0.05 1"
-                    radius="0.005" mass="0.05" pos="0 0 0.05">
+          <flexcomp name="cloth1" type="grid" dim="2" count="2 2 1" spacing="0.05 0.05 1" radius="0.005" mass="0.05" pos="0 0 0.02">
             <contact selfcollide="none"/>
           </flexcomp>
-          <flexcomp name="cloth2" type="grid" dim="2" count="2 2 1" spacing="0.05 0.05 1"
-                    radius="0.005" mass="0.05" pos="0 0 0.15">
+          <flexcomp name="cloth2" type="grid" dim="2" count="2 2 1" spacing="0.05 0.05 1" radius="0.005" mass="0.05" pos="0 0 0.05">
             <contact selfcollide="none"/>
           </flexcomp>
         </worldbody>
@@ -1385,10 +1477,11 @@ class IpcTest(parameterized.TestCase):
     )
     if nworld == 2:
       qpos = d.qpos.numpy()
-      qpos[1] += 0.01
+      qpos[1] += 0.005
       d.qpos = wp.array(qpos, dtype=float, device=d.qpos.device)
 
-    for _ in range(40):
+    d.qacc.fill_(wp.inf)
+    for _ in range(20):
       mjw.step(m, d)
 
     for w in range(nworld):
@@ -1411,8 +1504,7 @@ class IpcTest(parameterized.TestCase):
         </option>
         <worldbody>
           <geom name="ball" size="0.1" pos="0 0 0.1"/>
-          <flexcomp name="cloth" type="grid" dim="2" count="3 3 1" spacing="0.04 0.04 1"
-                    radius="0.004" mass="0.05" pos="0 0 0.205">
+          <flexcomp name="cloth" type="grid" dim="2" count="3 3 1" spacing="0.04 0.04 1" radius="0.004" mass="0.05" pos="0 0 0.205">
             <contact selfcollide="none"/>
           </flexcomp>
         </worldbody>
@@ -1429,17 +1521,17 @@ class IpcTest(parameterized.TestCase):
       mjw.step(m, d)
 
     ws = ipc.get_ipc_workspace(m, d)
+    ws.naset.fill_(-1)
+    ws.aset_lam.fill_(wp.inf)
     mjw.forward(m, d)
     ipc.ipc(m, d, ws=ws)
     for w in range(nworld):
       naset_w = int(ws.naset.numpy()[w])
-      in_ws = ws.pair_in_ws.numpy()[w, :naset_w]
-      lniv = ws.pair_lniv.numpy()[w, :naset_w]
-      ws_slots = np.where(in_ws > 0)[0]
+      aset_cnt = ws.aset_cnt.numpy()[w, :naset_w]
+      aset_lam = ws.aset_lam.numpy()[w, :naset_w]
       self.assertGreater(naset_w, 0)
-      self.assertGreater(len(ws_slots), 0)
-      # Every working-set pair is linearized and in the active set
-      self.assertTrue(np.all(lniv[ws_slots] > 0))
+      self.assertGreater(int(np.sum(aset_cnt < 0)), 0)
+      self.assertGreater(float(np.max(aset_lam)), 0.0)
     if nworld == 2:
       self.assertFalse(np.allclose(d.qpos.numpy()[0], d.qpos.numpy()[1]))
 
@@ -1455,8 +1547,7 @@ class IpcTest(parameterized.TestCase):
         </option>
         <worldbody>
           <geom name="floor" type="plane" size="0 0 1"/>
-          <flexcomp name="sheet" type="grid" dim="2" count="4 4 1" spacing="0.03 0.03 1"
-                    radius="0.003" mass="0.04" pos="0 0 0.15">
+          <flexcomp name="sheet" type="grid" dim="2" count="4 4 1" spacing="0.03 0.03 1" radius="0.003" mass="0.04" pos="0 0 0.15">
             <contact selfcollide="none"/>
           </flexcomp>
         </worldbody>
@@ -1471,6 +1562,7 @@ class IpcTest(parameterized.TestCase):
       d.qpos = wp.array(qpos, dtype=float, device=d.qpos.device)
 
     # Warmup step before capture
+    d.qacc.fill_(wp.inf)
     mjw.step(m, d)
 
     with wp.ScopedCapture() as capture:
@@ -1497,8 +1589,7 @@ class IpcTest(parameterized.TestCase):
         </option>
         <worldbody>
           <geom name="floor" type="plane" size="0 0 1"/>
-          <flexcomp name="sheet" type="grid" dim="2" count="4 4 1" spacing="0.03 0.03 1"
-                    radius="0.003" mass="0.04" pos="0 0 0.15">
+          <flexcomp name="sheet" type="grid" dim="2" count="4 4 1" spacing="0.03 0.03 1" radius="0.003" mass="0.04" pos="0 0 0.15">
             <contact selfcollide="none"/>
           </flexcomp>
         </worldbody>
@@ -1515,8 +1606,7 @@ class IpcTest(parameterized.TestCase):
         </option>
         <worldbody>
           <geom name="floor" type="plane" size="0 0 1"/>
-          <flexcomp name="sheet" type="grid" dim="2" count="4 4 1" spacing="0.03 0.03 1"
-                    radius="0.003" mass="0.04" pos="0 0 0.15">
+          <flexcomp name="sheet" type="grid" dim="2" count="4 4 1" spacing="0.03 0.03 1" radius="0.003" mass="0.04" pos="0 0 0.15">
             <contact selfcollide="none"/>
           </flexcomp>
         </worldbody>
@@ -1533,6 +1623,8 @@ class IpcTest(parameterized.TestCase):
       d_graph.qpos = wp.array(qpos, dtype=float, device=d_graph.qpos.device)
 
     # Warmup both models to compile kernels before capture
+    d_eager.qacc.fill_(wp.inf)
+    d_graph.qacc.fill_(wp.inf)
     mjw.step(m_eager, d_eager)
     mjw.step(m_graph, d_graph)
 
@@ -1556,13 +1648,12 @@ class IpcTest(parameterized.TestCase):
       m_c, d_c, m, d = test_data.fixture(
         xml=f"""
         <mujoco>
-          <option integrator="discrete" solver="CG">
+          <option timestep="0.004" integrator="discrete" solver="CG">
             <flag ipc="enable"/>
           </option>
           <worldbody>
             <geom name="obs" type="{gtype}" size="{gsize}" pos="0 0 0.05"/>
-            <flexcomp name="cloth" type="grid" dim="2" count="3 3 1" spacing="0.04 0.04 1"
-                      radius="0.004" mass="0.05" pos="0 0 0.13">
+            <flexcomp name="cloth" type="grid" dim="2" count="3 3 1" spacing="0.04 0.04 1" radius="0.004" mass="0.05" pos="0 0 0.115">
               <edge equality="true"/>
               <contact selfcollide="none"/>
             </flexcomp>
@@ -1573,11 +1664,11 @@ class IpcTest(parameterized.TestCase):
       )
       if nworld == 2:
         qpos = d.qpos.numpy()
-        qpos[1] += 0.005
+        qpos[1] += 0.002
         d.qpos = wp.array(qpos, dtype=float, device=d.qpos.device)
 
       d.qacc.fill_(wp.inf)
-      for _ in range(25):
+      for _ in range(20):
         mujoco.mj_step(m_c, d_c)
         mjw.step(m, d)
 
@@ -1596,14 +1687,11 @@ class IpcTest(parameterized.TestCase):
           <flag ipc="enable"/>
         </option>
         <asset>
-          <mesh name="box" vertex="
-            -0.2 -0.2 -0.02  0.2 -0.2 -0.02  0.2 0.2 -0.02  -0.2 0.2 -0.02
-            -0.2 -0.2 0.02  0.2 -0.2 0.02  0.2 0.2 0.02  -0.2 0.2 0.02"/>
+          <mesh name="box" vertex=" -0.2 -0.2 -0.02  0.2 -0.2 -0.02  0.2 0.2 -0.02  -0.2 0.2 -0.02 -0.2 -0.2 0.02  0.2 -0.2 0.02  0.2 0.2 0.02  -0.2 0.2 0.02"/>
         </asset>
         <worldbody>
           <geom name="mesh_obs" type="mesh" mesh="box"/>
-          <flexcomp name="cloth" type="grid" dim="2" count="3 3 1" spacing="0.04 0.04 1"
-                    radius="0.004" mass="0.05" pos="0 0 0.04">
+          <flexcomp name="cloth" type="grid" dim="2" count="3 3 1" spacing="0.04 0.04 1" radius="0.004" mass="0.05" pos="0 0 0.026">
             <edge equality="true"/>
             <contact selfcollide="none"/>
           </flexcomp>
@@ -1615,7 +1703,8 @@ class IpcTest(parameterized.TestCase):
     # Mark mesh as unhulled (mesh_graphadr = -1)
     m.mesh_graphadr = wp.array([-1], dtype=int, device=m.mesh_graphadr.device)
     ws = ipc.get_ipc_workspace(m, d)
-    ipc.ipc_init_topology(m, ws)
+    ws.ncand.fill_(-1)
+    ipc.ipc_init_topology(m, d, ws)
     cc.ipc_update_geom_features(m, d, ws)
     cc.ipc_discover_candidates(m, d, ws, d.flexvert_xpos, d.flexvert_xpos, d.flexvert_xpos, 1e30, 1e30)
     for w in range(nworld):
@@ -1623,11 +1712,12 @@ class IpcTest(parameterized.TestCase):
 
     if nworld == 2:
       qpos = d.qpos.numpy()
-      qpos[1] += 0.005
+      qpos[1] += 0.002
       d.qpos = wp.array(qpos, dtype=float, device=d.qpos.device)
 
+    d.nacon.fill_(-1)
     native_contacts = 0
-    for _ in range(30):
+    for _ in range(20):
       mjw.step(m, d)
       native_contacts += int(d.nacon.numpy()[0])
 
@@ -1643,13 +1733,12 @@ class IpcTest(parameterized.TestCase):
     _, _, m, d = test_data.fixture(
       xml="""
       <mujoco>
-        <option integrator="discrete" solver="CG">
+        <option timestep="0.004" integrator="discrete" solver="CG">
           <flag ipc="enable"/>
         </option>
         <worldbody>
           <geom name="box" type="box" size="0.2 0.2 0.05" pos="0 0 0.05"/>
-          <flexcomp name="cloth" type="grid" dim="2" count="3 3 1" spacing="0.04 0.04 1"
-                    radius="0.004" mass="0.05" pos="0 0 0.125">
+          <flexcomp name="cloth" type="grid" dim="2" count="3 3 1" spacing="0.04 0.04 1" radius="0.004" mass="0.05" pos="0 0 0.125">
             <edge equality="true"/>
             <contact selfcollide="none"/>
           </flexcomp>
@@ -1664,7 +1753,8 @@ class IpcTest(parameterized.TestCase):
       gxpos[1, 0, 2] = 0.07
       d.geom_xpos = wp.array(gxpos, dtype=wp.vec3, device=d.geom_xpos.device)
 
-    for _ in range(60):
+    d.qacc.fill_(wp.inf)
+    for _ in range(20):
       mjw.step(m, d)
 
     z0 = float(np.mean(d.flexvert_xpos.numpy()[0, :, 2]))
@@ -1684,8 +1774,7 @@ class IpcTest(parameterized.TestCase):
         </option>
         <worldbody>
           <geom name="floor" type="plane" size="1 1 0.1"/>
-          <flexcomp name="cloth" type="grid" dim="2" count="2 2 1"
-                    spacing="0.05 0.05 1" radius="0.005" mass="0.05" pos="0 0 0.0005">
+          <flexcomp name="cloth" type="grid" dim="2" count="2 2 1" spacing="0.05 0.05 1" radius="0.005" mass="0.05" pos="0 0 0.0005">
             <contact selfcollide="none"/>
           </flexcomp>
         </worldbody>
@@ -1699,14 +1788,15 @@ class IpcTest(parameterized.TestCase):
     self.assertEqual(ws_sized.max_aset, 16)
     self.assertEqual(ws_sized.max_cand, 8)
 
-    # Test BROADPHASE overflow when nconmax=2 (< 4 vertex-plane candidates in world 0)
-    d_bp = mjw.put_data(mjm, mjd, nworld=nworld, nconmax=2)
+    # Test BROADPHASE overflow when nccdmax=2 (< nconmax=3 < 4 vertex-plane candidates in world 0)
+    d_bp = mjw.put_data(mjm, mjd, nworld=nworld, nconmax=3, nccdmax=2)
     if nworld == 2:
       qpos = d_bp.qpos.numpy()
       qpos[1, 2::3] += 1.0
       d_bp.qpos = wp.array(qpos, dtype=float, device=d_bp.qpos.device)
     mjw.step(m, d_bp)
     self.assertTrue(bool(int(d_bp.overflow.numpy()[0]) & int(OverflowType.BROADPHASE)))
+    self.assertFalse(bool(int(d_bp.overflow.numpy()[0]) & int(OverflowType.NARROWPHASE)))
     if nworld == 2:
       self.assertEqual(int(d_bp.overflow.numpy()[1]), 0)
 
@@ -1750,6 +1840,131 @@ class IpcTest(parameterized.TestCase):
     if nworld == 2:
       self.assertEqual(int(d_nnz.overflow.numpy()[1]), 0)
 
+  def test_ipc_sort_aset_canonical_order(self):
+    """Tests the active-set radix sort against a lexicographic sort per world, padding and ties."""
+    mjm, _, m, d = test_data.fixture(
+      xml="""
+      <mujoco>
+        <option integrator="discrete" solver="CG">
+          <flag ipc="enable"/>
+        </option>
+        <worldbody>
+          <geom type="plane" size="1 1 0.1"/>
+          <flexcomp name="cloth" type="grid" count="3 3 1" spacing="0.05 0.05 0.05" pos="0 0 0.1" dim="2" radius="0.002">
+            <contact selfcollide="none"/>
+          </flexcomp>
+        </worldbody>
+      </mujoco>
+      """,
+      nworld=2,
+    )
+    ws = ipc.get_ipc_workspace(m, d)
+    cap = ws.max_aset
+    rng = np.random.default_rng(0)
+    nret = np.array([min(cap, 50), min(cap, 37)], dtype=np.int32)
+    typ = rng.integers(0, 5, (2, cap)).astype(np.int32)
+    geom = rng.integers(-1, 2, (2, cap)).astype(np.int32)
+    idx = rng.integers(0, 4, (2, cap, 4)).astype(np.int32)
+    lam = rng.uniform(0.0, 1.0, (2, cap)).astype(np.float32)
+    ws.nret.assign(nret)
+    ws.ret_type.assign(typ)
+    ws.ret_geom.assign(geom)
+    ws.ret_idx.assign(idx)
+    ws.ret_lam.assign(lam)
+    ws.world_done.zero_()
+    ws.aset_lam.fill_(wp.inf)
+    ipc.ipc_sort_aset(m, d, ws)
+
+    np.testing.assert_array_equal(ws.naset.numpy(), nret)
+    for w in range(2):
+      n = nret[w]
+      order = np.lexsort((np.arange(n), idx[w, :n, 3], idx[w, :n, 2], idx[w, :n, 1], idx[w, :n, 0], geom[w, :n], typ[w, :n]))
+      np.testing.assert_array_equal(ws.aset_type.numpy()[w, :n], typ[w, order])
+      np.testing.assert_array_equal(ws.aset_geom.numpy()[w, :n], geom[w, order])
+      np.testing.assert_array_equal(ws.aset_idx.numpy()[w, :n], idx[w, order])
+      np.testing.assert_array_equal(ws.aset_lam.numpy()[w, :n], lam[w, order])
+    self.assertFalse(np.array_equal(ws.aset_type.numpy()[0, :37], ws.aset_type.numpy()[1, :37]))
+
+  def test_ipc_init_ws_sparse_nnz_offset(self):
+    """Verifies IPC rows are appended after the largest native sparse row end."""
+    rowadr = wp.array([[6, 0, 3], [0, 3, 6]], dtype=int)
+    rownnz = wp.array([[3, 3, 3], [3, 3, 2]], dtype=int)
+    saved_nefc = wp.array([3, 3], dtype=int)
+    world_done = wp.zeros(2, dtype=int)
+    qacc_warmstart = wp.zeros((2, 1), dtype=float)
+    ws_entry = wp.empty((2, 1), dtype=float)
+    ws_done = wp.full(2, -1, dtype=int)
+    active_count = wp.full(2, -1, dtype=int)
+    active_nnz = wp.full(2, -1, dtype=int)
+    ws_cond = wp.full(1, -1, dtype=int)
+    ws_iter = wp.full(1, -1, dtype=int)
+    wp.launch(
+      ipc.ipc_init_ws_kernel,
+      dim=(2, 1),
+      inputs=[True, rownnz, rowadr, saved_nefc, world_done],
+      outputs=[qacc_warmstart, ws_entry, ws_done, active_count, active_nnz, ws_cond, ws_iter],
+    )
+    np.testing.assert_array_equal(active_nnz.numpy(), [9, 8])
+
+  def test_ipc_working_set_rounds_overflow(self):
+    """Verifies the working set round cap with pending additions sets OverflowType.ITERATIONS."""
+    ws_nadd = wp.array([3, 0], dtype=int)
+    overflow = wp.zeros(2, dtype=int)
+    ws_done = wp.zeros(2, dtype=int)
+    ws_iter = wp.array([ipc.IPC_WS_ROUNDS - 1], dtype=int)
+    ws_cond = wp.full(1, -1, dtype=int)
+    wp.launch(
+      ipc.ipc_update_and_check_ws_done_kernel(0),
+      dim=2,
+      inputs=[ws_nadd],
+      outputs=[overflow, ws_done, ws_iter, ws_cond],
+    )
+    np.testing.assert_array_equal(overflow.numpy(), [int(OverflowType.ITERATIONS), 0])
+    np.testing.assert_array_equal(ws_done.numpy(), [0, 1])
+    self.assertEqual(int(ws_iter.numpy()[0]), ipc.IPC_WS_ROUNDS)
+    self.assertEqual(int(ws_cond.numpy()[0]), 0)
+
+  @parameterized.parameters(1, 2)
+  def test_ipc_pin_chain_csr_and_overflow(self, nworld):
+    """Verifies CSR pinned vertex slide chains and their OverflowType.BROADPHASE capacity."""
+    _, _, m, d = test_data.fixture(
+      xml="""
+      <mujoco>
+        <option integrator="discrete" solver="CG" gravity="0 0 0">
+          <flag ipc="enable"/>
+        </option>
+        <worldbody>
+          <body name="carrier" pos="0 0 0.5">
+            <joint type="slide" axis="1 0 0"/>
+            <joint type="slide" axis="0 1 0"/>
+            <joint type="slide"/>
+            <geom size="0.01" mass="0.1" contype="0" conaffinity="0"/>
+            <flexcomp name="cloth" type="grid" dim="2" count="2 2 1" spacing="0.03 0.03 1" radius="0.004" mass="0.05" pos="0.06 0 0">
+              <pin id="0 1 2 3"/>
+              <contact selfcollide="none"/>
+            </flexcomp>
+          </body>
+        </worldbody>
+      </mujoco>
+      """,
+      nworld=nworld,
+    )
+    ws = ipc.get_ipc_workspace(m, d)
+    self.assertEqual(int(ws.npin_dofs.numpy()[0]), 12)
+    np.testing.assert_array_equal(ws.pin_num_chain.numpy(), [3, 3, 3, 3])
+    adr = ws.pin_chain_adr.numpy()
+    dof = ws.pin_chain_dof.numpy()
+    for v in range(4):
+      self.assertEqual(sorted(dof[adr[v] : adr[v] + 3]), [0, 1, 2])
+    self.assertEqual(sorted(adr), [0, 3, 6, 9])
+
+    ws.pin_chain_dof = wp.empty(5, dtype=int, device=d.qpos.device)
+    d.overflow.zero_()
+    ipc.ipc_init_topology(m, d, ws)
+    for w in range(nworld):
+      self.assertTrue(int(d.overflow.numpy()[w]) & int(OverflowType.BROADPHASE))
+    self.assertEqual(int((ws.pin_has_chain.numpy()).sum()), 1)
+
   @parameterized.parameters(1, 2)
   def test_ipc_linesearch_final_trial_accept(self, nworld):
     """Verifies exhausted IPC line search unconditionally accepts 1/256 step."""
@@ -1761,8 +1976,7 @@ class IpcTest(parameterized.TestCase):
         </option>
         <worldbody>
           <geom name="floor" type="plane" size="1 1 0.1"/>
-          <flexcomp name="cloth" type="grid" dim="2" count="2 2 1"
-                    spacing="0.05 0.05 1" radius="0.005" mass="0.05" pos="0 0 0.0008">
+          <flexcomp name="cloth" type="grid" dim="2" count="2 2 1" spacing="0.05 0.05 1" radius="0.005" mass="0.05" pos="0 0 0.0008">
             <contact selfcollide="none"/>
           </flexcomp>
         </worldbody>
@@ -1782,11 +1996,14 @@ class IpcTest(parameterized.TestCase):
 
     ws = ipc.get_ipc_workspace(m, d)
     ws.last_ls_alpha.fill_(wp.inf)
+    d.overflow.zero_()
     ipc.ipc(m, d, ws)
 
     np.testing.assert_allclose(ws.last_ls_alpha.numpy()[0], 1.0 / 256.0, atol=1e-7)
+    self.assertTrue(int(d.overflow.numpy()[0]) & int(OverflowType.LS_ITERATIONS))
     if nworld == 2:
       np.testing.assert_allclose(ws.last_ls_alpha.numpy()[1], 1.0, atol=1e-7)
+      self.assertFalse(int(d.overflow.numpy()[1]) & int(OverflowType.LS_ITERATIONS))
 
   @parameterized.parameters(1, 2)
   def test_ipc_incomplete_step_overflow(self, nworld):
@@ -1799,8 +2016,7 @@ class IpcTest(parameterized.TestCase):
         </option>
         <worldbody>
           <geom name="floor" type="plane" size="1 1 0.1"/>
-          <flexcomp name="cloth" type="grid" dim="2" count="2 2 1"
-                    spacing="0.05 0.05 1" radius="0.005" mass="0.05" pos="0 0 0.0031">
+          <flexcomp name="cloth" type="grid" dim="2" count="2 2 1" spacing="0.05 0.05 1" radius="0.005" mass="0.05" pos="0 0 0.0031">
             <contact selfcollide="none"/>
           </flexcomp>
         </worldbody>

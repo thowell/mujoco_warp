@@ -204,7 +204,7 @@ def inverse(m: Model, d: Data):
 
   if is_discrete:
     derivative.eff_mul_m(m, d, d.qfrc_inverse, d.qacc)
-    forward._launch_discrete_free_gyro(m, d, d.qfrc_inverse, d.qacc, True)
+    forward.launch_discrete_free_gyro(m, d, d.qfrc_inverse, d.qacc, True)
     wp.launch(
       _qfrc_inverse_discrete,
       dim=(d.nworld, m.nv),

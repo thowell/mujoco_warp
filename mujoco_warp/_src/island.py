@@ -81,6 +81,91 @@ def _dsu_union(parent: wp.array2d[int], worldid: int, tree0: int, tree1: int, tr
       return
 
 
+@wp.func
+def _eff_tendon_possible(
+  # Model:
+  opt_disableflags: int,
+  tendon_stiffness: wp.array2d[float],
+  tendon_stiffnesspoly: wp.array2d[wp.vec2],
+  tendon_damping: wp.array2d[float],
+  tendon_dampingpoly: wp.array2d[wp.vec2],
+  # In:
+  worldid: int,
+  tenid: int,
+) -> bool:
+  if not (opt_disableflags & DisableBit.SPRING):
+    if tendon_stiffness[worldid % tendon_stiffness.shape[0], tenid] != 0.0:
+      return True
+    spoly = tendon_stiffnesspoly[worldid % tendon_stiffnesspoly.shape[0], tenid]
+    if spoly[0] != 0.0 or spoly[1] != 0.0:
+      return True
+  if not (opt_disableflags & DisableBit.DAMPER):
+    if tendon_damping[worldid % tendon_damping.shape[0], tenid] != 0.0:
+      return True
+    dpoly = tendon_dampingpoly[worldid % tendon_dampingpoly.shape[0], tenid]
+    if dpoly[0] != 0.0 or dpoly[1] != 0.0:
+      return True
+  return False
+
+
+@wp.func
+def _eff_actuator_possible(
+  # Model:
+  opt_disableflags: int,
+  actuator_gaintype: wp.array[int],
+  actuator_biastype: wp.array[int],
+  # In:
+  actid: int,
+) -> bool:
+  if opt_disableflags & DisableBit.ACTUATION:
+    return False
+  gaintype = actuator_gaintype[actid]
+  biastype = actuator_biastype[actid]
+  return (
+    biastype == BiasType.AFFINE
+    or biastype == BiasType.DCMOTOR
+    or biastype == BiasType.MUSCLE
+    or gaintype == GainType.AFFINE
+    or gaintype == GainType.SO3
+    or gaintype == GainType.MUSCLE
+    or gaintype == GainType.DCMOTOR
+  )
+
+
+@wp.func
+def _union_tendon_trees(
+  # Model:
+  opt_enableflags: int,
+  dof_treeid: wp.array[int],
+  ten_J_rownnz: wp.array[int],
+  ten_J_rowadr: wp.array[int],
+  ten_J_colind: wp.array[int],
+  # Data in:
+  tree_awake_in: wp.array2d[int],
+  # In:
+  worldid: int,
+  tenid: int,
+  # Data out:
+  tree_island_out: wp.array2d[int],
+  # Out:
+  island_parent_out: wp.array2d[int],
+):
+  start = ten_J_rowadr[tenid]
+  end = start + ten_J_rownnz[tenid]
+  sleep_enabled = bool(opt_enableflags & EnableBit.SLEEP)
+  tree1 = int(-1)
+  for j in range(start, end):
+    tree2 = dof_treeid[ten_J_colind[j]]
+    if tree2 < 0:
+      continue
+    if sleep_enabled and tree_awake_in[worldid, tree2] == 0:
+      continue
+    if tree1 < 0:
+      tree1 = tree2
+    elif tree1 != tree2:
+      _dsu_union(island_parent_out, worldid, tree1, tree2, tree_island_out)
+
+
 @wp.kernel
 def _reset_dsu(
   # Data out:
@@ -365,91 +450,6 @@ def _island_dsu(
         _dsu_union(island_parent_out, worldid, tree, -1, tree_island_out)
       else:
         _dsu_union(island_parent_out, worldid, first_tree, tree, tree_island_out)
-
-
-@wp.func
-def _eff_tendon_possible(
-  # Model:
-  opt_disableflags: int,
-  tendon_stiffness: wp.array2d[float],
-  tendon_stiffnesspoly: wp.array2d[wp.vec2],
-  tendon_damping: wp.array2d[float],
-  tendon_dampingpoly: wp.array2d[wp.vec2],
-  # In:
-  worldid: int,
-  tenid: int,
-) -> bool:
-  if not (opt_disableflags & DisableBit.SPRING):
-    if tendon_stiffness[worldid % tendon_stiffness.shape[0], tenid] != 0.0:
-      return True
-    spoly = tendon_stiffnesspoly[worldid % tendon_stiffnesspoly.shape[0], tenid]
-    if spoly[0] != 0.0 or spoly[1] != 0.0:
-      return True
-  if not (opt_disableflags & DisableBit.DAMPER):
-    if tendon_damping[worldid % tendon_damping.shape[0], tenid] != 0.0:
-      return True
-    dpoly = tendon_dampingpoly[worldid % tendon_dampingpoly.shape[0], tenid]
-    if dpoly[0] != 0.0 or dpoly[1] != 0.0:
-      return True
-  return False
-
-
-@wp.func
-def _eff_actuator_possible(
-  # Model:
-  opt_disableflags: int,
-  actuator_gaintype: wp.array[int],
-  actuator_biastype: wp.array[int],
-  # In:
-  actid: int,
-) -> bool:
-  if opt_disableflags & DisableBit.ACTUATION:
-    return False
-  gaintype = actuator_gaintype[actid]
-  biastype = actuator_biastype[actid]
-  return (
-    biastype == BiasType.AFFINE
-    or biastype == BiasType.DCMOTOR
-    or biastype == BiasType.MUSCLE
-    or gaintype == GainType.AFFINE
-    or gaintype == GainType.SO3
-    or gaintype == GainType.MUSCLE
-    or gaintype == GainType.DCMOTOR
-  )
-
-
-@wp.func
-def _union_tendon_trees(
-  # Model:
-  opt_enableflags: int,
-  dof_treeid: wp.array[int],
-  ten_J_rownnz: wp.array[int],
-  ten_J_rowadr: wp.array[int],
-  ten_J_colind: wp.array[int],
-  # Data in:
-  tree_awake_in: wp.array2d[int],
-  # In:
-  worldid: int,
-  tenid: int,
-  # Data out:
-  tree_island_out: wp.array2d[int],
-  # Out:
-  island_parent_out: wp.array2d[int],
-):
-  start = ten_J_rowadr[tenid]
-  end = start + ten_J_rownnz[tenid]
-  sleep_enabled = bool(opt_enableflags & EnableBit.SLEEP)
-  tree1 = int(-1)
-  for j in range(start, end):
-    tree2 = dof_treeid[ten_J_colind[j]]
-    if tree2 < 0:
-      continue
-    if sleep_enabled and tree_awake_in[worldid, tree2] == 0:
-      continue
-    if tree1 < 0:
-      tree1 = tree2
-    elif tree1 != tree2:
-      _dsu_union(island_parent_out, worldid, tree1, tree2, tree_island_out)
 
 
 @wp.kernel
