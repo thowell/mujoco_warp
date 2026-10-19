@@ -59,7 +59,7 @@ def check_discrete(m: Model):
   if m.opt.integrator != IntegratorType.DISCRETE:
     if m.has_flex_snh:
       raise ValueError("stable Neo-Hookean elasticity requires integrator='discrete'")
-    if m.has_flex_passive:
+    if passive.flex_passive_contact(m):
       raise ValueError("passive flex contact requires an integrator with the effective metric: set integrator='discrete'")
     # 1D rod bending is integrated explicitly by all integrators except discrete
     if (
@@ -83,7 +83,7 @@ def check_discrete(m: Model):
   if m.opt.enableflags & EnableBit.SLEEP:
     if m.opt.disableflags & DisableBit.ISLAND:
       raise ValueError("Discrete integrator: sleep without islands not yet supported")
-    if m.nefmK > 0 or m.has_non_simple_flex or m.has_flex_passive or not m.flex_interp_assemblable:
+    if m.nefmK > 0 or m.has_non_simple_flex or passive.flex_passive_contact(m) or not m.flex_interp_assemblable:
       raise ValueError("Discrete integrator: sleep with flex not yet supported")
 
 
@@ -1140,7 +1140,7 @@ def implicit_free_body(m: Model, d: Data, vec_in: wp.array2d[float], vec_out: wp
 
 @cache_kernel
 def _discrete_free_gyro_kernel(has_fluid: bool, has_flex_passive: bool, is_inverse: bool, is_sparse: bool):
-  @wp.kernel(module="unique")
+  @wp.kernel(module="unique", enable_backward=False)
   def _discrete_free_gyro(
     # Model:
     nactuator: int,
@@ -1190,7 +1190,9 @@ def _discrete_free_gyro_kernel(has_fluid: bool, has_flex_passive: bool, is_inver
     # Out:
     out: wp.array2d[float],
   ):
-    worldid, freeid = wp.tid()
+    """One block per free body: the threads scan the couplings, then one thread solves."""
+    worldid, freeid, tid = wp.tid()
+    nthread = wp.block_dim()
     bodyid = body_freeadr[freeid]
     dof_adr = body_dofadr[bodyid]
 
@@ -1203,8 +1205,9 @@ def _discrete_free_gyro_kernel(has_fluid: bool, has_flex_passive: bool, is_inver
     for r in range(6):
       if efm_K_rownnz[dof_adr + r] != 0:
         return
-    nefc = nefc_in[worldid]
-    for i in range(nefc):
+    coupled = int(0)
+    nefc = wp.min(nefc_in[worldid], efc_J_rownnz_in.shape[1] if wp.static(is_sparse) else efc_J_in.shape[1])
+    for i in range(tid, nefc, nthread):
       if wp.static(is_sparse):
         radr = efc_J_rowadr_in[worldid, i]
         rnnz = efc_J_rownnz_in[worldid, i]
@@ -1212,34 +1215,36 @@ def _discrete_free_gyro_kernel(has_fluid: bool, has_flex_passive: bool, is_inver
           c = efc_J_colind_in[worldid, 0, radr + j]
           if c >= dof_adr and c < dof_adr + 6:
             if efc_J_in[worldid, 0, radr + j] != 0.0:
-              return
+              coupled = 1
       else:
         for r in range(6):
           if efc_J_in[worldid, i, dof_adr + r] != 0.0:
-            return
-    for t in range(ntendon):
+            coupled = 1
+    for t in range(tid, ntendon, nthread):
       if efm_ts_in[worldid, t] != 0.0:
         radr = ten_J_rowadr[t]
         for j in range(ten_J_rownnz[t]):
           c = ten_J_colind[radr + j]
           if c >= dof_adr and c < dof_adr + 6:
-            return
-    for a in range(nactuator):
+            coupled = 1
+    for a in range(tid, nactuator, nthread):
       if efm_as_in[worldid, a] != 0.0:
         radr = moment_rowadr_in[worldid, a]
         for j in range(moment_rownnz_in[worldid, a]):
           c = moment_colind_in[worldid, radr + j]
           if c >= dof_adr and c < dof_adr + 6:
-            return
+            coupled = 1
     if wp.static(has_flex_passive):
-      nacon = nacon_in[0]
-      for cid in range(nacon):
+      nacon = wp.min(nacon_in[0], contact_worldid_in.shape[0])
+      for cid in range(tid, nacon, nthread):
         if contact_worldid_in[cid] == worldid and efm_con_scale_in[cid] != 0.0:
           nnz = efm_con_nnz_in[cid]
           for j in range(nnz):
             c = efm_con_dof_in[cid, j]
             if c >= dof_adr and c < dof_adr + 6:
-              return
+              coupled = 1
+    if wp.tile_max(wp.tile(coupled))[0] != 0 or tid != 0:
+      return
 
     timestep = opt_timestep[worldid % opt_timestep.shape[0]]
     crb = crb_in[worldid, bodyid]
@@ -1317,15 +1322,16 @@ def _launch_discrete_free_gyro(m: Model, d: Data, out: wp.array2d[float], qacc: 
   if m.opt.integrator != IntegratorType.DISCRETE or not m.flex_interp_assemblable or m.has_non_simple_flex:
     return
   has_fluid = m.has_fluid and not ((m.opt.disableflags & DisableBit.SPRING) and (m.opt.disableflags & DisableBit.DAMPER))
-  if m.has_flex_passive and m.body_freeadr.size > 0:
+  if passive.flex_passive_contact(m) and m.body_freeadr.size > 0:
     efm_con_dof, _, efm_con_scale, _, efm_con_nnz = passive.build_efm_contact(m, d)
   else:
     efm_con_dof = wp.empty((0, 0), dtype=int, device=d.qacc.device)
     efm_con_scale = wp.empty(0, dtype=float, device=d.qacc.device)
     efm_con_nnz = wp.empty(0, dtype=int, device=d.qacc.device)
-  wp.launch(
-    _discrete_free_gyro_kernel(has_fluid, m.has_flex_passive, is_inverse, m.is_sparse),
+  wp.launch_tiled(
+    _discrete_free_gyro_kernel(has_fluid, passive.flex_passive_contact(m), is_inverse, m.is_sparse),
     dim=(d.nworld, m.body_freeadr.size),
+    block_dim=m.block_dim.discrete_free_gyro,
     inputs=[
       m.nactuator,
       m.ntendon,
