@@ -140,7 +140,6 @@ class RenderTest(parameterized.TestCase):
 
     self.assertNotEqual(np.unique(rgb).shape[0], 1)
 
-  @absltest.skipIf(not wp.get_device().is_cuda, "Skipping test that requires CUDA.")
   def test_render_graph_capture(self):
     mjm, mjd, m, d = test_data.fixture("humanoid/humanoid.xml")
     rc = mjw.create_render_context(

@@ -1855,25 +1855,27 @@ class CollisionTest(parameterized.TestCase):
       </mujoco>
       """
     )
-    # 1. Inside touching contact: pos="0 0 0.15" -> dist=-0.05
-    mjw.collision(m, d)
+    with wp.ScopedCapture() as capture:
+      mjw.kinematics(m, d)
+      mjw.collision(m, d)
+
+    # Inside touching contact: pos="0 0 0.15" -> dist=-0.05
+    wp.capture_launch(capture.graph)
     self.assertEqual(d.nacon.numpy()[0], 1)
     self.assertEqual(d.contact.dim.numpy()[0], 3)
 
-    # 2. In-gap band: pos="0 0 0.22" (dist=0.02, within margin+gap=0.05)
+    # In-gap band: pos="0 0 0.22" (dist=0.02, within margin+gap=0.05)
     qpos = d.qpos.numpy()
     qpos[0, :3] = np.array([0.0, 0.0, 0.22])
-    d.qpos = wp.from_numpy(qpos, dtype=wp.float32)
-    mjw.kinematics(m, d)
-    mjw.collision(m, d)
+    d.qpos.assign(qpos)
+    wp.capture_launch(capture.graph)
     self.assertEqual(d.nacon.numpy()[0], 1)
     self.assertEqual(d.contact.dim.numpy()[0], 1)
 
-    # 3. Outside gap band: pos="0 0 0.30" (dist=0.10, > gap=0.05) -> constraint released
+    # Outside gap band: pos="0 0 0.30" (dist=0.10, > gap=0.05) -> constraint released
     qpos[0, :3] = np.array([0.0, 0.0, 0.30])
-    d.qpos = wp.from_numpy(qpos, dtype=wp.float32)
-    mjw.kinematics(m, d)
-    mjw.collision(m, d)
+    d.qpos.assign(qpos)
+    wp.capture_launch(capture.graph)
     self.assertEqual(d.nacon.numpy()[0], 0)
 
   @parameterized.parameters(
