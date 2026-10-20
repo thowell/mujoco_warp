@@ -35,6 +35,10 @@ from mujoco_warp._src import types
 from mujoco_warp._src import warp_util
 
 
+class _ScratchTape(wp.Tape):
+  """Tape a wrapped forward runs on; wrapped functions it calls pass through as if untaped."""
+
+
 def _call(tape: wp.Tape | None, fn: Callable, *args, **kwargs):
   """Calls `fn` with `tape` as the active Warp tape (`None` pauses recording)."""
   prev, wp_context.runtime.tape = wp_context.runtime.tape, tape
@@ -45,14 +49,16 @@ def _call(tape: wp.Tape | None, fn: Callable, *args, **kwargs):
 
 def _is_float(arr: wp.array) -> bool:
   """Returns whether `arr` has a float scalar type, including float vectors and matrices."""
-  return wp.types.type_is_float(wp_types.type_scalar_type(arr.dtype))
+  return wp_types.type_is_float(wp_types.type_scalar_type(arr.dtype))
 
 
 def _accessed(launches: Sequence[list | Callable]) -> set[int]:
   """Returns `id(arr)` for arrays that recorded launches read or write."""
   arrays = []
   for l in launches:
-    if isinstance(l, list) and all(l[1]):  # kernel launch: [kernel, dim, max_blocks, inputs, outputs, ...]
+    if isinstance(l, list) and all(
+      (l[1],) if isinstance(l[1], int) else l[1]
+    ):  # kernel launch: [kernel, dim, max_blocks, inputs, outputs, ...]
       arrays += [*l[3], *l[4]]
     elif inspect.isfunction(l):  # wp.copy(dest, src) records a closure over `dest` and `src`
       cells = inspect.getclosurevars(l).nonlocals
@@ -92,20 +98,31 @@ def get(obj: object, path: str) -> object:
 class AdjointRule:
   """Reverse-mode rule for an API function.
 
-  `backward` must accumulate (`+=`) into input gradients, must not change `requires_grad`, should
-  keep scratch cotangents in inline allocations rather than `Data` gradients, and should recompute
-  intermediates from its inputs rather than rely on outputs that later calls may overwrite.
+  The rule lists the arrays the function differentiates. It must also list every field with
+  gradients that the forward reads or overwrites: kernel launches and copies between arrays with
+  gradients are detected and raise when the field is not listed, while `zero_()`, `fill_()`,
+  `assign()`, and copies involving an array without gradients are not detected. Listed Data and
+  RenderContext fields and array arguments that are non-empty float arrays get gradients enabled
+  automatically; Model fields only when the user enables them.
+
+  `backward` is called with the forward arguments and the tape paused. Like a kernel adjoint, it
+  must accumulate (`+=`) into the input gradients and then consume the output gradients: each must
+  afterwards equal the cotangent of the array's pre-call contents (zero where the forward overwrote
+  it; clone it first when the field is in place), because the earlier call that wrote the array
+  receives it next. It must not change `requires_grad`, should keep scratch cotangents in inline
+  allocations rather than `Data` gradients, and should recompute intermediates from its inputs
+  rather than rely on outputs that later calls may overwrite.
 
   Attributes:
-    backward: called with the forward arguments, with the tape paused, to accumulate input
-      gradients from output gradients; if None, the forward kernels are recorded natively and
-      must be compiled with `enable_backward=True`
+    backward: accumulates input gradients from output gradients; if None, the forward's launches
+      are recorded natively and its kernels must be compiled with `enable_backward=True`
     in_fields: differentiable fields of the first Data argument
     out_fields: differentiable fields of the last Data argument
-    model_fields: Model fields that can receive gradients when their `requires_grad` is set
+    model_fields: Model fields that can receive gradients when the user enables `requires_grad`
     render_fields: differentiable fields of the RenderContext argument
     array_args: names of differentiable standalone array arguments
-    supported: called with the forward arguments; returns reasons differentiation is not supported
+    supported: called untaped with the forward arguments, except during CUDA graph capture;
+      returns reasons differentiation is not supported
   """
 
   backward: Callable[..., None] | None = None
@@ -173,7 +190,7 @@ def _wrap(fn: Callable) -> Callable:
   @functools.wraps(fn)
   def wrapper(*args, **kwargs):
     tape = wp_context.runtime.tape if wp_context.runtime is not None else None
-    if tape is None:
+    if tape is None or isinstance(tape, _ScratchTape):
       return fn(*args, **kwargs)
 
     rule = RULES[name]
@@ -182,7 +199,7 @@ def _wrap(fn: Callable) -> Callable:
 
     bound = dict(zip(params, args), **kwargs)
     # Distinct containers by type in signature order; the first Data is input, the last is output:
-    objs = {cls: list({id(o): o for o in map(bound.get, params) if type(o) is cls}.values()) for cls in _FIELDS}
+    objs = {cls: list({id(o): o for o in map(bound.get, params) if isinstance(o, cls)}.values()) for cls in _FIELDS}
     m, data, rc = objs[types.Model][:1], objs[types.Data], objs[types.RenderContext][:1]
 
     # Arrays the rule differentiates; all but the opt-in Model fields get gradients enabled:
@@ -212,7 +229,7 @@ def _wrap(fn: Callable) -> Callable:
             continue
           label = f"{cls.__name__} field '{path}'"
           if arr not in _PROMOTED:
-            raise NotImplementedError(f"Differentiation of {label} is not supported.")
+            raise NotImplementedError(f"Differentiation of '{name}' with {label} is not supported.")
           foreign.append((label, arr))
 
     reasons = None if rule.supported is None or wp.get_device().is_capturing else _call(None, rule.supported, *args, **kwargs)
@@ -225,35 +242,39 @@ def _wrap(fn: Callable) -> Callable:
         arr.requires_grad = True
         _PROMOTED.add(arr)
 
-    # Native rules, and calls with foreign fields to check, run on a scratch tape whose launches
-    # are checked before native launches are appended to `tape`; custom rules record their backward:
-    fwd_tape = wp.Tape() if rule.backward is None or foreign else None
+    # The forward runs on a scratch tape, whose launches are checked before native rules append
+    # them to `tape`; custom rules record their backward instead:
+    fwd_tape = _ScratchTape()
     result = _call(fwd_tape, fn, *args, **kwargs)
-    launches = [] if fwd_tape is None else fwd_tape.launches
+    launches = fwd_tape.launches
 
-    if rule.backward is None and not all(map(_has_adjoint, launches)):
-      raise NotImplementedError(f"Differentiation of '{name}' requires a backward rule.")
     # Reading a foreign field would drop its gradient, and writing it would send this call's output
     # gradient to the earlier call:
     accessed = _accessed(launches)
     for label, arr in foreign:
       if id(arr) in accessed:
-        raise NotImplementedError(f"Differentiation of {label} is not supported.")
-
-    if rule.backward is None:
-      tape.launches.extend(launches)
-      tape.gradients.update(fwd_tape.gradients)
-      return result
+        raise NotImplementedError(
+          f"Differentiation of '{name}' is not supported: it accesses {label}, which an earlier call differentiates."
+        )
+    if rule.backward is None and not all(map(_has_adjoint, launches)):
+      raise NotImplementedError(f"Differentiation of '{name}' requires a backward rule.")
 
     arrays = [a for a in tracked if isinstance(a, wp.array) and a.size > 0 and a.requires_grad]
+    if rule.backward is None:
+      tape.launches.extend(launches)
+      # Warp registers kernel gradients only in `tape.backward`; register the rule's arrays now,
+      # with those of the recorded copies, so that a `tape.zero()` recorded before the first
+      # backward (as in a captured graph) zeroes them:
+      tape.gradients.update({**fwd_tape.gradients, **{a: a.grad for a in arrays}})
+    else:
 
-    def backward():
-      # Setting `requires_grad = False` after recording frees `.grad`:
-      if any(a.grad is None for a in arrays):
-        raise RuntimeError(f"Gradients for '{name}' were disabled after recording.")
-      _call(None, rule.backward, *args, **kwargs)
+      def backward():
+        # Setting `requires_grad = False` after recording frees `.grad`:
+        if any(a.grad is None for a in arrays):
+          raise RuntimeError(f"Gradients for '{name}' were disabled after recording.")
+        _call(None, rule.backward, *args, **kwargs)
 
-    tape.record_func(backward=backward, arrays=arrays)
+      tape.record_func(backward=backward, arrays=arrays)
     return result
 
   return wrapper
