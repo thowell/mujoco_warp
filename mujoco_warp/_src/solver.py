@@ -1948,7 +1948,7 @@ def _update_constraint_init_qfrc_constraint_sparse(compact: bool, nv: int, deter
     module_options["deterministic"] = wp.DeterministicMode.RUN_TO_RUN
     module_options["deterministic_max_records"] = nv
 
-  @wp.kernel(module="unique", enable_backward=False, grid_stride=True, module_options=module_options)
+  @wp.kernel(module="unique", module_options=module_options, grid_stride=True)
   def kernel(
     # Data in:
     nefc_in: wp.array[int],
@@ -3963,7 +3963,7 @@ def _solver_iteration(
 
 def init_context(m: types.Model, d: types.Data, ctx: SolverContext | InverseContext, grad: bool = True, compact: bool = False):
   if m.opt.integrator == types.IntegratorType.DISCRETE:
-    if m.nefmdof > 0 and not m.efm0_active and m.opt.solver == types.SolverType.CG:
+    if m.nefmdof > 0 and m.opt.solver == types.SolverType.CG:
       derivative.eff_prec_fold(m, d, out=d.efm_L)
     if grad:
       qfrc_smooth_eff = wp.zeros((d.nworld, m.nv_pad), dtype=float, device=d.qacc.device)

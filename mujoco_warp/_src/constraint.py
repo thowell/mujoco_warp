@@ -2949,13 +2949,17 @@ def _dof_chain_advance(dof_parentid: wp.array[int], da1: int, da2: int, n: int) 
 
 
 @cache_kernel
-def _efc_contact_jac_sparse(cone_type: types.ConeType, nmaxdim: int):
+def _efc_contact_jac_sparse(cone_type: types.ConeType, nmaxdim: int, max_records: int = 0, deterministic: bool = False):
   IS_ELLIPTIC = cone_type == types.ConeType.ELLIPTIC
   vecdim = wp.types.vector(length=nmaxdim, dtype=float)
+  module_options = {"enable_backward": False}
+  if deterministic:
+    module_options["deterministic"] = wp.DeterministicMode.RUN_TO_RUN
+    module_options["deterministic_max_records"] = max_records
 
   # Lane k of a contact computes the k-th nonzero for all of the contact's rows, so lanes write
   # consecutive addresses; one thread per row would scatter every store across sectors.
-  @wp.kernel(module="unique", enable_backward=False, grid_stride=False)
+  @wp.kernel(module="unique", module_options=module_options, grid_stride=False)
   def kernel(
     # Model:
     body_parentid: wp.array[int],
@@ -5451,6 +5455,7 @@ def make_constraint(m: types.Model, d: types.Data):
           ],
         )
 
+      det_atomics = bool(m.opt.deterministic & types.DeterminismType.ATOMICS)
       if m.is_sparse:
         if has_flex:
           wp.launch(
@@ -5508,9 +5513,11 @@ def make_constraint(m: types.Model, d: types.Data):
           ncontact_per_pass = d.naconmax
           if wp.get_device().is_cuda:
             ncontact_per_pass = min(ncontact_per_pass, 1024 * wp.get_device().sm_count)
+          ncontact_stride = max(ncontact_per_pass, 1)
+          max_records = ((d.naconmax + ncontact_stride - 1) // ncontact_stride) * nmaxdim if det_atomics else 0
           wp.launch(
-            _efc_contact_jac_sparse(m.opt.cone, nmaxdim),
-            dim=max(ncontact_per_pass, 1) * _CONTACT_JAC_LANES,
+            _efc_contact_jac_sparse(m.opt.cone, nmaxdim, max_records, det_atomics),
+            dim=ncontact_stride * _CONTACT_JAC_LANES,
             inputs=[
               m.body_parentid,
               m.body_rootid,
@@ -5547,7 +5554,6 @@ def make_constraint(m: types.Model, d: types.Data):
         d.efc.Jqvel.zero_()
         tile_size = m.block_dim.contact_jac_tiled
         n_dof_blocks = (m.nv_pad + tile_size - 1) // tile_size
-        det_atomics = bool(m.opt.deterministic & types.DeterminismType.ATOMICS)
 
         if has_flex:
           wp.launch_tiled(

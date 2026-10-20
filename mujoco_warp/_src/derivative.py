@@ -3115,8 +3115,9 @@ def eff_build(m: Model, d: Data):
     d.efm_K_val.zero_()
     d.efm_L.zero_()
 
+    det_atomics = bool(m.opt.deterministic & DeterminismType.ATOMICS)
     wp.launch(
-      _eff_flex_stretch_stiff_vert(bool(m.opt.deterministic & DeterminismType.ATOMICS)),
+      _eff_flex_stretch_stiff_vert(det_atomics),
       dim=(d.nworld, m.nflexvert),
       inputs=[
         m.opt.timestep,
@@ -3143,7 +3144,7 @@ def eff_build(m: Model, d: Data):
     )
 
     wp.launch(
-      _eff_flex_stretch_stiff_edge(bool(m.opt.deterministic & DeterminismType.ATOMICS)),
+      _eff_flex_stretch_stiff_edge(det_atomics),
       dim=(d.nworld, m.nflexedge, 2),
       inputs=[
         m.opt.timestep,
@@ -3171,7 +3172,6 @@ def eff_build(m: Model, d: Data):
       outputs=[d.efm_K_val],
     )
 
-    det_atomics = bool(m.opt.deterministic & DeterminismType.ATOMICS)
     wp.launch(
       _eff_flex_bend_stiff(det_atomics),
       dim=(d.nworld, m.nflexedge),
@@ -3347,7 +3347,7 @@ def eff_shift(m: Model, d: Data):
   if m.has_flex_passive and not ((m.opt.disableflags & DisableBit.SPRING) and (m.opt.disableflags & DisableBit.DAMPER)):
     efm_con_dof, efm_con_val, efm_con_scale, _, efm_con_nnz = build_efm_contact(m, d)
     wp.launch(
-      _eff_contact_shift(bool(m.opt.deterministic & DeterminismType.ATOMICS)),
+      _eff_contact_shift(det_atomics),
       dim=d.naconmax,
       inputs=[
         m.opt.timestep,
@@ -3366,7 +3366,7 @@ def eff_shift(m: Model, d: Data):
     Mi = m.M_fullm_i
     Mj = m.M_fullm_j
     wp.launch(
-      _qderiv_ellipsoid_fluid(bool(m.opt.deterministic & DeterminismType.ATOMICS)),
+      _qderiv_ellipsoid_fluid(det_atomics),
       dim=(d.nworld, m.body_fluid_ellipsoid_adr.size, Mi.size),
       inputs=[
         m.opt.timestep,
@@ -3397,7 +3397,7 @@ def eff_shift(m: Model, d: Data):
       outputs=[d.efm_fluid],
     )
     wp.launch(
-      _qderiv_box_fluid(bool(m.opt.deterministic & DeterminismType.ATOMICS)),
+      _qderiv_box_fluid(det_atomics),
       dim=(d.nworld, m.body_fluid_box_adr.size, Mi.size),
       inputs=[
         m.opt.timestep,
@@ -3959,7 +3959,7 @@ def _eff_factor_folded_blocks(
 def eff_prec_fold(m: Model, d: Data, out: Optional[wp.array] = None) -> wp.array:
   """Folds rank-1 metric terms and active/inactive efc rows into 3x3 preconditioner blocks."""
   epL = out if out is not None else wp.empty_like(d.efm_L)
-  if m.nefmdof == 0 or m.efm0_active:
+  if m.nefmdof == 0:
     return epL
   epB = wp.empty_like(d.efm_L)
   dofblk = m.efm_dofblk
@@ -4036,7 +4036,7 @@ def eff_prec_fold(m: Model, d: Data, out: Optional[wp.array] = None) -> wp.array
   if m.has_flex_passive:
     efm_con_dof, efm_con_val, efm_con_scale, _, efm_con_nnz = build_efm_contact(m, d)
     wp.launch(
-      _eff_fold_contact_rank1(bool(m.opt.deterministic & DeterminismType.ATOMICS)),
+      _eff_fold_contact_rank1(det_atomics),
       dim=d.naconmax,
       inputs=[
         m.efm_dofid,

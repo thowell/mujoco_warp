@@ -359,6 +359,7 @@ _CONTACT_CASES = (
     testcase_name="sparse",
     overrides={"opt.jacobian": "SPARSE"},
     covers=(
+      "constraint._efc_contact_jac_sparse",
       "passive._qfrc_adhesion",
       "sensor._contact_match_builder",
       "sensor._sensor_touch",
