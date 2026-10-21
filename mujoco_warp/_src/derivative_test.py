@@ -2249,7 +2249,7 @@ class DerivativeTest(parameterized.TestCase):
       <mujoco>
         <option solver="CG" integrator="discrete"/>
         <worldbody>
-          <flexcomp name="crease" type="direct" dim="2" radius="0.005" mass="0.1" point="0 0 0  0.1 0 0  0.05 0.08 0  0.05 0.06 0.06  0.05 0.05 0.03" element="0 1 2  1 0 3  0 4 1">
+          <flexcomp name="crease" type="direct" radius="0.005" mass="0.1" point="0 0 0  0.1 0 0  0.05 0.08 0  0.05 0.06 0.06  0.05 0.05 0.03" element="0 1 2  1 0 3  0 4 1">
             <contact selfcollide="none" contype="0" conaffinity="0"/>
             <elasticity young="1e4" poisson="0.2" damping="0.05" elastic2d="both" thickness="0.01"/>
           </flexcomp>
@@ -2261,21 +2261,32 @@ class DerivativeTest(parameterized.TestCase):
     )
     bending = mjm.flex_bending[mjm.flex_bendingadr[0] :].reshape(-1, 17)
     self.assertLess(np.min(bending[:, 0] + bending[:, 5] + bending[:, 10] + bending[:, 15]), 0.0)
+    mjds = [mjd]
     if nworld == 2:
       qvel_np = d.qvel.numpy()
       qvel_np[1] = qvel_np[0] * 1.5 + 0.05
-      d.qvel = wp.array(qvel_np, dtype=float)
+      d.qvel.assign(qvel_np)
+      mjd1 = mujoco.MjData(mjm)
+      mjd1.qpos[:] = d.qpos.numpy()[1]
+      mjd1.qvel[:] = qvel_np[1]
+      mjds.append(mjd1)
 
+    d.efm_K_val.fill_(wp.inf)
     d.efm_c.fill_(wp.inf)
     d.qacc_smooth.fill_(wp.inf)
 
-    mujoco.mj_forward(mjm, mjd)
+    for mjd_w in mjds:
+      mujoco.mj_forward(mjm, mjd_w)
     mjw.forward(m, d)
-
-    _assert_eq(d.efm_c.numpy()[0], mjd.efm_c, "efm_c")
-    _assert_eq(d.qacc_smooth.numpy()[0], mjd.qacc_smooth, "qacc_smooth")
+    efm_K_val = d.efm_K_val.numpy()
+    efm_c_np = d.efm_c.numpy()
+    qacc_smooth_np = d.qacc_smooth.numpy()
+    for w, mjd_w in enumerate(mjds):
+      _assert_eq(efm_K_val[w], mjd_w.efm_K_val, f"efm_K_val_w{w}")
+      _assert_eq(efm_c_np[w], mjd_w.efm_c, f"efm_c_w{w}")
+      _assert_eq(qacc_smooth_np[w], mjd_w.qacc_smooth, f"qacc_smooth_w{w}")
     if nworld == 2:
-      self.assertFalse(np.allclose(d.efm_c.numpy()[0], d.efm_c.numpy()[1]))
+      self.assertFalse(np.allclose(efm_c_np[0], efm_c_np[1]))
 
   def _eff_chol_reference(self, mjm, m, d, w, fold):
     """MuJoCo C's covered-block matrix H' (vertex-major) and its allowed vertex pairs."""
@@ -2477,11 +2488,12 @@ class DerivativeTest(parameterized.TestCase):
       np.testing.assert_array_equal(d.overflow.numpy(), 0)
       # each connect's 3 rows couple one pair of opposite corners, recorded once
       np.testing.assert_array_equal(chol.xcount.numpy(), 2 if fold else 0)
+      res_np = res.numpy()
       xs = []
       for w in range(nworld):
         H, cov = self._assert_eff_chol(mjm, m, d, chol, w, fold)
         x = np.linalg.solve(H, vec_np[w, cov])
-        np.testing.assert_allclose(res.numpy()[w, cov], x, rtol=1e-3, atol=1e-3 * np.abs(x).max(), err_msg=f"solve fold={fold}")
+        np.testing.assert_allclose(res_np[w, cov], x, rtol=1e-3, atol=1e-3 * np.abs(x).max(), err_msg=f"solve fold={fold}")
         xs.append(x)
       if nworld == 2:
         self.assertFalse(np.allclose(xs[0], xs[1]))
@@ -2582,11 +2594,12 @@ class DerivativeTest(parameterized.TestCase):
     np.testing.assert_array_equal(chol.status.numpy(), True)
     # spring couples v0-v5, drive couples v2-v3: neither is a flex edge
     np.testing.assert_array_equal(chol.xcount.numpy(), 2)
+    res_np = res.numpy()
     Hs = []
     for w in range(nworld):
       H, cov = self._assert_eff_chol(mjm, m, d, chol, w, True)
       x = np.linalg.solve(H, vec_np[w, cov])
-      np.testing.assert_allclose(res.numpy()[w, cov], x, rtol=1e-3, atol=1e-3 * np.abs(x).max())
+      np.testing.assert_allclose(res_np[w, cov], x, rtol=1e-3, atol=1e-3 * np.abs(x).max())
       Hs.append(H)
     if nworld == 2:
       self.assertFalse(np.allclose(Hs[0], Hs[1]))
@@ -3981,7 +3994,7 @@ class DerivativeTest(parameterized.TestCase):
       <mujoco>
         <option gravity="0 0 0" integrator="discrete" solver="CG" iterations="1" tolerance="1e-10"/>
         <worldbody>
-          <flexcomp name="cloth" type="grid" dim="2" count="3 3 1" spacing="0.05 0.05 1" radius="0.005" mass="0.09">
+          <flexcomp name="cloth" count="3 3 1" spacing="0.05 0.05 1" radius="0.005" mass="0.09">
             <contact contype="0" conaffinity="0" selfcollide="none"/>
             <elasticity young="5000" thickness="0.005" elastic2d="both" damping="0.1"/>
           </flexcomp>
@@ -4001,9 +4014,10 @@ class DerivativeTest(parameterized.TestCase):
 
     derivative.eff_solve(m, d, d.qacc_smooth, qfrc=wp.array(qfrc, dtype=float))
 
-    self.assertTrue(bool(int(d.overflow.numpy()[0]) & int(types.OverflowType.ITERATIONS)))
+    overflow_np = d.overflow.numpy()
+    self.assertTrue(bool(int(overflow_np[0]) & int(types.OverflowType.ITERATIONS)))
     if nworld == 2:
-      self.assertEqual(int(d.overflow.numpy()[1]), 0)
+      self.assertEqual(int(overflow_np[1]), 0)
 
   @parameterized.product(
     nworld=(1, 2),
@@ -4061,6 +4075,16 @@ class DerivativeTest(parameterized.TestCase):
     ctx.Mgrad.fill_(wp.inf)
     solver.init_context(m, d, ctx, grad=True)
 
+    efm_diag_np = d.efm_diag.numpy()
+    nefc_np = d.nefc.numpy()
+    efc_D_np = d.efc.D.numpy()
+    efc_J_np = d.efc.J.numpy()
+    if m.is_sparse:
+      J_rownnz_np = d.efc.J_rownnz.numpy()
+      J_rowadr_np = d.efc.J_rowadr.numpy()
+      J_colind_np = d.efc.J_colind.numpy()
+    grad_np = ctx.grad.numpy()
+    Mgrad_np = ctx.Mgrad.numpy()
     mjds = [mujoco.MjData(mjm) for _ in range(nworld)]
     for w in range(nworld):
       mjds[w].qpos[:] = qpos[w]
@@ -4068,27 +4092,80 @@ class DerivativeTest(parameterized.TestCase):
       mujoco.mj_forwardSkip(mjm, mjds[w], mujoco.mjtStage.mjSTAGE_NONE, 1)
       mj_M = np.zeros((mjm.nv, mjm.nv))
       mujoco.mju_sym2dense(mj_M, mjds[w].M, mjm.M_rownnz, mjm.M_rowadr, mjm.M_colind)
-      S_uu = mj_M[:2, :2] + np.diag(d.efm_diag.numpy()[w, :2])
-      nefc_w = int(d.nefc.numpy()[w])
-      D_w = d.efc.D.numpy()[w, :nefc_w]
+      S_uu = mj_M[:2, :2] + np.diag(efm_diag_np[w, :2])
+      nefc_w = int(nefc_np[w])
+      D_w = efc_D_np[w, :nefc_w]
       if m.is_sparse:
         J_dense = np.zeros((nefc_w, m.nv))
-        rownnz = d.efc.J_rownnz.numpy()[w, :nefc_w]
-        rowadr = d.efc.J_rowadr.numpy()[w, :nefc_w]
-        colind = d.efc.J_colind.numpy()[w, 0]
-        J_val = d.efc.J.numpy()[w, 0]
+        rownnz = J_rownnz_np[w, :nefc_w]
+        rowadr = J_rowadr_np[w, :nefc_w]
+        colind = J_colind_np[w, 0]
+        J_val = efc_J_np[w, 0]
         for r in range(nefc_w):
           for k in range(rownnz[r]):
             J_dense[r, colind[rowadr[r] + k]] = J_val[rowadr[r] + k]
       else:
-        J_dense = d.efc.J.numpy()[w, :nefc_w, : m.nv]
+        J_dense = efc_J_np[w, :nefc_w, : m.nv]
       J_u = J_dense[:, :2]
       S_uu += J_u.T @ (D_w[:, None] * J_u)
-      want_u = np.linalg.solve(S_uu, ctx.grad.numpy()[w, :2])
-      np.testing.assert_allclose(ctx.Mgrad.numpy()[w, :2], want_u, atol=1e-4, rtol=1e-4)
+      want_u = np.linalg.solve(S_uu, grad_np[w, :2])
+      np.testing.assert_allclose(Mgrad_np[w, :2], want_u, atol=1e-4, rtol=1e-4)
 
     if nworld == 2:
-      self.assertFalse(np.allclose(ctx.Mgrad.numpy()[0, :2], ctx.Mgrad.numpy()[1, :2]))
+      self.assertFalse(np.allclose(Mgrad_np[0, :2], Mgrad_np[1, :2]))
+
+  @parameterized.parameters(1, 2)
+  def test_eff_mul_m_passive_flex_disabled_spring_damper(self, nworld):
+    """Tests that eff_mul_m ignores passive flex contact when SPRING and DAMPER are disabled."""
+    mjm, mjd, m, d = test_data.fixture(
+      xml="""
+      <mujoco>
+        <option integrator="discrete"/>
+        <worldbody>
+          <geom name="floor" type="plane" size="2 2 0.01"/>
+          <flexcomp name="f0" count="2 2 1" spacing="0.06 0.06 0.06" pos="0 0 0.005" radius="0.015" mass="0.4">
+            <contact passive="true" selfcollide="none"/>
+            <elasticity young="1000" damping="0.05"/>
+          </flexcomp>
+        </worldbody>
+      </mujoco>
+      """,
+      nworld=nworld,
+    )
+    qvel = d.qvel.numpy()
+    qfrc = d.qfrc_applied.numpy()
+    qvel[0] = -0.2
+    qfrc[0, 0] = 1.0
+    mjds = [mjd]
+    mjd.qvel[:] = qvel[0]
+    mjd.qfrc_applied[:] = qfrc[0]
+    if nworld == 2:
+      mjd1 = mujoco.MjData(mjm)
+      qvel[1] = -0.4
+      qfrc[1, 0] = 3.0
+      mjd1.qvel[:] = qvel[1]
+      mjd1.qfrc_applied[:] = qfrc[1]
+      mjds.append(mjd1)
+    d.qvel.assign(qvel)
+    d.qfrc_applied.assign(qfrc)
+
+    mjw.forward(m, d)
+    efm_con = derivative.build_efm_contact(m, d)
+    self.assertGreater(int(efm_con[4].numpy().max()), 0)
+    mjm.opt.disableflags |= mujoco.mjtDisableBit.mjDSBL_SPRING | mujoco.mjtDisableBit.mjDSBL_DAMPER
+    m.opt.disableflags = int(mjm.opt.disableflags)
+    mjw.forward(m, d)
+
+    res_wp = wp.full_like(d.qacc_smooth, wp.inf)
+    derivative.eff_mul_m(m, d, res_wp, d.qacc_smooth, efm_con=efm_con)
+    res_np = res_wp.numpy()
+    for w in range(nworld):
+      mujoco.mj_forward(mjm, mjds[w])
+      expected = np.zeros(mjm.nv)
+      mujoco.mj_mulM(mjm, mjds[w], expected, mjds[w].qacc_smooth)
+      _assert_eq(res_np[w], expected, f"eff_mul_m_disabled_spring_damper_w{w}")
+    if nworld == 2:
+      self.assertFalse(np.allclose(res_np[0], res_np[1]))
 
 
 if __name__ == "__main__":

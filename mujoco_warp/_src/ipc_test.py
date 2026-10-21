@@ -95,15 +95,17 @@ class IpcTest(parameterized.TestCase):
     d.qacc.fill_(wp.inf)
     mjw.step(m, d)
 
+    qvel_np = d.qvel.numpy()
+    qpos_np = d.qpos.numpy()
     for w in range(nworld):
-      qvel = d.qvel.numpy()[w]
-      qpos = d.qpos.numpy()[w]
+      qvel = qvel_np[w]
+      qpos = qpos_np[w]
       for i in range(2, m.nv, 3):
         np.testing.assert_allclose(qvel[i], want_v, atol=1e-5)
       self.assertFalse(np.isnan(qpos[0]))
 
     if nworld == 2:
-      self.assertFalse(np.allclose(d.qpos.numpy()[0], d.qpos.numpy()[1]))
+      self.assertFalse(np.allclose(qpos_np[0], qpos_np[1]))
 
   @parameterized.parameters(1, 2)
   def test_contact_blocks_tunneling(self, nworld):
@@ -139,8 +141,9 @@ class IpcTest(parameterized.TestCase):
     mjw.step(m, d)
     mjw.kinematics(m, d)
     mjw.flex(m, d)
+    fv_np = d.flexvert_xpos.numpy()
     for w in range(nworld):
-      self.assertLess(float(np.min(d.flexvert_xpos.numpy()[w, :, 2])), 0.0)
+      self.assertLess(float(np.min(fv_np[w, :, 2])), 0.0)
 
     # With IPC contact enabled, cloth is stopped above z = 0 at committed step endpoint
     m.opt.disableflags &= ~mjw.DisableBit.CONTACT
@@ -151,8 +154,9 @@ class IpcTest(parameterized.TestCase):
     mjw.kinematics(m, d)
     mjw.flex(m, d)
 
+    fv_np = d.flexvert_xpos.numpy()
     for w in range(nworld):
-      flexvert_xpos = d.flexvert_xpos.numpy()[w]
+      flexvert_xpos = fv_np[w]
       minz = float(np.min(flexvert_xpos[:, 2]))
       self.assertGreater(minz, 0.0)
       self.assertFalse(np.isnan(minz))
@@ -196,8 +200,9 @@ class IpcTest(parameterized.TestCase):
     mjw.step(m, d)
     mjw.kinematics(m, d)
     mjw.flex(m, d)
+    fv_np = d.flexvert_xpos.numpy()
     for w in range(nworld):
-      self.assertLess(float(np.min(d.flexvert_xpos.numpy()[w, :, 2])), 0.02)
+      self.assertLess(float(np.min(fv_np[w, :, 2])), 0.02)
 
     # With IPC contact enabled, cloth is stopped above z = 0.02 at committed step endpoint
     m.opt.disableflags &= ~mjw.DisableBit.CONTACT
@@ -208,8 +213,9 @@ class IpcTest(parameterized.TestCase):
     mjw.kinematics(m, d)
     mjw.flex(m, d)
 
+    fv_np = d.flexvert_xpos.numpy()
     for w in range(nworld):
-      flexvert_xpos = d.flexvert_xpos.numpy()[w]
+      flexvert_xpos = fv_np[w]
       minz = float(np.min(flexvert_xpos[:, 2]))
       self.assertGreater(minz, 0.02)
       self.assertFalse(np.isnan(minz))
@@ -243,13 +249,14 @@ class IpcTest(parameterized.TestCase):
     d.qacc.fill_(wp.inf)
     mjw.step(m, d)
 
+    lam_np = d.flexvert_lambda.numpy()
     for w in range(nworld):
-      lam = d.flexvert_lambda.numpy()[w]
+      lam = lam_np[w]
       self.assertFalse(np.isnan(lam).any())
       self.assertGreater(float(np.max(lam)), 0.0)
 
     if nworld == 2:
-      self.assertFalse(np.allclose(d.flexvert_lambda.numpy()[0], d.flexvert_lambda.numpy()[1]))
+      self.assertFalse(np.allclose(lam_np[0], lam_np[1]))
 
   @parameterized.parameters(1, 2)
   def test_constraint_force_reported(self, nworld):
@@ -279,8 +286,9 @@ class IpcTest(parameterized.TestCase):
       mjw.step(m, d)
 
     expected_weight = 0.05 * 9.81
+    qfrc_np = d.qfrc_constraint.numpy()
     for w in range(nworld):
-      qfrc = d.qfrc_constraint.numpy()[w]
+      qfrc = qfrc_np[w]
       self.assertFalse(np.isinf(qfrc).any())
       total_z_force = float(np.sum(qfrc[2::3]))
       np.testing.assert_allclose(total_z_force, expected_weight, rtol=0.05)
@@ -312,8 +320,9 @@ class IpcTest(parameterized.TestCase):
     d.qacc.fill_(wp.inf)
     mjw.step(m, d)
 
+    qvel_np = d.qvel.numpy()
     for w in range(nworld):
-      qvel = d.qvel.numpy()[w]
+      qvel = qvel_np[w]
       for i in range(2, m.nv, 3):
         self.assertGreater(qvel[i], 0.0)
 
@@ -637,8 +646,9 @@ class IpcTest(parameterized.TestCase):
         native += int(d.nacon.numpy()[0])
 
       self.assertEqual(native > 0, not supported, f"{gtype}: native contacts only for unsupported types")
+      fv_np = d.flexvert_xpos.numpy()
       for w in range(nworld):
-        zmin = float(np.min(d.flexvert_xpos.numpy()[w, :, 2]))
+        zmin = float(np.min(fv_np[w, :, 2]))
         self.assertGreater(zmin, 0.2, f"{gtype}: sheet rests on top in world {w}")
       if nworld == 2:
         self.assertFalse(np.allclose(d.qpos.numpy()[0], d.qpos.numpy()[1]))
@@ -763,9 +773,10 @@ class IpcTest(parameterized.TestCase):
         mjw.step(m, d)
       qx.append(d.qpos.numpy()[:, 0].copy())
       cx.append(np.mean(d.flexvert_xpos.numpy()[:, :, 0], axis=1))
+      qvel_np = d.qvel.numpy()
       for w in range(nworld):
         want_v = 1.0 if w == 0 else 2.0
-        np.testing.assert_allclose(d.qvel.numpy()[w, 0], want_v, atol=1e-5)
+        np.testing.assert_allclose(qvel_np[w, 0], want_v, atol=1e-5)
 
     for w in range(nworld):
       want_x = 0.02 if w == 0 else 0.04
@@ -967,8 +978,9 @@ class IpcTest(parameterized.TestCase):
     f_elemnum = int(mjm.flex_elemnum[0])
     flex_elem = mjm.flex_elem[f_elemadr : f_elemadr + 3 * f_elemnum].reshape(-1, 3)
 
+    fv_np = d.flexvert_xpos.numpy()
     for w in range(nworld):
-      xv = d.flexvert_xpos.numpy()[w, f_vertadr : f_vertadr + f_vertnum]
+      xv = fv_np[w, f_vertadr : f_vertadr + f_vertnum]
       p = np.array([0.021, 0.019, 0.02])
       best_dist = 1e30
       best_cp = np.zeros(3)
@@ -983,7 +995,7 @@ class IpcTest(parameterized.TestCase):
       self.assertGreater(best_cp[2], p[2])
       self.assertGreater(best_dist, 0.9 * 0.005)
     if nworld == 2:
-      self.assertFalse(np.allclose(d.flexvert_xpos.numpy()[0], d.flexvert_xpos.numpy()[1]))
+      self.assertFalse(np.allclose(fv_np[0], fv_np[1]))
 
   @parameterized.parameters(1, 2)
   def test_pinned_paddle_stops_on_plane(self, nworld):
@@ -1021,13 +1033,14 @@ class IpcTest(parameterized.TestCase):
     f_vertadr = int(mjm.flex_vertadr[0])
     f_vertnum = int(mjm.flex_vertnum[0])
     verts = d.flexvert_xpos.numpy()[:, f_vertadr : f_vertadr + f_vertnum]
+    qpos_np = d.qpos.numpy()
     for w in range(nworld):
       zmin = float(np.min(verts[w, :, 2]))
-      carrier_z = float(d.qpos.numpy()[w, 0])
+      carrier_z = float(qpos_np[w, 0])
       self.assertGreater(zmin, -0.005)
       self.assertLess(carrier_z, -0.03)
     if nworld == 2:
-      self.assertFalse(np.allclose(d.qpos.numpy()[0], d.qpos.numpy()[1]))
+      self.assertFalse(np.allclose(qpos_np[0], qpos_np[1]))
 
   @parameterized.parameters(1, 2)
   def test_articulated_capsule_does_not_tunnel(self, nworld):
@@ -1063,13 +1076,16 @@ class IpcTest(parameterized.TestCase):
     worst = [1e9] * nworld
     for _ in range(20):
       mjw.step(m, d)
+      geom_xpos_np = d.geom_xpos.numpy()
+      geom_xmat_np = d.geom_xmat.numpy()
+      qvel_np = d.qvel.numpy()
       for w in range(nworld):
-        cz = float(d.geom_xpos.numpy()[w, 1, 2])
-        axz = float(d.geom_xmat.numpy()[w, 1, 2, 2])
+        cz = float(geom_xpos_np[w, 1, 2])
+        axz = float(geom_xmat_np[w, 1, 2, 2])
         lowest = cz - abs(0.2 * axz) - 0.05
         if lowest < worst[w]:
           worst[w] = lowest
-        self.assertFalse(np.isnan(d.qvel.numpy()[w, 0]))
+        self.assertFalse(np.isnan(qvel_np[w, 0]))
 
     for w in range(nworld):
       self.assertGreater(worst[w], -0.05)
@@ -1087,7 +1103,7 @@ class IpcTest(parameterized.TestCase):
         </option>
         <worldbody>
           <flexcomp name="cloth" type="grid" dim="2" count="5 5 1" spacing=".04 .04 1" radius=".004" mass=".1" pos="0 0 .2">
-            <contact selfcollide="auto" passive="true"/>
+            <contact passive="true"/>
             <pin id="0 4 20 24"/>
           </flexcomp>
         </worldbody>
@@ -1103,7 +1119,7 @@ class IpcTest(parameterized.TestCase):
         </option>
         <worldbody>
           <flexcomp name="cloth" type="grid" dim="2" count="5 5 1" spacing=".04 .04 1" radius=".004" mass=".1" pos="0 0 .2">
-            <contact selfcollide="auto" passive="false"/>
+            <contact passive="false"/>
             <pin id="0 4 20 24"/>
           </flexcomp>
         </worldbody>
@@ -1295,14 +1311,16 @@ class IpcTest(parameterized.TestCase):
       mjw.step(m_c, d_c)
       mjw.step(m_f, d_f)
 
+    fv_c = d_c.flexvert_xpos.numpy()
+    fv_f = d_f.flexvert_xpos.numpy()
     for w in range(nworld):
       # Colliding cloth rests on floor (z > 0)
-      self.assertGreater(float(np.min(d_c.flexvert_xpos.numpy()[w, :, 2])), 0.0)
+      self.assertGreater(float(np.min(fv_c[w, :, 2])), 0.0)
       # Filtered cloth tunnels through floor under gravity (z < 0)
-      self.assertLess(float(np.min(d_f.flexvert_xpos.numpy()[w, :, 2])), -0.01)
+      self.assertLess(float(np.min(fv_f[w, :, 2])), -0.01)
     if nworld == 2:
-      self.assertFalse(np.allclose(d_c.flexvert_xpos.numpy()[0], d_c.flexvert_xpos.numpy()[1]))
-      self.assertFalse(np.allclose(d_f.flexvert_xpos.numpy()[0], d_f.flexvert_xpos.numpy()[1]))
+      self.assertFalse(np.allclose(fv_c[0], fv_c[1]))
+      self.assertFalse(np.allclose(fv_f[0], fv_f[1]))
 
   @parameterized.parameters(1, 2)
   def test_cylinder_flex_no_duplicate_contacts(self, nworld):
@@ -1337,10 +1355,11 @@ class IpcTest(parameterized.TestCase):
     # Native contacts are generated for cylinder (unsupported in IPC)
     self.assertGreater(int(d.nacon.numpy()[0]), 0)
     # Cloth rests on top of cylinder (z > 0.1)
+    fv_np = d.flexvert_xpos.numpy()
     for w in range(nworld):
-      self.assertGreater(float(np.min(d.flexvert_xpos.numpy()[w, :, 2])), 0.1)
+      self.assertGreater(float(np.min(fv_np[w, :, 2])), 0.1)
     if nworld == 2:
-      self.assertFalse(np.allclose(d.flexvert_xpos.numpy()[0], d.flexvert_xpos.numpy()[1]))
+      self.assertFalse(np.allclose(fv_np[0], fv_np[1]))
 
   @parameterized.parameters(1, 2)
   def test_ipc_omitted_pair_admission_at_proposal(self, nworld):
@@ -1372,11 +1391,12 @@ class IpcTest(parameterized.TestCase):
       mjw.step(m, d)
 
     # Sheet must not penetrate through floor
+    fv_np = d.flexvert_xpos.numpy()
     for w in range(nworld):
-      zmin = float(np.min(d.flexvert_xpos.numpy()[w, :, 2]))
+      zmin = float(np.min(fv_np[w, :, 2]))
       self.assertGreater(zmin, 0.0)
     if nworld == 2:
-      self.assertFalse(np.allclose(d.flexvert_xpos.numpy()[0], d.flexvert_xpos.numpy()[1]))
+      self.assertFalse(np.allclose(fv_np[0], fv_np[1]))
 
   @parameterized.parameters(1, 2)
   def test_ipc_reach_filtering_simulation(self, nworld):
@@ -1407,11 +1427,12 @@ class IpcTest(parameterized.TestCase):
     for _ in range(20):
       mjw.step(m, d)
 
+    fv_np = d.flexvert_xpos.numpy()
     for w in range(nworld):
-      zmin_w = float(np.min(d.flexvert_xpos.numpy()[w, :, 2]))
+      zmin_w = float(np.min(fv_np[w, :, 2]))
       self.assertGreater(zmin_w, 0.0)
     if nworld == 2:
-      self.assertFalse(np.allclose(d.flexvert_xpos.numpy()[0], d.flexvert_xpos.numpy()[1]))
+      self.assertFalse(np.allclose(fv_np[0], fv_np[1]))
 
   @parameterized.parameters(1, 2)
   def test_ipc_flex_sphere_collision(self, nworld):
@@ -1441,8 +1462,9 @@ class IpcTest(parameterized.TestCase):
     for _ in range(20):
       mjw.step(m, d)
 
+    fv_np = d.flexvert_xpos.numpy()
     for w in range(nworld):
-      verts = d.flexvert_xpos.numpy()[w]
+      verts = fv_np[w]
       zmin = float(np.min(verts[:, 2]))
       zmax = float(np.max(verts[:, 2]))
       self.assertGreaterEqual(zmax, 0.20)
@@ -1451,7 +1473,7 @@ class IpcTest(parameterized.TestCase):
       dists = np.linalg.norm(verts - np.array([0.0, 0.0, 0.1]), axis=1)
       self.assertGreaterEqual(float(np.min(dists)), 0.098)
     if nworld == 2:
-      self.assertFalse(np.allclose(d.flexvert_xpos.numpy()[0], d.flexvert_xpos.numpy()[1]))
+      self.assertFalse(np.allclose(fv_np[0], fv_np[1]))
 
   @parameterized.parameters(1, 2)
   def test_ipc_multi_cloth_stacking(self, nworld):
@@ -1484,14 +1506,15 @@ class IpcTest(parameterized.TestCase):
     for _ in range(20):
       mjw.step(m, d)
 
+    fv_np = d.flexvert_xpos.numpy()
     for w in range(nworld):
-      verts = d.flexvert_xpos.numpy()[w]
+      verts = fv_np[w]
       v1 = verts[:4]
       v2 = verts[4:]
       self.assertGreaterEqual(float(np.min(v1[:, 2])), 0.0)
       self.assertGreater(float(np.min(v2[:, 2] - v1[:, 2])), 0.0)
     if nworld == 2:
-      self.assertFalse(np.allclose(d.flexvert_xpos.numpy()[0], d.flexvert_xpos.numpy()[1]))
+      self.assertFalse(np.allclose(fv_np[0], fv_np[1]))
 
   @parameterized.parameters(1, 2)
   def test_ipc_pair_admit_enters_working_set(self, nworld):
@@ -1525,10 +1548,13 @@ class IpcTest(parameterized.TestCase):
     ws.aset_lam.fill_(wp.inf)
     mjw.forward(m, d)
     ipc.ipc(m, d, ws=ws)
+    naset_np = ws.naset.numpy()
+    aset_cnt_np = ws.aset_cnt.numpy()
+    aset_lam_np = ws.aset_lam.numpy()
     for w in range(nworld):
-      naset_w = int(ws.naset.numpy()[w])
-      aset_cnt = ws.aset_cnt.numpy()[w, :naset_w]
-      aset_lam = ws.aset_lam.numpy()[w, :naset_w]
+      naset_w = int(naset_np[w])
+      aset_cnt = aset_cnt_np[w, :naset_w]
+      aset_lam = aset_lam_np[w, :naset_w]
       self.assertGreater(naset_w, 0)
       self.assertGreater(int(np.sum(aset_cnt < 0)), 0)
       self.assertGreater(float(np.max(aset_lam)), 0.0)
@@ -1572,8 +1598,9 @@ class IpcTest(parameterized.TestCase):
       wp.capture_launch(capture.graph)
     wp.synchronize()
 
+    time_np = d.time.numpy()
     for w in range(nworld):
-      self.assertGreater(float(d.time.numpy()[w]), 0.02)
+      self.assertGreater(float(time_np[w]), 0.02)
     if nworld == 2:
       self.assertFalse(np.allclose(d.qpos.numpy()[0], d.qpos.numpy()[1]))
 
@@ -1707,8 +1734,9 @@ class IpcTest(parameterized.TestCase):
     ipc.ipc_init_topology(m, d, ws)
     cc.ipc_update_geom_features(m, d, ws)
     cc.ipc_discover_candidates(m, d, ws, d.flexvert_xpos, d.flexvert_xpos, d.flexvert_xpos, 1e30, 1e30)
+    ncand_np = ws.ncand.numpy()
     for w in range(nworld):
-      self.assertEqual(int(ws.ncand.numpy()[w]), 0)
+      self.assertEqual(int(ncand_np[w]), 0)
 
     if nworld == 2:
       qpos = d.qpos.numpy()
@@ -1722,10 +1750,11 @@ class IpcTest(parameterized.TestCase):
       native_contacts += int(d.nacon.numpy()[0])
 
     self.assertGreater(native_contacts, 0)
+    fv_np = d.flexvert_xpos.numpy()
     for w in range(nworld):
-      self.assertGreater(float(np.min(d.flexvert_xpos.numpy()[w, :, 2])), 0.01)
+      self.assertGreater(float(np.min(fv_np[w, :, 2])), 0.01)
     if nworld == 2:
-      self.assertFalse(np.allclose(d.flexvert_xpos.numpy()[0], d.flexvert_xpos.numpy()[1]))
+      self.assertFalse(np.allclose(fv_np[0], fv_np[1]))
 
   @parameterized.parameters(1, 2)
   def test_per_world_geom_variation(self, nworld):
@@ -1876,14 +1905,18 @@ class IpcTest(parameterized.TestCase):
     ipc.ipc_sort_aset(m, d, ws)
 
     np.testing.assert_array_equal(ws.naset.numpy(), nret)
+    aset_type_np = ws.aset_type.numpy()
+    aset_geom_np = ws.aset_geom.numpy()
+    aset_idx_np = ws.aset_idx.numpy()
+    aset_lam_np = ws.aset_lam.numpy()
     for w in range(2):
       n = nret[w]
       order = np.lexsort((np.arange(n), idx[w, :n, 3], idx[w, :n, 2], idx[w, :n, 1], idx[w, :n, 0], geom[w, :n], typ[w, :n]))
-      np.testing.assert_array_equal(ws.aset_type.numpy()[w, :n], typ[w, order])
-      np.testing.assert_array_equal(ws.aset_geom.numpy()[w, :n], geom[w, order])
-      np.testing.assert_array_equal(ws.aset_idx.numpy()[w, :n], idx[w, order])
-      np.testing.assert_array_equal(ws.aset_lam.numpy()[w, :n], lam[w, order])
-    self.assertFalse(np.array_equal(ws.aset_type.numpy()[0, :37], ws.aset_type.numpy()[1, :37]))
+      np.testing.assert_array_equal(aset_type_np[w, :n], typ[w, order])
+      np.testing.assert_array_equal(aset_geom_np[w, :n], geom[w, order])
+      np.testing.assert_array_equal(aset_idx_np[w, :n], idx[w, order])
+      np.testing.assert_array_equal(aset_lam_np[w, :n], lam[w, order])
+    self.assertFalse(np.array_equal(aset_type_np[0, :37], aset_type_np[1, :37]))
 
   def test_ipc_init_ws_sparse_nnz_offset(self):
     """Verifies IPC rows are appended after the largest native sparse row end."""
@@ -1961,8 +1994,9 @@ class IpcTest(parameterized.TestCase):
     ws.pin_chain_dof = wp.empty(5, dtype=int, device=d.qpos.device)
     d.overflow.zero_()
     ipc.ipc_init_topology(m, d, ws)
+    overflow_np = d.overflow.numpy()
     for w in range(nworld):
-      self.assertTrue(int(d.overflow.numpy()[w]) & int(OverflowType.BROADPHASE))
+      self.assertTrue(int(overflow_np[w]) & int(OverflowType.BROADPHASE))
     self.assertEqual(int((ws.pin_has_chain.numpy()).sum()), 1)
 
   @parameterized.parameters(1, 2)

@@ -19,11 +19,10 @@ ownership predicates (mjc_ipcOwnsFlexFlex, mjc_ipcOwnsFlexGeom), pair geometry (
 mjc_pairVerts, mjc_pairBand, mjc_standoff), swept candidate discovery (mjc_candidates),
 and conservative advancement ToI bisection (mjc_advance).
 
-Candidate discovery is brute force on the GPU: flex vertex x static geom, static geom corner
-x flex triangle, static geom edge x flex edge, flex vertex x flex triangle, and flex edge x
-flex edge, i.e. O(V * G + C * F + E_g * E + V * F + E^2) pair tests per query with AABB
-early exits. MuJoCo C uses per-flex BVHs instead, so large self-colliding flexes (tens of
-thousands of edges) scale quadratically here.
+Candidate discovery tests flex vertex x static geom, static geom corner x flex triangle,
+static geom edge x flex edge, flex vertex x flex triangle, and flex edge x flex edge with
+AABB early exits, using brute-force pair launches for smaller workloads and a uniform spatial
+hash grid broadphase (ipc_flex_grid) for large flex-flex/self-collision batches.
 """
 
 from enum import IntEnum
@@ -401,7 +400,7 @@ def geom_point_dist_normal(
 ) -> tuple[float, wp.vec3]:
   """Signed distance and outward world normal from static geom to pos (mjc_GeomDist)."""
   if gt == int(GeomType.PLANE):
-    n = wp.vec3(gR[0, 2], gR[1, 2], gR[2, 2])
+    n = gR[:, 2]
     return wp.dot(pos - gp, n), n
   if gt == int(GeomType.SPHERE):
     diff = pos - gp
@@ -2685,6 +2684,8 @@ def ipc_eval_toi_kernel(
   )
 
   gtarget = 0.2 * g0
+  inv_l_disp = 1.0 / l_disp
+  tol = 1e-9 * g0
   t = float(0.0)
 
   for _it in range(32):
@@ -2717,9 +2718,10 @@ def ipc_eval_toi_kernel(
       pn,
     )
     room = g - gtarget
-    if room <= 1e-9 * g0:
+    if room <= tol:
       break
-    t += room / l_disp
+    dt = room * inv_l_disp
+    t += dt
     if t >= 1.0:
       t = 1.0
       break

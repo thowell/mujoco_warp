@@ -401,11 +401,15 @@ class ContinuousCollisionTest(parameterized.TestCase):
       outputs=[beta, world_done, stall],
     )
 
+    wfree_np = wfree.numpy()
+    beta_np = beta.numpy()
+    world_done_np = world_done.numpy()
+    stall_np = stall.numpy()
     for w_idx in range(nworld):
-      np.testing.assert_allclose(wfree.numpy()[w_idx], alpha_vals[w_idx] * w_np[w_idx], atol=1e-5)
-      np.testing.assert_allclose(beta.numpy()[w_idx], alpha_vals[w_idx], atol=1e-5)
-      self.assertEqual(world_done.numpy()[w_idx], 0)
-      self.assertEqual(stall.numpy()[w_idx], 0)
+      np.testing.assert_allclose(wfree_np[w_idx], alpha_vals[w_idx] * w_np[w_idx], atol=1e-5)
+      np.testing.assert_allclose(beta_np[w_idx], alpha_vals[w_idx], atol=1e-5)
+      self.assertEqual(world_done_np[w_idx], 0)
+      self.assertEqual(stall_np[w_idx], 0)
 
   def test_geom_distance_kernel(self):
     empty_v = wp.zeros(0, dtype=wp.vec3)
@@ -502,8 +506,9 @@ class ContinuousCollisionTest(parameterized.TestCase):
     ws.aset_type.fill_(-1)
     cc.ipc_discover_candidates(m, d, ws, d.flexvert_xpos, d.flexvert_xpos, d.flexvert_xpos, 0.08, 0.08)
     ipc.ipc_seed_active_set(m, d, ws)
+    naset_np = ws.naset.numpy()
     for w in range(nworld):
-      self.assertEqual(int(ws.naset.numpy()[w]), 0)
+      self.assertEqual(int(naset_np[w]), 0)
 
     # Large displacement sweeping cloth2 toward cloth1 in world 0 admits inter-flex candidate pairs
     dto_np = d.flexvert_xpos.numpy().copy()
@@ -623,11 +628,14 @@ class ContinuousCollisionTest(parameterized.TestCase):
     cc.ipc_discover_candidates(m, d, ws, d.flexvert_xpos, d.flexvert_xpos, d.flexvert_xpos, -1e30, -1e30)
     ipc.ipc_seed_active_set(m, d, ws)
 
+    naset_np = ws.naset.numpy()
+    types_np = ws.aset_type.numpy()
+    standoffs_np = ws.aset_standoff.numpy()
     for w in range(nworld):
-      naset_w = int(ws.naset.numpy()[w])
+      naset_w = int(naset_np[w])
       self.assertGreater(naset_w, 0)
-      types = ws.aset_type.numpy()[w, :naset_w]
-      standoffs = ws.aset_standoff.numpy()[w, :naset_w]
+      types = types_np[w, :naset_w]
+      standoffs = standoffs_np[w, :naset_w]
       flex_flex_idx = np.where(types == int(cc.FlexPairType.FLEX_VERT_TRI))[0]
       self.assertGreater(len(flex_flex_idx), 0)
       for idx in flex_flex_idx:
@@ -665,9 +673,11 @@ class ContinuousCollisionTest(parameterized.TestCase):
     ipc.ipc_init_topology(m, d, ws)
     cc.ipc_update_geom_features(m, d, ws)
 
+    ngv_np = ws.ngv.numpy()
+    nge_np = ws.nge.numpy()
     for w in range(nworld):
-      self.assertEqual(int(ws.ngv.numpy()[w]), 8)
-      self.assertEqual(int(ws.nge.numpy()[w]), 12)
+      self.assertEqual(int(ngv_np[w]), 8)
+      self.assertEqual(int(nge_np[w]), 12)
 
     corners_np = ws.geom_corners.numpy()[:, :8]
     edges_np = ws.geom_edges.numpy()[:, :12]
@@ -837,12 +847,17 @@ class ContinuousCollisionTest(parameterized.TestCase):
     ws.geom_edges.fill_(wp.vec3(wp.inf))
     cc.ipc_update_geom_features(m, d, ws)
 
+    ngv_np = ws.ngv.numpy()
+    nge_np = ws.nge.numpy()
+    overflow_np = d.overflow.numpy()
+    corner_geom_np = ws.corner_geom.numpy()
+    edge_geom_np = ws.edge_geom.numpy()
     for w in range(nworld):
-      self.assertEqual(int(ws.ngv.numpy()[w]), 96)
-      self.assertEqual(int(ws.nge.numpy()[w]), 144)
-      self.assertEqual(int(d.overflow.numpy()[w]), 0)
-      corner_geoms = ws.corner_geom.numpy()[w, :96]
-      edge_geoms = ws.edge_geom.numpy()[w, :144]
+      self.assertEqual(int(ngv_np[w]), 96)
+      self.assertEqual(int(nge_np[w]), 144)
+      self.assertEqual(int(overflow_np[w]), 0)
+      corner_geoms = corner_geom_np[w, :96]
+      edge_geoms = edge_geom_np[w, :144]
       self.assertEqual([int((corner_geoms == gi).sum()) for gi in range(3)], [32, 32, 32])
       self.assertEqual([int((edge_geoms == gi).sum()) for gi in range(3)], [48, 48, 48])
 
@@ -859,10 +874,13 @@ class ContinuousCollisionTest(parameterized.TestCase):
     d.overflow.zero_()
     ipc.ipc_init_topology(m, d, ws)
     cc.ipc_update_geom_features(m, d, ws)
+    ngv_np = ws.ngv.numpy()
+    nge_np = ws.nge.numpy()
+    overflow_np = d.overflow.numpy()
     for w in range(nworld):
-      self.assertEqual(int(ws.ngv.numpy()[w]), 96)
-      self.assertEqual(int(ws.nge.numpy()[w]), 144)
-      self.assertTrue(bool(int(d.overflow.numpy()[w]) & int(OverflowType.BROADPHASE)))
+      self.assertEqual(int(ngv_np[w]), 96)
+      self.assertEqual(int(nge_np[w]), 144)
+      self.assertTrue(bool(int(overflow_np[w]) & int(OverflowType.BROADPHASE)))
 
   @parameterized.parameters(1, 2)
   def test_ipc_discover_candidates_same_body(self, nworld):
@@ -924,9 +942,7 @@ class ContinuousCollisionTest(parameterized.TestCase):
           <flag ipc="enable"/>
         </option>
         <worldbody>
-          <flexcomp name="cloth" type="grid" dim="2" count="7 7 1" spacing="0.01 0.01 1" radius="0.001" mass="0.05">
-            <contact selfcollide="auto"/>
-          </flexcomp>
+          <flexcomp name="cloth" type="grid" dim="2" count="7 7 1" spacing="0.01 0.01 1" radius="0.001" mass="0.05"/>
         </worldbody>
       </mujoco>
       """,
@@ -1009,14 +1025,21 @@ class ContinuousCollisionTest(parameterized.TestCase):
       d.overflow.zero_()
       ipc.ipc_init_topology(m, d, ws)
       cc.ipc_update_geom_features(m, d, ws)
+      ngv_np = ws.ngv.numpy()
+      nge_np = ws.nge.numpy()
+      overflow_np = d.overflow.numpy()
+      geom_corners_np = ws.geom_corners.numpy()
+      corner_geom_np = ws.corner_geom.numpy()
+      geom_edges_np = ws.geom_edges.numpy()
+      edge_geom_np = ws.edge_geom.numpy()
       for w in range(nworld):
-        self.assertEqual(int(ws.ngv.numpy()[w]), 10)
-        self.assertEqual(int(ws.nge.numpy()[w]), 13)
-        self.assertTrue(bool(int(d.overflow.numpy()[w]) & int(OverflowType.BROADPHASE)))
-        self.assertTrue(np.all(np.isfinite(ws.geom_corners.numpy()[w])))
-        self.assertTrue(np.all(ws.corner_geom.numpy()[w] >= 0))
-        self.assertTrue(np.all(np.isfinite(ws.geom_edges.numpy()[w])))
-        self.assertTrue(np.all(ws.edge_geom.numpy()[w] >= 0))
+        self.assertEqual(int(ngv_np[w]), 10)
+        self.assertEqual(int(nge_np[w]), 13)
+        self.assertTrue(bool(int(overflow_np[w]) & int(OverflowType.BROADPHASE)))
+        self.assertTrue(np.all(np.isfinite(geom_corners_np[w])))
+        self.assertTrue(np.all(corner_geom_np[w] >= 0))
+        self.assertTrue(np.all(np.isfinite(geom_edges_np[w])))
+        self.assertTrue(np.all(edge_geom_np[w] >= 0))
 
 
 if __name__ == "__main__":

@@ -2950,12 +2950,12 @@ class IOTest(parameterized.TestCase):
 
     test_lambda = np.array([[1.5 + w, 2.5 + w, 3.5 + w, 4.5 + w] for w in range(nworld)], dtype=np.float32)
     test_conage = np.array([[-1 + w, 0 + w, 2 + w, 5 + w] for w in range(nworld)], dtype=np.int32)
-    d.flexvert_lambda = wp.array(test_lambda, dtype=float)
-    d.flexvert_conage = wp.array(test_conage, dtype=int)
+    d.flexvert_lambda.assign(test_lambda)
+    d.flexvert_conage.assign(test_conage)
 
     for w in range(nworld):
-      mjd.flexvert_lambda[:] = np.inf
-      mjd.flexvert_conage[:] = -999
+      mjd.flexvert_lambda.fill(np.inf)
+      mjd.flexvert_conage.fill(-1)
       io.get_data_into(mjd, mjm, d, world_id=w)
       np.testing.assert_allclose(mjd.flexvert_lambda, test_lambda[w], atol=1e-5)
       np.testing.assert_array_equal(mjd.flexvert_conage, test_conage[w])

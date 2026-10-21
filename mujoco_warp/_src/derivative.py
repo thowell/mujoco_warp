@@ -4100,9 +4100,6 @@ def _eff_build_uncovered_map(
   epU_out: wp.array[int],
   ep_loc_out: wp.array[int],
 ):
-  tid = wp.tid()
-  if tid != 0:
-    return
   cnt = int(0)
   for i in range(nv):
     if efm_dofblk[i] < 0:
