@@ -96,16 +96,7 @@ def create_solver_context(
     and not m.efm0_active
   )
   n_u = nv - 3 * m.nefmdof
-  eff_fold_dense = (
-    eff_fold_wanted
-    or (
-      m.opt.integrator == types.IntegratorType.DISCRETE
-      and passive.flex_passive_contact(m)
-      and m.nefmdof > 0
-      and not m.efm0_active
-      and m.opt.solver == types.SolverType.CG
-    )
-  ) and 0 < n_u <= 600
+  eff_fold_dense = eff_fold_wanted and 0 < n_u <= 600
   n_u_pad = n_u if n_u <= _BLOCK_CHOLESKY_DIM else ((n_u + 31) // 32) * 32
 
   return SolverContext(
@@ -1196,9 +1187,7 @@ def _linesearch_iterative_kernel(
     improvement = float(0.0)
 
     # a slope at alpha = 0 below rounding noise means the start is already the line minimum
-    ls_converged = False
-    if wp.static(not EXACT_GTOL):
-      ls_converged = wp.abs(p0[1]) < _ALPHA_NOISE_EPS * q1_abs
+    ls_converged = (p0[1] == 0.0) if wp.static(EXACT_GTOL) else (wp.abs(p0[1]) < _ALPHA_NOISE_EPS * q1_abs)
 
     # lo_in at lo_alpha_in = -p0[1] / p0[2]
     lo_alpha_in = -math.safe_div(p0[1], p0[2])
@@ -1261,7 +1250,7 @@ def _linesearch_iterative_kernel(
       lo_in = _eval_pt(ctx_quad_gauss, lo_alpha_in) + lo_in_sum[0]
 
       # accept Newton step if derivative is small and cost improved
-      if wp.abs(lo_in[1]) < gtol_accept and (lo_in[0] < 0.0 or (wp.static(EXACT_GTOL) and lo_alpha_in == 0.0)):
+      if wp.abs(lo_in[1]) < gtol_accept and lo_in[0] < 0.0:
         ls_converged = True
         alpha = lo_alpha_in
         improvement = -lo_in[0]
@@ -4055,44 +4044,21 @@ def _solver_iteration(
 
 
 @wp.func
-def _constraint_row_cost(
+def _elliptic_row_cost(
   # Data in:
-  contact_friction_in: wp.array[types.vec5],
-  contact_dim_in: wp.array[int],
   contact_efc_address_in: wp.array2d[int],
-  efc_type_in: wp.array2d[int],
-  efc_id_in: wp.array2d[int],
   efc_D_in: wp.array2d[float],
-  efc_frictionloss_in: wp.array2d[float],
   # In:
-  impratio_invsqrt: float,
-  nrow_equality: int,
-  nrow_friction: int,
-  efcid: int,
+  friction: types.vec5,
+  mu: float,
+  dim: int,
+  D: float,
+  Dm: float,
+  conid: int,
   worldid: int,
+  jar: float,
   jar_in: wp.array2d[float],
 ) -> float:
-  """Cost of constraint row efcid at jar = J * qacc - aref (MuJoCo C mj_constraintUpdate_impl).
-
-  An elliptic contact's cost is counted on its first row.
-  """
-  D = efc_D_in[worldid, efcid]
-  jar = jar_in[worldid, efcid]
-  if efcid < nrow_equality:
-    return 0.5 * D * jar * jar
-  if efcid < nrow_equality + nrow_friction:
-    f = efc_frictionloss_in[worldid, efcid]
-    return _eval_frictionloss_cost(jar, f, math.safe_div(f, D), D)
-  if efc_type_in[worldid, efcid] != types.ConstraintType.CONTACT_ELLIPTIC:
-    if jar < 0.0:
-      return 0.5 * D * jar * jar
-    return 0.0
-  conid = efc_id_in[worldid, efcid]
-  if efcid != contact_efc_address_in[conid, 0]:
-    return 0.0
-  friction = contact_friction_in[conid]
-  mu = friction[0] * impratio_invsqrt
-  dim = contact_dim_in[conid]
   N = jar * mu
   T2 = float(0.0)
   for j in range(1, dim):
@@ -4108,9 +4074,56 @@ def _constraint_row_cost(
       jarj = jar_in[worldid, rowj]
       cost += 0.5 * efc_D_in[worldid, rowj] * jarj * jarj
     return cost
-  Dm = D / (mu * mu * (1.0 + mu * mu))
   NmT = N - mu * T
   return 0.5 * Dm * NmT * NmT
+
+
+@wp.func
+def _constraint_row_cost_diff(
+  # Data in:
+  contact_friction_in: wp.array[types.vec5],
+  contact_dim_in: wp.array[int],
+  contact_efc_address_in: wp.array2d[int],
+  efc_type_in: wp.array2d[int],
+  efc_id_in: wp.array2d[int],
+  efc_D_in: wp.array2d[float],
+  efc_frictionloss_in: wp.array2d[float],
+  # In:
+  impratio_invsqrt: float,
+  nrow_equality: int,
+  nrow_friction: int,
+  efcid: int,
+  worldid: int,
+  jar_warmstart_in: wp.array2d[float],
+  jar_smooth_in: wp.array2d[float],
+) -> float:
+  """Cost difference (warmstart - smooth) of row efcid (MuJoCo C mj_constraintUpdate_impl).
+
+  An elliptic contact's cost is counted on its first row.
+  """
+  D = efc_D_in[worldid, efcid]
+  jar_w = jar_warmstart_in[worldid, efcid]
+  jar_s = jar_smooth_in[worldid, efcid]
+  if efcid < nrow_equality:
+    return 0.5 * D * (jar_w * jar_w - jar_s * jar_s)
+  if efcid < nrow_equality + nrow_friction:
+    f = efc_frictionloss_in[worldid, efcid]
+    rf = math.safe_div(f, D)
+    return _eval_frictionloss_cost(jar_w, f, rf, D) - _eval_frictionloss_cost(jar_s, f, rf, D)
+  if efc_type_in[worldid, efcid] != types.ConstraintType.CONTACT_ELLIPTIC:
+    cost_w = 0.5 * D * jar_w * jar_w if jar_w < 0.0 else 0.0
+    cost_s = 0.5 * D * jar_s * jar_s if jar_s < 0.0 else 0.0
+    return cost_w - cost_s
+  conid = efc_id_in[worldid, efcid]
+  if efcid != contact_efc_address_in[conid, 0]:
+    return 0.0
+  friction = contact_friction_in[conid]
+  mu = friction[0] * impratio_invsqrt
+  dim = contact_dim_in[conid]
+  Dm = math.safe_div(D, mu * mu * (1.0 + mu * mu))
+  return _elliptic_row_cost(
+    contact_efc_address_in, efc_D_in, friction, mu, dim, D, Dm, conid, worldid, jar_w, jar_warmstart_in
+  ) - _elliptic_row_cost(contact_efc_address_in, efc_D_in, friction, mu, dim, D, Dm, conid, worldid, jar_s, jar_smooth_in)
 
 
 @cache_kernel
@@ -4150,7 +4163,7 @@ def _warmstart_cost(check_skip: bool):
     if wp.static(CHECK_SKIP):
       if skip_in[worldid]:
         return
-    nefc = nefc_in[worldid]
+    nefc = wp.min(nefc_in[worldid], efc_type_in.shape[1])
     if nefc == 0:
       return
     impratio_invsqrt = opt_impratio_invsqrt[worldid % opt_impratio_invsqrt.shape[0]]
@@ -4159,7 +4172,7 @@ def _warmstart_cost(check_skip: bool):
     # cost difference warmstart - smooth, rows and dofs split over the block
     diff = float(0.0)
     for efcid in range(tid, nefc, nthread):
-      diff += _constraint_row_cost(
+      diff += _constraint_row_cost_diff(
         contact_friction_in,
         contact_dim_in,
         contact_efc_address_in,
@@ -4173,20 +4186,6 @@ def _warmstart_cost(check_skip: bool):
         efcid,
         worldid,
         jar_warmstart_in,
-      )
-      diff -= _constraint_row_cost(
-        contact_friction_in,
-        contact_dim_in,
-        contact_efc_address_in,
-        efc_type_in,
-        efc_id_in,
-        efc_D_in,
-        efc_frictionloss_in,
-        impratio_invsqrt,
-        ne,
-        nf,
-        efcid,
-        worldid,
         jar_smooth_in,
       )
     for dofid in range(tid, nv, nthread):
@@ -4262,7 +4261,6 @@ def _warmstart_best(m: types.Model, d: types.Data, ctx: SolverContext, skip: wp.
     outputs=[ctx.search_unchanged],
   )
   wp.launch(_warmstart_select, dim=(d.nworld, m.nv), inputs=[d.qacc_smooth, ctx.search_unchanged], outputs=[d.qacc])
-  ctx.search_unchanged.zero_()
 
 
 def _init_jaref(m: types.Model, d: types.Data, ctx: SolverContext | InverseContext):
@@ -4352,21 +4350,6 @@ def init_context(
         if ctx.eff_chol is not None:
           # contact-adaptive Cholesky factor of the covered block (mj_effCholFoldFactor)
           derivative.eff_chol_factor(m, d, ctx.eff_chol, fold=True)
-      elif not compact and m.nefmdof > 0 and m.opt.solver == types.SolverType.CG and passive.flex_passive_contact(m):
-        derivative.eff_prec_fold(
-          m,
-          d,
-          out=d.efm_L,
-          efm_con=ctx.efm_con,
-          epS=ctx.epS,
-          epS_factor=ctx.epS_factor,
-          epS_rhs=ctx.epS_rhs,
-          epS_sol=ctx.epS_sol,
-          epU=ctx.epU,
-          ep_loc=ctx.ep_loc,
-        )
-    elif m.nefmdof > 0 and m.opt.solver == types.SolverType.CG and passive.flex_passive_contact(m):
-      derivative.eff_prec_fold(m, d, out=d.efm_L)
     if grad:
       d = dataclasses.replace(d, qfrc_smooth=_get_qfrc_smooth_eff(m, d, ctx))
 

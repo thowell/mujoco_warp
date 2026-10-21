@@ -1201,7 +1201,7 @@ def _discrete_free_gyro_kernel(
       if efm_K_rownnz[dof_adr + r] != 0:
         return
     coupled = int(0)
-    nefc = nefc_in[worldid]
+    nefc = wp.min(nefc_in[worldid], efc_J_rownnz_in.shape[1] if wp.static(is_sparse) else efc_J_in.shape[1])
     for i in range(tid, nefc, nthread):
       if wp.static(is_sparse):
         radr = efc_J_rowadr_in[worldid, i]
@@ -1230,7 +1230,7 @@ def _discrete_free_gyro_kernel(
           if c >= dof_adr and c < dof_adr + 6:
             coupled = 1
     if wp.static(has_flex_passive):
-      nacon = nacon_in[0]
+      nacon = wp.min(nacon_in[0], contact_worldid_in.shape[0])
       for cid in range(tid, nacon, nthread):
         if contact_worldid_in[cid] == worldid and efm_con_scale_in[cid] != 0.0:
           nnz = efm_con_nnz_in[cid]

@@ -736,15 +736,12 @@ def put_model(mjm: mujoco.MjModel, batch_sizes: dict[str, int] | None = None) ->
   dofblk = np.full(mjm.nv, -1, dtype=np.int32)
   for k, b in enumerate(m.efm_dofid):
     dofblk[b : b + 3] = k
-  has_flex_stretch = False
-  if mjm.nflex > 0 and mjm.flex_stiffness.size > 0:
-    for f in range(mjm.nflex):
-      if int(mjm.flex_interp[f]) == 0 and not bool(mjm.flex_rigid[f]) and int(mjm.flex_stiffnessadr[f]) >= 0:
-        if np.any(mjm.flex_stiffness[int(mjm.flex_stiffnessadr[f]) :] != 0):
-          has_flex_stretch = True
-          break
+  has_stretch_or_interp = any(
+    mjm.flex_interp[f] != 0 or (mjm.flex_stiffnessadr[f] >= 0 and mjm.flex_stiffness[mjm.flex_stiffnessadr[f]] != 0)
+    for f in range(mjm.nflex)
+  )
   m.efm0_active = bool(
-    mjm.nefm0dof > 0 and not has_flex_stretch and not (m.has_flex_passive and not is_ipc) and not m.has_non_simple_flex
+    mjm.nefm0dof > 0 and not has_stretch_or_interp and not (m.has_flex_passive and not is_ipc) and not m.has_non_simple_flex
   )
   if m.efm0_active:
     dofblk[:] = -1
@@ -2373,8 +2370,7 @@ def put_data(
     val = getattr(mjd.contact, f.name)
     val = np.tile(val, (nworld,) + (1,) * (val.ndim - 1))
     width = ((0, naconmax - val.shape[0]),) + ((0, 0),) * (val.ndim - 1)
-    pad_val = -1 if f.name in ["flex", "elem", "vert"] else 0
-    val = np.pad(val, width, constant_values=pad_val)
+    val = np.pad(val, width)
     contact_kwargs[f.name] = _create_array(val, f.type, sizes)
 
   contact = types.Contact(**contact_kwargs)

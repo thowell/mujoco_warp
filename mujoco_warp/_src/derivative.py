@@ -2156,10 +2156,6 @@ def _eff_mul_diag(check_skip: bool):
   return kernel
 
 
-# threads per row of the effective-metric stiffness product
-EFF_MUL_SPLIT = 8
-
-
 @cache_kernel
 def _eff_mul_diag_and_csr(check_skip: bool):
   @wp.kernel(module="unique", enable_backward=False, grid_stride=False)
@@ -2177,18 +2173,19 @@ def _eff_mul_diag_and_csr(check_skip: bool):
     # Out:
     res_out: wp.array2d[float],
   ):
-    """Row dofid of diag * vec + K * vec, its entries split over EFF_MUL_SPLIT threads."""
-    worldid, dofid, part = wp.tid()
+    worldid, dofid = wp.tid()
     if wp.static(check_skip):
       if skip_in[worldid]:
         return
-    s = float(0.0)
-    if part == 0:
-      s = efm_diag_in[worldid, dofid] * vec_in[worldid, dofid]
-    rowadr = efm_K_rowadr[dofid]
-    for adr in range(rowadr + part, rowadr + efm_K_rownnz[dofid], EFF_MUL_SPLIT):
-      s += efm_K_val_in[worldid, adr] * vec_in[worldid, efm_K_colind[adr]]
-    wp.atomic_add(res_out, worldid, dofid, s)
+    s = efm_diag_in[worldid, dofid] * vec_in[worldid, dofid]
+    rownnz = efm_K_rownnz[dofid]
+    if rownnz > 0:
+      rowadr = efm_K_rowadr[dofid]
+      for j in range(rownnz):
+        adr = rowadr + j
+        col = efm_K_colind[adr]
+        s += efm_K_val_in[worldid, adr] * vec_in[worldid, col]
+    res_out[worldid, dofid] += s
 
   return kernel
 
@@ -3164,10 +3161,10 @@ def _pcg_beta_and_p_update_tiled(
   for dofid in range(tid, nv, BLOCK_DIM):
     local_rznew += efm_r_in[worldid, dofid] * efm_z_in[worldid, dofid]
 
+  rz = efm_rz_in[worldid]
   rz_tile = wp.tile(local_rznew, preserve_type=True)
   rz_sum = wp.tile_reduce(wp.add, rz_tile)
   rznew = rz_sum[0]
-  rz = efm_rz_in[worldid]
   beta = math.safe_div(rznew, rz)
   if tid == 0:
     efm_rz_out[worldid] = rznew
@@ -3521,9 +3518,7 @@ def eff_shift(m: Model, d: Data):
       outputs=[d.efm_c],
     )
 
-  if passive.flex_passive_contact(m) and not (
-    (m.opt.disableflags & DisableBit.SPRING) and (m.opt.disableflags & DisableBit.DAMPER)
-  ):
+  if passive.flex_passive_contact(m):
     efm_con_dof, efm_con_val, efm_con_scale, _, efm_con_nnz = build_efm_contact(m, d)
     wp.launch(
       _eff_contact_shift,
@@ -3744,7 +3739,7 @@ def eff_mul_m(
     if m.nefmK > 0:
       wp.launch(
         _eff_mul_diag_and_csr(check_skip),
-        dim=(d.nworld, m.nv, EFF_MUL_SPLIT),
+        dim=(d.nworld, m.nv),
         inputs=[
           m.efm_K_rownnz,
           m.efm_K_rowadr,
@@ -3791,9 +3786,7 @@ def eff_mul_m(
       ],
       outputs=[res],
     )
-    if passive.flex_passive_contact(m) and not (
-      (m.opt.disableflags & DisableBit.SPRING) and (m.opt.disableflags & DisableBit.DAMPER)
-    ):
+    if passive.flex_passive_contact(m):
       if efm_con is None:
         efm_con_dof, efm_con_val, efm_con_scale, _, efm_con_nnz = build_efm_contact(m, d)
       else:

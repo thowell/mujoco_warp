@@ -941,8 +941,8 @@ class SleepTest(parameterized.TestCase):
         </worldbody>
         <tendon>
           <fixed name="ten" damping="2.0">
-            <joint joint="j1" coef="1.0"/>
-            <joint joint="j2" coef="-1.0"/>
+            <joint joint="j1" coef="1"/>
+            <joint joint="j2" coef="-1"/>
           </fixed>
         </tendon>
       </mujoco>
@@ -955,15 +955,17 @@ class SleepTest(parameterized.TestCase):
     if nworld == 2:
       tree_asleep[1, 0] = 0
       tree_asleep[1, 1] = 1
-    d.tree_asleep = wp.array(tree_asleep, dtype=int, device=d.tree_asleep.device)
+    d.tree_asleep.assign(tree_asleep)
     sleep.update_sleep(m, d)
 
     sleep.wake_tendon(m, d)
+    d.tree_awake.fill_(-1)
     sleep.update_sleep(m, d)
 
-    self.assertEqual(int(d.tree_awake.numpy()[0, 1]), 1)
+    tree_awake = d.tree_awake.numpy()
+    self.assertEqual(int(tree_awake[0, 1]), 1)
     if nworld == 2:
-      self.assertEqual(int(d.tree_awake.numpy()[1, 1]), 0)
+      self.assertEqual(int(tree_awake[1, 1]), 0)
 
 
 # An actuated 2-hinge arm (tree 0, dofs 0-1) plus two free bodies

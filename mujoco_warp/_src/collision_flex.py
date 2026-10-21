@@ -655,39 +655,6 @@ def _collide_geom_triangle_detect(
       )
     return
 
-  if gtype == int(GeomType.CYLINDER):
-    cyl_radius = size_val[0]
-    cyl_half_height = size_val[1]
-    cyl_axis = wp.vec3(rot[0, 2], rot[1, 2], rot[2, 2])
-    cyl_dists, cyl_poss, cyl_nrms = collision_primitive_core.cylinder_triangle(
-      pos, cyl_axis, cyl_radius, cyl_half_height, t1, t2, t3, tri_radius
-    )
-    for i in range(2):
-      if cyl_dists[i] < margin:
-        _write_candidate(
-          max_candidates,
-          cyl_dists[i],
-          cyl_poss[i],
-          cyl_nrms[i],
-          geomid,
-          -1,
-          flexid,
-          elemid,
-          vertex_id,
-          worldid,
-          warn_overflow,
-          overflow_out,
-          cand_dist_out,
-          cand_pos_out,
-          cand_nrm_out,
-          cand_geom_out,
-          cand_flex_out,
-          cand_elem_out,
-          cand_vert_out,
-          cand_worldid_out,
-          ncand_out,
-        )
-
 
 @wp.func
 def _collide_mesh_convex(
@@ -868,39 +835,52 @@ def _collide_mesh_convex(
 
 
 @wp.func
-def _fix_normal_flex2d(
+def _fix_cylinder_normal(
   # In:
-  gtype: int,
   gpos: wp.vec3,
   grot: wp.mat33,
   gsize: wp.vec3,
   pos: wp.vec3,
   normal: wp.vec3,
 ) -> wp.vec3:
-  """Analytic geom normal for convex geom : 2D flex contacts (MuJoCo C mjc_fixNormal)."""
+  """Analytic cylinder normal for cylinder : 2D flex contacts (MuJoCo C mjc_fixNormal)."""
   pos1 = wp.transpose(grot) @ (pos - gpos)
-  nrm = wp.vec3(0.0)
-  if gtype == int(GeomType.SPHERE):
-    nrm = pos1
-  elif gtype == int(GeomType.CAPSULE):
-    nz = float(0.0)
-    if pos1[2] < -gsize[1]:
-      nz = pos1[2] + gsize[1]
-    elif pos1[2] > gsize[1]:
-      nz = pos1[2] - gsize[1]
-    nrm = wp.vec3(pos1[0], pos1[1], nz)
-  elif gtype == int(GeomType.CYLINDER):
-    # keep the collider normal near the flat wall, unless 4x closer to the round wall
-    if wp.abs(pos1[2]) > 0.95 * gsize[1]:
-      return normal
-    dst1 = wp.abs(gsize[1] - wp.abs(pos1[2]))
-    dst2 = wp.abs(gsize[0] - wp.sqrt(pos1[0] * pos1[0] + pos1[1] * pos1[1]))
-    if dst1 < 0.25 * dst2:
-      return normal
-    nrm = wp.vec3(pos1[0], pos1[1], 0.0)
-  else:
+  # keep the collider normal near the flat wall, unless 4x closer to the round wall
+  if wp.abs(pos1[2]) > 0.95 * gsize[1]:
     return normal
-  return grot @ wp.normalize(nrm)
+  dst1 = wp.abs(gsize[1] - wp.abs(pos1[2]))
+  dst2 = wp.abs(gsize[0] - wp.sqrt(pos1[0] * pos1[0] + pos1[1] * pos1[1]))
+  if dst1 < 0.25 * dst2:
+    return normal
+  return grot @ wp.normalize(wp.vec3(pos1[0], pos1[1], 0.0))
+
+
+@wp.func
+def _is_passive_flex_cand(
+  # Model:
+  opt_integrator: int,
+  body_weldid: wp.array[int],
+  geom_bodyid: wp.array[int],
+  flex_passive: wp.array[int],
+  flex_dim: wp.array[int],
+  flex_interp: wp.array[int],
+  # In:
+  geom_pair: wp.vec2i,
+  flex_pair: wp.vec2i,
+) -> bool:
+  if opt_integrator != int(IntegratorType.DISCRETE):
+    return False
+  f0 = flex_pair[0]
+  f1 = flex_pair[1]
+  g0 = geom_pair[0]
+  g1 = geom_pair[1]
+  wants = (f0 >= 0 and flex_passive[f0] != 0 and flex_interp[f0] == 0 and flex_dim[f0] >= 2) or (
+    f1 >= 0 and flex_passive[f1] != 0 and flex_interp[f1] == 0 and flex_dim[f1] >= 2
+  )
+  ok = (f0 >= 0 or (g0 >= 0 and body_weldid[geom_bodyid[g0]] == 0)) and (
+    f1 >= 0 or (g1 >= 0 and body_weldid[geom_bodyid[g1]] == 0)
+  )
+  return wants and ok
 
 
 @cache_kernel
@@ -2083,9 +2063,10 @@ def _flex_narrowphase_elem_detect(warn_overflow: int, enable_ipc: bool = False):
 
             contact_pos = 0.5 * (w1 + w2)
             if f_dim == 2:
-              if not swept:
+              if swept:
+                normal = _fix_cylinder_normal(geom_pos, geom_rot, geom_size_val, contact_pos, normal)
+              else:
                 contact_pos -= 0.5 * elem_radius * normal
-              normal = _fix_normal_flex2d(gtype, geom_pos, geom_rot, geom_size_val, contact_pos, normal)
 
             _write_candidate(
               max_candidates,
@@ -2192,7 +2173,11 @@ def _filter_flex_candidates_sorted(enable_ipc: bool = False):
   def kernel(
     # Model:
     opt_integrator: int,
+    body_weldid: wp.array[int],
+    geom_bodyid: wp.array[int],
     flex_passive: wp.array[int],
+    flex_dim: wp.array[int],
+    flex_interp: wp.array[int],
     # In:
     ncand: wp.array[int],
     epsilon: float,
@@ -2200,6 +2185,7 @@ def _filter_flex_candidates_sorted(enable_ipc: bool = False):
     sort_val: wp.array[int],
     cand_dist: wp.array[float],
     cand_pos: wp.array[wp.vec3],
+    cand_geom: wp.array[wp.vec2i],
     cand_flex: wp.array[wp.vec2i],
     cand_elem: wp.array[wp.vec2i],
     cand_vert: wp.array[wp.vec2i],
@@ -2227,13 +2213,21 @@ def _filter_flex_candidates_sorted(enable_ipc: bool = False):
     pos_i = cand_pos[i]
     dist_i = cand_dist[i]
     eps2 = epsilon * epsilon
-    f0 = cand_flex[i][0]
-    f1 = cand_flex[i][1]
-    is_passive = opt_integrator == int(IntegratorType.DISCRETE) and (
-      wp.static(enable_ipc) or (f0 >= 0 and flex_passive[f0] != 0) or (f1 >= 0 and flex_passive[f1] != 0)
+    is_passive = (opt_integrator == int(IntegratorType.DISCRETE) and wp.static(enable_ipc)) or _is_passive_flex_cand(
+      opt_integrator,
+      body_weldid,
+      geom_bodyid,
+      flex_passive,
+      flex_dim,
+      flex_interp,
+      cand_geom[i],
+      cand_flex[i],
     )
-    elem_i = cand_elem[i]
-    vert_i = cand_vert[i]
+    elem_i = wp.vec2i(-1, -1)
+    vert_i = wp.vec2i(-1, -1)
+    if is_passive:
+      elem_i = cand_elem[i]
+      vert_i = cand_vert[i]
 
     keep = int(1)
 
@@ -2345,7 +2339,6 @@ def _write_filtered_contacts(warn_overflow: int, enable_ipc: bool = False):
     contact_type_out: wp.array[int],
     contact_geomcollisionid_out: wp.array[int],
     nacon_out: wp.array[int],
-    # Data out:
     overflow_out: wp.array[int],
   ):
     i = wp.tid()
@@ -2465,22 +2458,16 @@ def _write_filtered_contacts(warn_overflow: int, enable_ipc: bool = False):
     # this contact's dims, and the Jacobian kernels skip -1 entries)
     for k in range(contact_efc_address_out.shape[1]):
       contact_efc_address_out[id_, k] = -1
-    f0 = cand_flex[i][0]
-    f1 = cand_flex[i][1]
-    g0 = cand_geom[i][0]
-    g1 = cand_geom[i][1]
-    wants = (
-      (
-        (f0 >= 0 and flex_passive[f0] != 0 and flex_interp[f0] == 0 and flex_dim[f0] >= 2)
-        or (f1 >= 0 and flex_passive[f1] != 0 and flex_interp[f1] == 0 and flex_dim[f1] >= 2)
-      )
-      and opt_integrator == int(IntegratorType.DISCRETE)
-      and not wp.static(enable_ipc)
+    is_passive = not wp.static(enable_ipc) and _is_passive_flex_cand(
+      opt_integrator,
+      body_weldid,
+      geom_bodyid,
+      flex_passive,
+      flex_dim,
+      flex_interp,
+      cand_geom[i],
+      cand_flex[i],
     )
-    ok = (f0 >= 0 or (g0 >= 0 and body_weldid[geom_bodyid[g0]] == 0)) and (
-      f1 >= 0 or (g1 >= 0 and body_weldid[geom_bodyid[g1]] == 0)
-    )
-    is_passive = wants and ok
     contact_type_out[id_] = int(ContactType.PASSIVE) if is_passive else int(ContactType.CONSTRAINT)
     contact_geomcollisionid_out[id_] = 0
 
@@ -2601,7 +2588,11 @@ def _parallel_fps_find_seed(enable_ipc: bool = False):
   def kernel(
     # Model:
     opt_integrator: int,
+    body_weldid: wp.array[int],
+    geom_bodyid: wp.array[int],
     flex_passive: wp.array[int],
+    flex_dim: wp.array[int],
+    flex_interp: wp.array[int],
     # In:
     flex_group_start_indices_in: wp.array[int],
     flex_num_groups_in: wp.array[int],
@@ -2629,10 +2620,15 @@ def _parallel_fps_find_seed(enable_ipc: bool = False):
       return
 
     first_cand_idx = sort_val[g_start]
-    f0 = cand_flex[first_cand_idx][0]
-    f1 = cand_flex[first_cand_idx][1]
-    is_passive = opt_integrator == int(IntegratorType.DISCRETE) and (
-      wp.static(enable_ipc) or (f0 >= 0 and flex_passive[f0] != 0) or (f1 >= 0 and flex_passive[f1] != 0)
+    is_passive = (opt_integrator == int(IntegratorType.DISCRETE) and wp.static(enable_ipc)) or _is_passive_flex_cand(
+      opt_integrator,
+      body_weldid,
+      geom_bodyid,
+      flex_passive,
+      flex_dim,
+      flex_interp,
+      cand_geom[first_cand_idx],
+      cand_flex[first_cand_idx],
     )
     if cand_geom[first_cand_idx][0] >= 0 or is_passive:
       scratch_count_out[g, tid] = 0
@@ -3096,7 +3092,11 @@ def _run_filter_flex_fps(
     dim=(nmax_groups, _FPS_BLOCK_SIZE),
     inputs=[
       m.opt.integrator,
+      m.body_weldid,
+      m.geom_bodyid,
       m.flex_passive,
+      m.flex_dim,
+      m.flex_interp,
       ws.flex_group_start_indices,
       ws.flex_num_groups,
       ws.ncand,
@@ -3244,13 +3244,18 @@ def _filter_and_write_contacts(
     dim=d.naconmax,
     inputs=[
       m.opt.integrator,
+      m.body_weldid,
+      m.geom_bodyid,
       m.flex_passive,
+      m.flex_dim,
+      m.flex_interp,
       ws.ncand,
       _FLEX_CONTACT_DEDUP_TOLERANCE,
       ws.filter_key,
       ws.filter_val,
       ws.dist,
       ws.pos,
+      ws.geom,
       ws.flex,
       ws.elem,
       ws.vert,

@@ -119,7 +119,6 @@ def _add_body_normal_jac(
   body_simple: wp.array[int],
   dof_parentid: wp.array[int],
   # Data in:
-  xmat_in: wp.array2d[wp.mat33],
   subtree_com_in: wp.array2d[wp.vec3],
   cdof_in: wp.array2d[wp.spatial_vector],
   # In:
@@ -141,10 +140,11 @@ def _add_body_normal_jac(
   if dofnum == 0:
     return nnz
   da = body_dofadr[b]
-  if body_simple[b] == 2 and dofnum == 3:
-    n_loc = wp.transpose(xmat_in[worldid, b]) @ normal
-    for ax in range(3):
-      nnz = _add_con_dof(cid, da + ax, weight * n_loc[ax], nnz, efm_con_dof_out, efm_con_val_out)
+  if body_simple[b] == 2:
+    for d in range(dofnum):
+      nnz = _add_con_dof(
+        cid, da + d, weight * wp.dot(normal, wp.spatial_bottom(cdof_in[worldid, da + d])), nnz, efm_con_dof_out, efm_con_val_out
+      )
     return nnz
   offset = pos - subtree_com_in[worldid, body_rootid[b]]
   i = da + dofnum - 1
@@ -1631,7 +1631,11 @@ def _flex_scatter_kernel(check_skip: bool):
 
 def flex_passive_contact(m: Model) -> bool:
   """Returns True if passive flex contacts are active (IPC owns flex contact when enabled)."""
-  return m.has_flex_passive and not (m.opt.enableflags & EnableBit.IPC)
+  return bool(
+    m.has_flex_passive
+    and not (m.opt.enableflags & EnableBit.IPC)
+    and not ((m.opt.disableflags & DisableBit.SPRING) and (m.opt.disableflags & DisableBit.DAMPER))
+  )
 
 
 def flex_gather(
@@ -3200,7 +3204,6 @@ def _eff_contact_build(
   body_dofadr: wp.array[int],
   body_simple: wp.array[int],
   dof_parentid: wp.array[int],
-  geom_bodyid: wp.array[int],
   flex_dim: wp.array[int],
   flex_vertadr: wp.array[int],
   flex_elemdataadr: wp.array[int],
@@ -3209,7 +3212,6 @@ def _eff_contact_build(
   M_rownnz: wp.array[int],
   M_rowadr: wp.array[int],
   # Data in:
-  xmat_in: wp.array2d[wp.mat33],
   subtree_com_in: wp.array2d[wp.vec3],
   cdof_in: wp.array2d[wp.spatial_vector],
   flexvert_xpos_in: wp.array2d[wp.vec3],
@@ -3217,7 +3219,6 @@ def _eff_contact_build(
   contact_dist_in: wp.array[float],
   contact_pos_in: wp.array[wp.vec3],
   contact_frame_in: wp.array[wp.mat33],
-  contact_geom_in: wp.array[wp.vec2i],
   contact_flex_in: wp.array[wp.vec2i],
   contact_elem_in: wp.array[wp.vec2i],
   contact_vert_in: wp.array[wp.vec2i],
@@ -3243,15 +3244,9 @@ def _eff_contact_build(
     return
 
   worldid = contact_worldid_in[cid]
-  timestep = opt_timestep[worldid % opt_timestep.shape[0]]
-  geom0 = contact_geom_in[cid][0]
-  geom1 = contact_geom_in[cid][1]
-  flex0 = contact_flex_in[cid][0]
-  flex1 = contact_flex_in[cid][1]
-  elem0 = contact_elem_in[cid][0]
-  elem1 = contact_elem_in[cid][1]
-  vert0 = contact_vert_in[cid][0]
-  vert1 = contact_vert_in[cid][1]
+  flex = contact_flex_in[cid]
+  elem = contact_elem_in[cid]
+  vert = contact_vert_in[cid]
 
   k = _flex_contact_stiffness(
     body_weldid,
@@ -3266,12 +3261,12 @@ def _eff_contact_build(
     M_rowadr,
     M_in,
     worldid,
-    flex0,
-    flex1,
-    elem0,
-    elem1,
-    vert0,
-    vert1,
+    flex[0],
+    flex[1],
+    elem[0],
+    elem[1],
+    vert[0],
+    vert[1],
   )
 
   if k <= float(0.0):
@@ -3280,16 +3275,23 @@ def _eff_contact_build(
     efm_con_scale_out[cid] = float(0.0)
     return
 
+  timestep = opt_timestep[worldid % opt_timestep.shape[0]]
   gap = contact_dist_in[cid]
   pos = contact_pos_in[cid]
   normal = contact_frame_in[cid][0]
 
   nnz = int(0)
 
-  # Side 0 (sign = -1.0)
-  if flex0 >= 0:
-    if vert0 >= 0:
-      gv = flex_vertadr[flex0] + vert0
+  for s in range(2):
+    flex_s = flex[s]
+    if flex_s < 0:
+      continue
+    elem_s = elem[s]
+    vert_s = vert[s]
+    vert_opp = vert[1 - s] if flex[1 - s] == flex_s else -1
+    sign = -1.0 if s == 0 else 1.0
+    if vert_s >= 0:
+      gv = flex_vertadr[flex_s] + vert_s
       nnz = _add_body_normal_jac(
         body_rootid,
         body_weldid,
@@ -3297,7 +3299,6 @@ def _eff_contact_build(
         body_dofadr,
         body_simple,
         dof_parentid,
-        xmat_in,
         subtree_com_in,
         cdof_in,
         worldid,
@@ -3305,36 +3306,36 @@ def _eff_contact_build(
         flex_vertbodyid[gv],
         pos,
         normal,
-        -1.0,
+        sign,
         nnz,
         efm_con_dof_out,
         efm_con_val_out,
       )
-    elif elem0 >= 0:
-      dim0 = flex_dim[flex0]
-      nvrt0 = dim0 + 1
-      base0 = flex_elemdataadr[flex0] + nvrt0 * elem0
-      w0 = wp.vec4(0.0, 0.0, 0.0, 0.0)
-      v0 = wp.vec4i(-1, -1, -1, -1)
-      n0 = int(0)
-      sum_w0 = float(0.0)
-      for j in range(nvrt0):
-        v_local = flex_elem[base0 + j]
-        if vert1 >= 0 and v_local == vert1:
+    elif elem_s >= 0:
+      dim_s = flex_dim[flex_s]
+      nvrt_s = dim_s + 1
+      base_s = flex_elemdataadr[flex_s] + nvrt_s * elem_s
+      w_s = wp.vec4(0.0, 0.0, 0.0, 0.0)
+      v_s = wp.vec4i(-1, -1, -1, -1)
+      n_s = int(0)
+      sum_w_s = float(0.0)
+      for j in range(nvrt_s):
+        v_local = flex_elem[base_s + j]
+        if vert_opp >= 0 and v_local == vert_opp:
           continue
-        gv = flex_vertadr[flex0] + v_local
+        gv = flex_vertadr[flex_s] + v_local
         v_pos = flexvert_xpos_in[worldid, gv]
         d = wp.length(pos - v_pos)
         weight = math.safe_div(1.0, d)
-        w0[n0] = weight
-        v0[n0] = gv
-        sum_w0 += weight
-        n0 += 1
-      if sum_w0 > float(0.0):
-        inv_sum0 = float(1.0) / sum_w0
-        for j in range(n0):
-          wj = w0[j] * inv_sum0
-          gv = v0[j]
+        w_s[n_s] = weight
+        v_s[n_s] = gv
+        sum_w_s += weight
+        n_s += 1
+      if sum_w_s > float(0.0):
+        inv_sum_s = float(1.0) / sum_w_s
+        for j in range(n_s):
+          wj = w_s[j] * inv_sum_s
+          gv = v_s[j]
           nnz = _add_body_normal_jac(
             body_rootid,
             body_weldid,
@@ -3342,7 +3343,6 @@ def _eff_contact_build(
             body_dofadr,
             body_simple,
             dof_parentid,
-            xmat_in,
             subtree_com_in,
             cdof_in,
             worldid,
@@ -3350,123 +3350,11 @@ def _eff_contact_build(
             flex_vertbodyid[gv],
             pos,
             normal,
-            -wj,
+            sign * wj,
             nnz,
             efm_con_dof_out,
             efm_con_val_out,
           )
-  elif geom0 >= 0:
-    nnz = _add_body_normal_jac(
-      body_rootid,
-      body_weldid,
-      body_dofnum,
-      body_dofadr,
-      body_simple,
-      dof_parentid,
-      xmat_in,
-      subtree_com_in,
-      cdof_in,
-      worldid,
-      cid,
-      geom_bodyid[geom0],
-      pos,
-      normal,
-      -1.0,
-      nnz,
-      efm_con_dof_out,
-      efm_con_val_out,
-    )
-
-  # Side 1 (sign = +1.0)
-  if flex1 >= 0:
-    if vert1 >= 0:
-      gv = flex_vertadr[flex1] + vert1
-      nnz = _add_body_normal_jac(
-        body_rootid,
-        body_weldid,
-        body_dofnum,
-        body_dofadr,
-        body_simple,
-        dof_parentid,
-        xmat_in,
-        subtree_com_in,
-        cdof_in,
-        worldid,
-        cid,
-        flex_vertbodyid[gv],
-        pos,
-        normal,
-        1.0,
-        nnz,
-        efm_con_dof_out,
-        efm_con_val_out,
-      )
-    elif elem1 >= 0:
-      dim1 = flex_dim[flex1]
-      nvrt1 = dim1 + 1
-      base1 = flex_elemdataadr[flex1] + nvrt1 * elem1
-      w1 = wp.vec4(0.0, 0.0, 0.0, 0.0)
-      v1 = wp.vec4i(-1, -1, -1, -1)
-      n1 = int(0)
-      sum_w1 = float(0.0)
-      for j in range(nvrt1):
-        v_local = flex_elem[base1 + j]
-        if vert0 >= 0 and v_local == vert0:
-          continue
-        gv = flex_vertadr[flex1] + v_local
-        v_pos = flexvert_xpos_in[worldid, gv]
-        d = wp.length(pos - v_pos)
-        weight = math.safe_div(1.0, d)
-        w1[n1] = weight
-        v1[n1] = gv
-        sum_w1 += weight
-        n1 += 1
-      if sum_w1 > float(0.0):
-        inv_sum1 = float(1.0) / sum_w1
-        for j in range(n1):
-          wj = w1[j] * inv_sum1
-          gv = v1[j]
-          nnz = _add_body_normal_jac(
-            body_rootid,
-            body_weldid,
-            body_dofnum,
-            body_dofadr,
-            body_simple,
-            dof_parentid,
-            xmat_in,
-            subtree_com_in,
-            cdof_in,
-            worldid,
-            cid,
-            flex_vertbodyid[gv],
-            pos,
-            normal,
-            wj,
-            nnz,
-            efm_con_dof_out,
-            efm_con_val_out,
-          )
-  elif geom1 >= 0:
-    nnz = _add_body_normal_jac(
-      body_rootid,
-      body_weldid,
-      body_dofnum,
-      body_dofadr,
-      body_simple,
-      dof_parentid,
-      xmat_in,
-      subtree_com_in,
-      cdof_in,
-      worldid,
-      cid,
-      geom_bodyid[geom1],
-      pos,
-      normal,
-      1.0,
-      nnz,
-      efm_con_dof_out,
-      efm_con_val_out,
-    )
 
   # Compact zero entries
   real_nnz = int(0)
@@ -3496,11 +3384,7 @@ def build_efm_contact(
   efm_con_scale = wp.zeros(d.naconmax, dtype=float)
   efm_con_force = wp.zeros(d.naconmax, dtype=float)
   efm_con_nnz = wp.zeros(d.naconmax, dtype=int)
-  if (
-    rebuild
-    and flex_passive_contact(m)
-    and not ((m.opt.disableflags & DisableBit.SPRING) and (m.opt.disableflags & DisableBit.DAMPER))
-  ):
+  if rebuild and flex_passive_contact(m):
     wp.launch(
       _eff_contact_build,
       dim=d.naconmax,
@@ -3512,7 +3396,6 @@ def build_efm_contact(
         m.body_dofadr,
         m.body_simple,
         m.dof_parentid,
-        m.geom_bodyid,
         m.flex_dim,
         m.flex_vertadr,
         m.flex_elemdataadr,
@@ -3520,7 +3403,6 @@ def build_efm_contact(
         m.flex_elem,
         m.M_rownnz,
         m.M_rowadr,
-        d.xmat,
         d.subtree_com,
         d.cdof,
         d.flexvert_xpos,
@@ -3528,7 +3410,6 @@ def build_efm_contact(
         d.contact.dist,
         d.contact.pos,
         d.contact.frame,
-        d.contact.geom,
         d.contact.flex,
         d.contact.elem,
         d.contact.vert,

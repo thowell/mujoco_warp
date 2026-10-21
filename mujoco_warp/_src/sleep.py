@@ -15,8 +15,8 @@
 
 import warp as wp
 
+from mujoco_warp._src import support
 from mujoco_warp._src import types
-from mujoco_warp._src.types import DisableBit
 from mujoco_warp._src.types import EqType
 from mujoco_warp._src.types import IntegratorType
 from mujoco_warp._src.types import ObjType
@@ -82,33 +82,6 @@ def _tendon_limit_active(
   if dist_high < margin:
     return True
 
-  return False
-
-
-@wp.func
-def _eff_tendon_possible(
-  # Model:
-  opt_disableflags: int,
-  tendon_stiffness: wp.array2d[float],
-  tendon_stiffnesspoly: wp.array2d[wp.vec2],
-  tendon_damping: wp.array2d[float],
-  tendon_dampingpoly: wp.array2d[wp.vec2],
-  # In:
-  worldid: int,
-  tenid: int,
-) -> bool:
-  if not (opt_disableflags & DisableBit.SPRING):
-    if tendon_stiffness[worldid % tendon_stiffness.shape[0], tenid] != 0.0:
-      return True
-    spoly = tendon_stiffnesspoly[worldid % tendon_stiffnesspoly.shape[0], tenid]
-    if spoly[0] != 0.0 or spoly[1] != 0.0:
-      return True
-  if not (opt_disableflags & DisableBit.DAMPER):
-    if tendon_damping[worldid % tendon_damping.shape[0], tenid] != 0.0:
-      return True
-    dpoly = tendon_dampingpoly[worldid % tendon_dampingpoly.shape[0], tenid]
-    if dpoly[0] != 0.0 or dpoly[1] != 0.0:
-      return True
   return False
 
 
@@ -502,7 +475,7 @@ def _wake_tendon_kernel(
   if any_awake == 1:
     active = _tendon_limit_active(tendon_limited, tendon_range, tendon_margin, ten_length_in, worldid, tenid)
     if not active and opt_integrator == IntegratorType.DISCRETE:
-      active = _eff_tendon_possible(
+      active = support.eff_tendon_possible(
         opt_disableflags,
         tendon_stiffness,
         tendon_stiffnesspoly,
