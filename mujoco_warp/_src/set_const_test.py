@@ -275,9 +275,11 @@ class SetConstTest(parameterized.TestCase):
 
     mjwarp.reset_data(m, d)
     d.ctrl.fill_(ctrl)
+    with wp.ScopedCapture() as capture:
+      mjwarp.step(m, d)
     err_wp = 0.0
     for _ in range(10):
-      mjwarp.step(m, d)
+      wp.capture_launch(capture.graph)
       qpos = d.qpos.numpy()[0]
       err_wp = max(err_wp, abs(qpos[2] - qpos0[2] - slider_crank_s(qpos[0] - qpos0[0])))
 
@@ -867,9 +869,8 @@ class SetConstTest(parameterized.TestCase):
     for i in range(mjm.nbody):
       _assert_eq(m.body_invweight0.numpy()[0, i], mjm.body_invweight0[i], f"body_invweight0[{i}]")
 
-  @absltest.skipIf(not wp.get_device().is_cuda, "Skipping test that requires GPU.")
   def test_set_const_graph_capture(self):
-    """Test that set_const is compatible with CUDA graph capture."""
+    """Test that set_const is compatible with graph capture."""
     _, _, m, d = test_data.fixture("humanoid/humanoid.xml", keyframe=0)
 
     with wp.ScopedCapture() as capture:

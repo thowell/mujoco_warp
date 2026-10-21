@@ -1216,9 +1216,12 @@ class IOTest(parameterized.TestCase):
     m = mjwarp.put_model(mjm)
     d = mjwarp.put_data(mjm, mjd, nconmax=16, njmax=16)
 
+    with wp.ScopedCapture() as capture:
+      mjwarp.step(m, d)
+
     # let the box fall and settle on the ground
     for _ in range(30):
-      mjwarp.step(m, d)
+      wp.capture_launch(capture.graph)
 
     # check that box is above ground
     # box center should be at z ≈ 0.5 when resting on ground

@@ -1473,6 +1473,13 @@ class FlexPassiveForcesTest(parameterized.TestCase):
     V = rot_x(-0.6) @ rot_z(0.2) @ rot_y(0.5)
     mjds = [mujoco.MjData(mjm) for _ in range(nworld)]
 
+    with wp.ScopedCapture() as capture:
+      mjw.kinematics(m, d)
+      mjw.com_pos(m, d)
+      mjw.flex(m, d)
+      mjw.com_vel(m, d)
+      mjw.passive(m, d)
+
     for rank in (1, 2, 3):
       for scale in (1.0, 0.1, 0.0, -0.1, -1.0):
         sv0 = np.array([1.3, 0.85, 1.15], dtype=np.float64)
@@ -1497,11 +1504,7 @@ class FlexPassiveForcesTest(parameterized.TestCase):
         d.qpos.assign(qpos_batch)
         d.qvel.zero_()
         d.qfrc_spring.fill_(wp.inf)
-        mjw.kinematics(m, d)
-        mjw.com_pos(m, d)
-        mjw.flex(m, d)
-        mjw.com_vel(m, d)
-        mjw.passive(m, d)
+        wp.capture_launch(capture.graph)
 
         for w in range(nworld):
           mjds[w].qpos[:] = qpos_batch[w]
@@ -3123,10 +3126,13 @@ class FlexDynamicsTest(parameterized.TestCase):
     xml, atol = xml_and_atol
     mjm, mjd, m, d = test_data.fixture(xml=xml, nworld=nworld)
 
+    with wp.ScopedCapture() as capture:
+      mjw.step(m, d)
+
     # Run 10 steps
     for _ in range(10):
       mujoco.mj_step(mjm, mjd)
-      mjw.step(m, d)
+      wp.capture_launch(capture.graph)
 
     for w in range(nworld):
       np.testing.assert_allclose(
@@ -3161,10 +3167,13 @@ class FlexDynamicsTest(parameterized.TestCase):
     """
     mjm, mjd, m, d = test_data.fixture(xml=xml, nworld=nworld)
 
+    with wp.ScopedCapture() as capture:
+      mjw.step(m, d)
+
     # Run 10 steps
     for _ in range(10):
       mujoco.mj_step(mjm, mjd)
-      mjw.step(m, d)
+      wp.capture_launch(capture.graph)
 
     for w in range(nworld):
       np.testing.assert_allclose(
@@ -3190,10 +3199,13 @@ class FlexDynamicsTest(parameterized.TestCase):
     """
     mjm, mjd, m, d = test_data.fixture(xml=xml, nworld=nworld)
 
+    with wp.ScopedCapture() as capture:
+      mjw.step(m, d)
+
     # Run 50 steps
     for _ in range(50):
       mujoco.mj_step(mjm, mjd)
-      mjw.step(m, d)
+      wp.capture_launch(capture.graph)
 
     for w in range(nworld):
       np.testing.assert_allclose(
@@ -3233,15 +3245,18 @@ class FlexDynamicsTest(parameterized.TestCase):
       mjd1 = mujoco.MjData(mjm)
       qpos = d.qpos.numpy()
       qpos[1, 2] += 0.002
-      d.qpos = wp.array(qpos, dtype=float, device=d.qpos.device)
+      d.qpos.assign(qpos)
       mjd1.qpos[:] = qpos[1]
       mjds.append(mjd1)
+
+    with wp.ScopedCapture() as capture:
+      mjw.step(m, d)
 
     for step in range(20):
       for w in range(nworld):
         mujoco.mj_step(mjm, mjds[w])
       d.qacc.fill_(wp.inf)
-      mjw.step(m, d)
+      wp.capture_launch(capture.graph)
 
       # Passive contact must not generate constraints in either C or Warp
       for w in range(nworld):
@@ -3764,6 +3779,9 @@ class FlexContactParityTest(parameterized.TestCase):
     checkpoints = [0, 250, 500, 1000]
     curr_step = 0
 
+    with wp.ScopedCapture() as capture:
+      mjw.forward(m, d)
+
     for target_step in checkpoints:
       while curr_step < target_step:
         mujoco.mj_step(mjm, mjd)
@@ -3773,7 +3791,7 @@ class FlexContactParityTest(parameterized.TestCase):
       d.qvel.assign(np.tile(mjd.qvel, (nworld, 1)).astype(np.float32))
 
       d.nacon.fill_(-1)
-      mjw.forward(m, d)
+      wp.capture_launch(capture.graph)
       mujoco.mj_forward(mjm, mjd)
 
       for w in range(nworld):
