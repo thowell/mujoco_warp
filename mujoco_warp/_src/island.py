@@ -515,12 +515,6 @@ def _zero_island_counts(
   nidof_out[worldid] = 0
 
 
-def _sort_islands(m: types.Model, d: types.Data):
-  """Deterministic island sort."""
-  # TODO(team): Implementation of island sorting.
-  pass
-
-
 @event_scope
 def island(m: types.Model, d: types.Data):
   """Discover constraint islands."""
@@ -533,9 +527,6 @@ def island(m: types.Model, d: types.Data):
     return
 
   direct_dsu(m, d, wp.empty((d.nworld, m.ntree), dtype=int))
-
-  if m.opt.deterministic & types.DeterminismType.ISLANDS:
-    _sort_islands(m, d)
 
 
 @wp.kernel

@@ -272,7 +272,6 @@ class DeterminismType(enum.IntFlag):
     CONTACTS: stable contact ordering via geometric radix sort
     CONSTRAINT: canonical constraint row ordering
     ATOMICS: invariant floating-point atomic reductions
-    ISLANDS: canonical island ordering
     ALL: all determinism features
   """
 
@@ -280,8 +279,7 @@ class DeterminismType(enum.IntFlag):
   CONTACTS = 1 << 0
   CONSTRAINT = 1 << 1
   ATOMICS = 1 << 2
-  ISLANDS = 1 << 3
-  ALL = CONTACTS | CONSTRAINT | ATOMICS | ISLANDS
+  ALL = CONTACTS | CONSTRAINT | ATOMICS
 
 
 class DisableBit(enum.IntFlag):

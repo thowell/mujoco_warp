@@ -2414,11 +2414,11 @@ def _update_gradient_init_h_sparse(compact: bool):
 
 
 @cache_kernel
-def _add_tendon_metric_dense(nv: int, deterministic: bool = False):
+def _add_tendon_metric_dense(max_ten_J_rownnz: int, deterministic: bool = False):
   module_options = {"enable_backward": False}
   if deterministic:
     module_options["deterministic"] = wp.DeterministicMode.RUN_TO_RUN
-    module_options["deterministic_max_records"] = nv * (nv + 1) // 2
+    module_options["deterministic_max_records"] = max_ten_J_rownnz * (max_ten_J_rownnz - 1) // 2
 
   @wp.kernel(module="unique", module_options=module_options)
   def kernel(
@@ -2459,7 +2459,7 @@ def _add_actuator_metric_dense(nv: int, deterministic: bool = False):
   module_options = {"enable_backward": False}
   if deterministic:
     module_options["deterministic"] = wp.DeterministicMode.RUN_TO_RUN
-    module_options["deterministic_max_records"] = nv * (nv + 1) // 2
+    module_options["deterministic_max_records"] = nv * (nv - 1) // 2
 
   @wp.kernel(module="unique", module_options=module_options)
   def kernel(
@@ -3485,7 +3485,7 @@ def _update_gradient(m: types.Model, d: types.Data, ctx: SolverContext, compact:
     det_atomics = bool(m.opt.deterministic & types.DeterminismType.ATOMICS)
     if is_discrete:
       wp.launch(
-        _add_tendon_metric_dense(m.nv if det_atomics else 0, det_atomics),
+        _add_tendon_metric_dense(m.max_ten_J_rownnz if det_atomics else 0, det_atomics),
         dim=(d.nworld, m.ntendon),
         inputs=[m.ten_J_rownnz, m.ten_J_rowadr, m.ten_J_colind, d.ten_J, d.efm_ts, ctx.done],
         outputs=[ctx.h],

@@ -1511,11 +1511,11 @@ def _eff_diag_damp_shift(
 
 
 @cache_kernel
-def _eff_tendon_shift(nv: int, deterministic: bool = False):
+def _eff_tendon_shift(max_ten_J_rownnz: int, deterministic: bool = False):
   module_options = {"enable_backward": False}
   if deterministic:
     module_options["deterministic"] = wp.DeterministicMode.RUN_TO_RUN
-    module_options["deterministic_max_records"] = nv
+    module_options["deterministic_max_records"] = max_ten_J_rownnz
 
   @wp.kernel(module="unique", module_options=module_options)
   def kernel(
@@ -1786,11 +1786,11 @@ def _eff_init_sdiag(
 
 
 @cache_kernel
-def _eff_add_tendon_qH_diag(nv: int, deterministic: bool = False):
+def _eff_add_tendon_qH_diag(max_ten_J_rownnz: int, deterministic: bool = False):
   module_options = {"enable_backward": False}
   if deterministic:
     module_options["deterministic"] = wp.DeterministicMode.RUN_TO_RUN
-    module_options["deterministic_max_records"] = nv
+    module_options["deterministic_max_records"] = max_ten_J_rownnz
 
   @wp.kernel(module="unique", module_options=module_options)
   def kernel(
@@ -1962,11 +1962,11 @@ def _eff_mul_diag_and_csr(check_skip: bool):
 
 
 @cache_kernel
-def _eff_mul_add_tendon(check_skip: bool, nv: int, deterministic: bool = False):
+def _eff_mul_add_tendon(check_skip: bool, max_ten_J_rownnz: int, deterministic: bool = False):
   module_options = {"enable_backward": False}
   if deterministic:
     module_options["deterministic"] = wp.DeterministicMode.RUN_TO_RUN
-    module_options["deterministic_max_records"] = nv
+    module_options["deterministic_max_records"] = max_ten_J_rownnz
 
   @wp.kernel(module="unique", module_options=module_options, grid_stride=False)
   def kernel(
@@ -3290,7 +3290,7 @@ def eff_shift(m: Model, d: Data):
 
   det_atomics = bool(m.opt.deterministic & DeterminismType.ATOMICS)
   wp.launch(
-    _eff_tendon_shift(m.nv if det_atomics else 0, det_atomics),
+    _eff_tendon_shift(m.max_ten_J_rownnz if det_atomics else 0, det_atomics),
     dim=(d.nworld, m.ntendon),
     inputs=[
       m.opt.timestep,
@@ -3490,7 +3490,7 @@ def eff_actuation(m: Model, d: Data):
     outputs=[d.qH],
   )
   wp.launch(
-    _eff_add_tendon_qH_diag(m.nv if det_atomics else 0, det_atomics),
+    _eff_add_tendon_qH_diag(m.max_ten_J_rownnz if det_atomics else 0, det_atomics),
     dim=(d.nworld, m.ntendon),
     inputs=[
       m.ten_J_rownnz,
@@ -3587,7 +3587,7 @@ def eff_mul_m(
       )
     det_atomics = bool(m.opt.deterministic & DeterminismType.ATOMICS)
     wp.launch(
-      _eff_mul_add_tendon(check_skip, m.nv if det_atomics else 0, det_atomics),
+      _eff_mul_add_tendon(check_skip, m.max_ten_J_rownnz if det_atomics else 0, det_atomics),
       dim=(d.nworld, m.ntendon),
       inputs=[
         m.ten_J_rownnz,
@@ -3755,11 +3755,11 @@ def _eff_build_blocks_raw(
 
 
 @cache_kernel
-def _eff_fold_tendon(nv: int, deterministic: bool = False):
+def _eff_fold_tendon(max_ten_J_rownnz: int, deterministic: bool = False):
   module_options = {"enable_backward": False}
   if deterministic:
     module_options["deterministic"] = wp.DeterministicMode.RUN_TO_RUN
-    module_options["deterministic_max_records"] = 3 * nv
+    module_options["deterministic_max_records"] = 3 * max_ten_J_rownnz
 
   @wp.kernel(module="unique", module_options=module_options)
   def kernel(
@@ -3987,7 +3987,7 @@ def eff_prec_fold(m: Model, d: Data, out: Optional[wp.array] = None) -> wp.array
 
   det_atomics = bool(m.opt.deterministic & DeterminismType.ATOMICS)
   wp.launch(
-    _eff_fold_tendon(m.nv if det_atomics else 0, det_atomics),
+    _eff_fold_tendon(m.max_ten_J_rownnz if det_atomics else 0, det_atomics),
     dim=(d.nworld, m.ntendon),
     inputs=[
       m.ten_J_rownnz,

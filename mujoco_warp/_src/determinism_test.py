@@ -36,7 +36,6 @@ from mujoco_warp import test_data
 from mujoco_warp._src import bvh
 from mujoco_warp._src import collision_driver
 from mujoco_warp._src import constraint
-from mujoco_warp._src import island
 from mujoco_warp._src import render_util
 from mujoco_warp._src import set_const
 from mujoco_warp._src import warp_util
@@ -567,7 +566,7 @@ class DeterminismTest(parameterized.TestCase):
   @parameterized.named_parameters(*_FLEX_CASES)
   def test_flex(self, overrides, covers):
     """1D, 2D, 3D and interpolated flexes with elasticity, energy and render normals."""
-    mjm, mjd, m, d = test_data.fixture(
+    mjm, _, m, d = test_data.fixture(
       xml="""
       <mujoco>
         <option>
@@ -595,16 +594,14 @@ class DeterminismTest(parameterized.TestCase):
       nworld=2,
       qvel_noise=0.1,
     )
+    with _record_launches() as launches:
+      rc = render_util.create_render_context(mjm, nworld=2, cam_res=(8, 8), deterministic=True)
     if not overrides:
-      with _record_launches() as launches:
-        mesh0, root0 = bvh.build_flex_bvh(mjm, mjd, 2, 1, deterministic=True)
-      mesh1, root1 = bvh.build_flex_bvh(mjm, mjd, 2, 1, deterministic=True)
+      rc1 = render_util.create_render_context(mjm, nworld=2, cam_res=(8, 8), deterministic=True)
       self.assertIn(("bvh.accumulate_flex_vertex_normals", _RUN_TO_RUN, True), launches)
-      self.assertEqual(_bitwise_diff(_snapshot(_flatten(mesh0, "mesh")), _snapshot(_flatten(mesh1, "mesh"))), [])
-      np.testing.assert_array_equal(root0.numpy(), root1.numpy())
-
-    # created outside the runs: create_render_context cannot select deterministic kernels
-    rc = render_util.create_render_context(mjm, nworld=2, cam_res=(8, 8))
+      self.assertEqual(
+        _bitwise_diff(_snapshot(_flatten(rc.flex_group_root, "root")), _snapshot(_flatten(rc1.flex_group_root, "root"))), []
+      )
     self._check_scene(mjm, m, d, covers, extra=lambda m, d: bvh.refit_bvh(m, d, rc), rc=rc)
 
   @parameterized.named_parameters(*_FLEX_SHELL_CASES)
@@ -825,7 +822,7 @@ class DeterminismTest(parameterized.TestCase):
     self.assertIs(mjw.DeterminismType, DeterminismType)
     self.assertEqual(int(DeterminismType.NONE), 0)
     single = {name: int(flag) for name, flag in DeterminismType.__members__.items() if flag and not (flag & (flag - 1))}
-    self.assertEqual(single, {"CONTACTS": 1, "CONSTRAINT": 2, "ATOMICS": 4, "ISLANDS": 8})
+    self.assertEqual(single, {"CONTACTS": 1, "CONSTRAINT": 2, "ATOMICS": 4})
     self.assertEqual(int(DeterminismType.ALL), sum(single.values()))
 
   def test_option(self):
@@ -841,10 +838,10 @@ class DeterminismTest(parameterized.TestCase):
       (np.bool_(True), DeterminismType.ALL),
       (np.bool_(False), DeterminismType.NONE),
       (DeterminismType.ATOMICS, DeterminismType.ATOMICS),
-      (DeterminismType.CONTACTS | DeterminismType.ISLANDS, 9),
-      (~DeterminismType.CONTACTS, 14),
+      (DeterminismType.CONTACTS | DeterminismType.ATOMICS, 5),
+      (~DeterminismType.CONTACTS, 6),
       (np.int32(4), DeterminismType.ATOMICS),
-      (15, DeterminismType.ALL),
+      (7, DeterminismType.ALL),
       (-1, DeterminismType.ALL),
     ):
       m.opt.deterministic = value
@@ -852,11 +849,11 @@ class DeterminismTest(parameterized.TestCase):
       self.assertIs(type(m.opt.deterministic), int)
 
     m.opt.deterministic &= ~DeterminismType.ATOMICS
-    self.assertEqual(m.opt.deterministic, 11)
+    self.assertEqual(m.opt.deterministic, 3)
     m.opt.deterministic |= DeterminismType.ATOMICS
     self.assertEqual(m.opt.deterministic, DeterminismType.ALL)
 
-  @parameterized.parameters(16, 1 << 40, 1.5, 4.0, "ATOMICS")
+  @parameterized.parameters(8, 1 << 40, 1.5, 4.0, "ATOMICS")
   def test_option_invalid(self, value):
     """Option.deterministic rejects values that are not DeterminismType bitmasks."""
     _, _, m, _ = test_data.fixture(xml="<mujoco/>")
@@ -870,15 +867,15 @@ class DeterminismTest(parameterized.TestCase):
     ("bool_false", {"opt.deterministic": False}, DeterminismType.NONE),
     ("numpy_bool", {"opt.deterministic": np.bool_(True)}, DeterminismType.ALL),
     ("flag", {"opt.deterministic": DeterminismType.ATOMICS}, DeterminismType.ATOMICS),
-    ("complement", {"opt.deterministic": ~DeterminismType.CONTACTS}, 14),
+    ("complement", {"opt.deterministic": ~DeterminismType.CONTACTS}, 6),
     ("digits", {"opt.deterministic": "4"}, DeterminismType.ATOMICS),
     ("str_true", {"opt.deterministic": "true"}, DeterminismType.ALL),
     ("str_false", {"opt.deterministic": "False"}, DeterminismType.NONE),
     ("name", {"opt.deterministic": "atomics"}, DeterminismType.ATOMICS),
-    ("names", {"opt.deterministic": "contacts | islands"}, 9),
+    ("names", {"opt.deterministic": "contacts | atomics"}, 5),
     ("none", ["opt.deterministic = NONE"], DeterminismType.NONE),
     ("all", ["opt.deterministic=ALL"], DeterminismType.ALL),
-    ("negate", ["opt.deterministic=~CONTACTS|~ISLANDS"], DeterminismType.CONSTRAINT),
+    ("negate", ["opt.deterministic=~CONTACTS"], DeterminismType.CONSTRAINT),
     ("negate_and_set", ["opt.deterministic=~CONTACTS|ATOMICS"], 6),
   )
   def test_override_model(self, overrides, expected):
@@ -889,7 +886,7 @@ class DeterminismTest(parameterized.TestCase):
     self.assertEqual(m.opt.deterministic, expected)
     self.assertIs(type(m.opt.deterministic), int)
 
-  @parameterized.parameters("FOO", "~FOO", "ATOMICS|FOO", "16", "-1", "1.5", 16, 1 << 40)
+  @parameterized.parameters("FOO", "~FOO", "ATOMICS|FOO", "8", "-1", "1.5", 8, 1 << 40)
   def test_override_model_invalid(self, value):
     """override_model rejects unknown names and out of range values."""
     _, _, m, _ = test_data.fixture(xml="<mujoco/>")
@@ -902,7 +899,7 @@ class DeterminismTest(parameterized.TestCase):
     self.assertEqual(m.opt.deterministic, DeterminismType.ATOMICS)
     override_model(mjm, ["opt.deterministic=ALL"])
 
-  @parameterized.parameters(range(16))
+  @parameterized.parameters(range(8))
   def test_hooks(self, mask):
     """Sort hooks run iff their bit is set, as the last writer of their stage."""
     _, _, m, d = test_data.fixture(
@@ -938,8 +935,6 @@ class DeterminismTest(parameterized.TestCase):
       (collision_driver, "collision", "collision"),
       (constraint, "_sort_constraints", "constraint"),
       (constraint, "make_constraint", "make_constraint"),
-      (island, "_sort_islands", "islands"),
-      (island, "island", "island"),
     )
     with contextlib.ExitStack() as stack:
       for module, name, tag in spies:
@@ -949,11 +944,10 @@ class DeterminismTest(parameterized.TestCase):
 
     tags = [tag for tag, _, _ in events]
     self.assertTrue(all(same for _, same, _ in events))
-    self.assertEqual([tags.count(stage) for stage in ("collision", "contactfilter", "make_constraint", "island")], [2, 2, 1, 1])
+    self.assertEqual([tags.count(stage) for stage in ("collision", "contactfilter", "make_constraint")], [2, 2, 1])
     for hook, stage, bit in (
       ("contacts", "collision", DeterminismType.CONTACTS),
       ("constraint", "make_constraint", DeterminismType.CONSTRAINT),
-      ("islands", "island", DeterminismType.ISLANDS),
     ):
       self.assertEqual(tags.count(hook), tags.count(stage) if mask & bit else 0, hook)
       for i, tag in enumerate(tags):
@@ -970,13 +964,11 @@ class DeterminismTest(parameterized.TestCase):
       self.assertEqual(mode == _RUN_TO_RUN, atomics and name in _DET_FACTORIES, name)
 
   @parameterized.named_parameters(
-    ("default", {}, (2, 1, 1)),
-    ("contact_disabled", {"opt.disableflags": "CONTACT"}, (0, 1, 1)),
-    ("constraint_disabled", {"opt.disableflags": "CONSTRAINT"}, (0, 1, 1)),
-    ("island_disabled", {"opt.disableflags": "ISLAND"}, (1, 1, 0)),
-    ("sleep_disabled", {"opt.enableflags": 0}, (1, 1, 0)),
+    ("default", {}, (2, 1)),
+    ("contact_disabled", {"opt.disableflags": "CONTACT"}, (0, 1)),
+    ("constraint_disabled", {"opt.disableflags": "CONSTRAINT"}, (0, 1)),
     # contacts provided by the user are not sorted
-    ("user_contacts", {"opt.run_collision_detection": False}, (0, 1, 1)),
+    ("user_contacts", {"opt.run_collision_detection": False}, (0, 1)),
   )
   def test_hook_preconditions(self, overrides, ncalls):
     """Sort hooks are skipped with the stages that do not run."""
@@ -1006,10 +998,9 @@ class DeterminismTest(parameterized.TestCase):
     with (
       mock.patch.object(collision_driver, "_sort_contacts") as contacts,
       mock.patch.object(constraint, "_sort_constraints") as constraints,
-      mock.patch.object(island, "_sort_islands") as islands,
     ):
       mjw.forward(m, d)
-    self.assertEqual((contacts.call_count, constraints.call_count, islands.call_count), ncalls)
+    self.assertEqual((contacts.call_count, constraints.call_count), ncalls)
 
   @absltest.skipIf(not wp.get_device().is_cuda, "CUDA graph capture requires CUDA")
   @parameterized.parameters(True, False)

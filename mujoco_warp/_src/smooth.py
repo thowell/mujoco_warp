@@ -4346,11 +4346,11 @@ def _accumulate_jac_chain(
 
 
 @cache_kernel
-def _spatial_site_tendon(nv: int, deterministic: bool = False):
+def _spatial_site_tendon(max_ten_J_rownnz: int, deterministic: bool = False):
   module_options = {"enable_backward": False}
   if deterministic:
     module_options["deterministic"] = wp.DeterministicMode.RUN_TO_RUN
-    module_options["deterministic_max_records"] = 2 * nv
+    module_options["deterministic_max_records"] = 2 * max_ten_J_rownnz
 
   @wp.kernel(module="unique", module_options=module_options)
   def kernel(
@@ -4438,11 +4438,11 @@ def _spatial_site_tendon(nv: int, deterministic: bool = False):
 
 
 @cache_kernel
-def _spatial_geom_tendon(nv: int, deterministic: bool = False):
+def _spatial_geom_tendon(max_ten_J_rownnz: int, deterministic: bool = False):
   module_options = {"enable_backward": False}
   if deterministic:
     module_options["deterministic"] = wp.DeterministicMode.RUN_TO_RUN
-    module_options["deterministic_max_records"] = 4 * nv
+    module_options["deterministic_max_records"] = 4 * max_ten_J_rownnz
 
   @wp.kernel(module="unique", module_options=module_options)
   def kernel(
@@ -4864,7 +4864,7 @@ def tendon(m: Model, d: Data):
   det_atomics = bool(m.opt.deterministic & DeterminismType.ATOMICS)
   # process spatial site tendons
   wp.launch(
-    _spatial_site_tendon(m.nv if det_atomics else 0, det_atomics),
+    _spatial_site_tendon(m.max_ten_J_rownnz if det_atomics else 0, det_atomics),
     dim=(d.nworld, m.wrap_site_pair_adr.size),
     inputs=[
       m.body_parentid,
@@ -4888,7 +4888,7 @@ def tendon(m: Model, d: Data):
 
   # process spatial geom tendons
   wp.launch(
-    _spatial_geom_tendon(m.nv if det_atomics else 0, det_atomics),
+    _spatial_geom_tendon(m.max_ten_J_rownnz if det_atomics else 0, det_atomics),
     dim=(d.nworld, m.wrap_geom_adr.size),
     inputs=[
       m.body_parentid,
