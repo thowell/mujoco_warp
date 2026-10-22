@@ -16,7 +16,6 @@
 
 import contextlib
 import dataclasses
-import gc
 import inspect
 
 import numpy as np
@@ -55,7 +54,7 @@ def _weighted_loss_kernel(
   loss_out: wp.array[float],
 ):
   w, i = wp.tid()
-  wp.atomic_add(loss_out, 0, weights[w] * vec[w, i])
+  wp.atomic_add(loss_out, 0, weights[w] * vec[w, i])  # kernel_analyzer: ignore[atomic]
 
 
 @wp.kernel(module="unique")
@@ -93,6 +92,29 @@ def _axpy_kernel(
   y_out[w, i] += a * x[w, i]
 
 
+@wp.kernel(module="unique", enable_backward=False)
+def _square_kernel(
+  # In:
+  x: wp.array[float],
+  # Out:
+  y_out: wp.array[float],
+):
+  i = wp.tid()
+  y_out[i] = x[i] * x[i]
+
+
+@wp.kernel(module="unique", enable_backward=False)
+def _square_bwd_kernel(
+  # In:
+  x: wp.array[float],
+  y_grad: wp.array[float],
+  # Out:
+  x_grad_out: wp.array[float],
+):
+  i = wp.tid()
+  x_grad_out[i] += 2.0 * x[i] * y_grad[i]
+
+
 def _leaf_step(m, d, d_out=None):
   """Linear stand-in for `step`: qpos' = 2 qpos + 0.5 qvel + 3 body_mass[1]."""
   target = d if d_out is None else d_out
@@ -123,13 +145,6 @@ def _requires_grad(*arrays: wp.array):
   yield
   for a in arrays:
     a.requires_grad = False
-
-
-def _promote(*arrays: wp.array):
-  """Enables gradients on `arrays` as an earlier differentiable call would."""
-  for a in arrays:
-    a.requires_grad = True
-    diff._PROMOTED.add(a)
 
 
 def _register(fn, backward=None, **rule):
@@ -185,7 +200,6 @@ class DiffApiTest(parameterized.TestCase):
       if k not in _API_RULES:
         del diff.RULES[k], diff._PARAMS[k]
     diff.RULES.update(_API_RULES)
-    diff._PROMOTED.clear()
     for obj in (self.m, self.d, self.rc):
       for path in diff._FIELDS[type(obj)]:
         arr = diff.get(obj, path)
@@ -337,14 +351,24 @@ class DiffApiTest(parameterized.TestCase):
 
   @parameterized.parameters(*((cls, p) for cls, paths in diff._FIELDS.items() for p in paths))
   def test_field_requires_grad_raises_not_implemented(self, cls: type, path: str):
-    # Gradients on any field the rule does not list raise:
+    # Gradients on any field the rule does not list raise when accessed (or upfront if non-float):
     obj = {mjw.Model: self.m, mjw.Data: self.d, mjw.RenderContext: self.rc}[cls]
     arr = diff.get(obj, path)
     if not isinstance(arr, wp.array):
       self.skipTest(f"{cls.__name__} field '{path}' is not a Warp array.")
-    diff.register_adjoint("render", lambda *args: None)
+
+    def use_field(m, d, rc):
+      if diff._is_float(arr) and arr.size > 0:
+        wp.copy(arr, arr)
+
+    wrapped = _register(use_field, lambda *args: None)
     with _requires_grad(arr):
-      self._assert_not_supported(f"'render' with {cls.__name__} field '{path}'", mjw.render, self.m, self.d, self.rc)
+      if not diff._is_float(arr):
+        self._assert_not_supported(f"'use_field' with {cls.__name__} field '{path}'", wrapped, self.m, self.d, self.rc)
+      elif arr.size > 0:
+        self._assert_not_supported(
+          f"'use_field' is not supported: it accesses {cls.__name__} field '{path}'", wrapped, self.m, self.d, self.rc
+        )
 
   @parameterized.parameters(
     ("m", "body_mass", None),
@@ -360,14 +384,14 @@ class DiffApiTest(parameterized.TestCase):
     ("rc_extra", "lower", "RenderContext"),
   )
   def test_container_roles(self, arg: str, path: str, error: str | None):
-    calls = []
-
     def roles(m, d, d_mid, d_out, m_extra, rc, rc_extra):
-      calls.append(1)
+      if error is not None:
+        arr_arg = diff.get(containers[arg], path)
+        wp.copy(arr_arg, arr_arg)
 
     # The first Model, the first Data, the last Data, and the first RenderContext have the model,
-    # input, output, and render roles; other containers have no role. Errors raise before the
-    # forward runs:
+    # input, output, and render roles; other containers have no role. Accessing a field on a
+    # container without the matching role raises:
     wrapped = _register(
       roles,
       lambda *args, **kwargs: None,
@@ -390,10 +414,9 @@ class DiffApiTest(parameterized.TestCase):
       if error is None:
         wrapped(**containers)
       else:
-        with self.assertRaisesRegex(NotImplementedError, f"'roles' with {error} field '{path}'"):
+        with self.assertRaisesRegex(NotImplementedError, f"it accesses {error} field '{path}'"):
           wrapped(**containers)
     self.assertEqual(arr in tape.gradients, error is None)
-    self.assertEqual(calls, [1] if error is None else [])
 
   def test_array_args(self):
     def scale(m, d, x, y, z=None):
@@ -480,11 +503,11 @@ class DiffApiTest(parameterized.TestCase):
 
     wrapped = _register(checked, lambda *args, **kwargs: None, in_fields=("qpos",), supported=supported)
 
-    # Untaped calls skip supported; under a tape, field validation runs before supported:
-    with _requires_grad(self.d.qvel):
+    # Untaped calls skip supported; under a tape, non-float field validation runs before supported:
+    with _requires_grad(self.d.nefc):
       self.assertEqual(wrapped(self.m, self.d, reasons="unsupported"), "ok")
       self.assertFalse(self.d.qpos.requires_grad)
-      self._assert_not_supported("Data field 'qvel'", wrapped, self.m, self.d, reasons="unsupported")
+      self._assert_not_supported("Data field 'nefc'", wrapped, self.m, self.d, reasons="unsupported")
     self.assertEmpty(tapes)
 
     # supported receives the call arguments, and its reasons raise before promotion:
@@ -540,12 +563,11 @@ class DiffApiTest(parameterized.TestCase):
     unpromoted = (self.d.nefc, self.d.ten_length, self.d.qacc, d_out.qpos, self.m.body_mass)
     with _requires_grad(self.d.qvel), wp.Tape() as tape:
       wrapped(self.m, self.d, self.rc, x, y, d_out=d_out)
-      # Arrays with user-enabled gradients are tracked but not promoted:
+      # Arrays with user-enabled gradients are tracked alongside promoted ones:
       self.assertCountEqual(map(id, tape.gradients), map(id, (*promoted, self.d.qvel, y)))
     self.assertEqual(seen, [True])
     self.assertTrue(all(a.requires_grad for a in promoted))
     self.assertFalse(any(a.requires_grad for a in unpromoted))
-    self.assertCountEqual(map(id, diff._PROMOTED), map(id, promoted))
 
     # Promoted gradients persist across calls, and Model fields are tracked when enabled:
     grads = [a.grad for a in promoted]
@@ -561,16 +583,6 @@ class DiffApiTest(parameterized.TestCase):
       with wp.Tape():
         wrapped(self.m, self.d, self.rc, x, **kwargs)
     self.assertTrue(self.d.qacc.requires_grad and d_shared.qacc.requires_grad)
-
-    # Promoted arrays are weakly referenced:
-    num_promoted = len(diff._PROMOTED)
-    d_temp = mjw.make_data(self.mjm)
-    with wp.Tape():
-      wrapped(self.m, d_temp, self.rc, x)
-    self.assertGreater(len(diff._PROMOTED), num_promoted)
-    del d_temp
-    gc.collect()
-    self.assertLen(diff._PROMOTED, num_promoted)
 
     # A rule with only integer and empty fields tracks no arrays, even when the user enables
     # gradients on an empty field, and still runs its backward:
@@ -600,10 +612,11 @@ class DiffApiTest(parameterized.TestCase):
       elif mode == "nested":
         mjw.kinematics(m, d)
 
-    # Fields promoted by an earlier call but not differentiated by this rule are allowed unless
-    # read or written, including by API functions the forward calls (which pass through); accesses
-    # raise and leave the tape unchanged (custom and native rules):
-    _promote(self.d.qvel, self.rc.lower)
+    # Float fields with gradients not differentiated by this rule are allowed unless read or
+    # written, including by API functions the forward calls (which pass through); accesses raise
+    # and leave the tape unchanged (custom and native rules):
+    self.d.qvel.requires_grad = True
+    self.rc.lower.requires_grad = True
     for backward in (lambda *args: None, None):
       wrapped = _register(deps, backward, in_fields=("qpos",), out_fields=("qacc",), render_fields=("upper",))
       for mode in ("unaccessed", "zero_dim"):
@@ -792,6 +805,7 @@ class DiffApiTest(parameterized.TestCase):
     def _fk_bwd(m_arg, d_arg):
       mjw.kinematics(m_arg, d_arg)
       wp.launch(_fk_bwd_kernel, dim=nworld, inputs=[d_arg.site_xpos.grad], outputs=[d_arg.qpos.grad])
+      d_arg.site_xpos.grad.zero_()
 
     depth_seeds = []
     diff.register_adjoint(
@@ -844,6 +858,44 @@ class DiffApiTest(parameterized.TestCase):
     np.testing.assert_allclose(m.body_mass.grad.numpy()[0, 1], 6.0 * np.sum(scales), atol=1e-6)
     if nworld == 2:
       self.assertFalse(np.allclose(d.qpos.grad.numpy()[0], d.qpos.grad.numpy()[1]))
+
+  def test_overwritten_output(self):
+    def overwrite(x, y):
+      wp.launch(_scale_kernel, dim=x.shape, inputs=[x], outputs=[y])
+
+    def backward(x, y):
+      wp.launch(_axpy_kernel, dim=x.shape, inputs=[2.0, y.grad], outputs=[x.grad])
+      y.grad.zero_()  # The forward replaced y; its old value had no effect.
+
+    overwrite = _register(overwrite, backward, array_args=("x", "y"))
+    x = wp.full((1, 1), 2.0, dtype=float, requires_grad=True)
+    z = wp.full((1, 1), 3.0, dtype=float, requires_grad=True)
+    y = wp.zeros_like(x, requires_grad=True)
+    loss = wp.zeros(1, dtype=float, requires_grad=True)
+    one = wp.ones(1, dtype=float)
+    three = wp.full(1, 3.0, dtype=float)
+
+    with wp.Tape() as tape:
+      overwrite(x, y)  # y = 2 * x
+      wp.launch(_weighted_loss_kernel, dim=x.shape, inputs=[y, one], outputs=[loss])
+      overwrite(z, y)  # y = 2 * z, overwriting the same buffer
+      wp.launch(_weighted_loss_kernel, dim=x.shape, inputs=[y, three], outputs=[loss])
+      wp.launch(_weighted_loss_kernel, dim=x.shape, inputs=[x, one], outputs=[loss])
+
+    tape.backward(loss=loss)
+    # L = 2 * x + 3 * (2 * z) + x = 3 * x + 6 * z:
+    np.testing.assert_allclose(loss.numpy(), 24.0)
+    np.testing.assert_allclose(x.grad.numpy(), 3.0)
+    np.testing.assert_allclose(z.grad.numpy(), 6.0)
+    np.testing.assert_allclose(y.grad.numpy(), 0.0)
+
+    # Custom rules suppress verify_autograd_array_access during their internal forward launches:
+    wp.config.verify_autograd_array_access = True
+    diff.register_adjoint("step", _leaf_step_bwd, in_fields=("qpos", "qvel"))
+    with wp.Tape() as tape:
+      mjw.step(self.m, self.d)
+    wp.config.verify_autograd_array_access = False
+    self.assertFalse(self.d.qpos._is_read)
 
   @parameterized.parameters(1, 2)
   def test_finite_difference_jacobian(self, nworld: int):
@@ -961,6 +1013,46 @@ class DiffApiTest(parameterized.TestCase):
       np.testing.assert_allclose(d_new.qvel.numpy(), 1.0)
       np.testing.assert_allclose(d_new.qpos.grad.numpy(), 6.0)
     self.assertLen(calls, 2)
+
+    # Nonlinear checkpoint replay in eager mode and inside a captured CUDA graph:
+    def square_fn(x, y):
+      wp.launch(_square_kernel, dim=x.shape, inputs=[x], outputs=[y])
+
+    def square_bwd(x, y):
+      wp.launch(_square_bwd_kernel, dim=x.shape, inputs=[x, y.grad], outputs=[x.grad])
+      y.grad.zero_()
+
+    square = _register(square_fn, square_bwd, array_args=("x", "y"))
+    x = wp.zeros(1, dtype=float, requires_grad=True)
+    y = wp.zeros_like(x, requires_grad=True)
+    seed = wp.zeros_like(x, requires_grad=False)
+    checkpoints = [wp.empty_like(x, requires_grad=False) for _ in range(2)]
+
+    def checkpointed_replay():
+      x.fill_(2.0)
+      seed.fill_(1.0)
+      for saved in checkpoints:
+        wp.copy(saved, x)
+        square(x, y)
+        wp.copy(x, y)
+      for saved in reversed(checkpoints):
+        wp.copy(x, saved)
+        with wp.Tape() as replay:
+          square(x, y)
+        replay.zero()
+        replay.backward(grads={y: seed})
+        wp.copy(seed, x.grad)
+
+    checkpointed_replay()
+    np.testing.assert_allclose(seed.numpy(), 32.0)
+    wp.synchronize()
+
+    with wp.ScopedCapture() as capture:
+      checkpointed_replay()
+
+    for _ in range(2):
+      wp.capture_launch(capture.graph)
+      np.testing.assert_allclose(seed.numpy(), 32.0)
 
 
 if __name__ == "__main__":

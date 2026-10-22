@@ -128,4 +128,6 @@ from mujoco_warp._src.types import SolverType as SolverType
 from mujoco_warp._src.types import State as State
 from mujoco_warp._src.types import TrnType as TrnType
 
-_differentiable(globals())
+# Wrap all public API functions exported by this module.
+# Internal module bindings stay unchanged; register adjoint rules after this call.
+_differentiable(locals())
