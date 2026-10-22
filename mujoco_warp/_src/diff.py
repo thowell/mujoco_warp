@@ -24,7 +24,6 @@ validated and recorded with either a custom backward or their native kernel adjo
 import dataclasses
 import functools
 import inspect
-import weakref
 from typing import Callable, Sequence
 
 import warp as wp
@@ -39,11 +38,15 @@ class _ScratchTape(wp.Tape):
   """Tape a wrapped forward runs on; wrapped functions it calls pass through as if untaped."""
 
 
-def _call(tape: wp.Tape | None, fn: Callable, *args, **kwargs):
+def _call(tape: wp.Tape | None, fn: Callable, *args, verify_access: bool = True, **kwargs):
   """Calls `fn` with `tape` as the active Warp tape (`None` pauses recording)."""
-  prev, wp_context.runtime.tape = wp_context.runtime.tape, tape
+  prev_tape, wp_context.runtime.tape = wp_context.runtime.tape, tape
+  prev_verify = wp.config.verify_autograd_array_access
+  if not verify_access:
+    wp.config.verify_autograd_array_access = False
   result = fn(*args, **kwargs)
-  wp_context.runtime.tape = prev
+  wp_context.runtime.tape = prev_tape
+  wp.config.verify_autograd_array_access = prev_verify
   return result
 
 
@@ -136,7 +139,6 @@ class AdjointRule:
 
 RULES: dict[str, AdjointRule | None] = {}  # wrapped function name -> rule
 _PARAMS: dict[str, tuple[str, ...]] = {}  # wrapped function name -> parameter names
-_PROMOTED: weakref.WeakSet[wp.array] = weakref.WeakSet()  # arrays with gradients enabled by a rule, not the user
 
 
 def register_adjoint(
@@ -218,8 +220,8 @@ def _wrap(fn: Callable) -> Callable:
       ):
         raise NotImplementedError(f"Differentiation of '{name}' with array argument '{k}' is not supported.")
 
-    # Container fields with gradients must be float fields of the rule. Fields promoted by an
-    # earlier call (`foreign`) are exempt unless this call reads or writes them (checked below):
+    # Container fields with gradients must be float fields of the rule; other float fields with
+    # gradients (`foreign`) are allowed unless this call reads or writes them (checked below):
     foreign = []
     for cls, cs in objs.items():
       for c in cs:
@@ -228,7 +230,7 @@ def _wrap(fn: Callable) -> Callable:
           if not isinstance(arr, wp.array) or not arr.requires_grad or (id(arr) in allowed and _is_float(arr)):
             continue
           label = f"{cls.__name__} field '{path}'"
-          if arr not in _PROMOTED:
+          if not _is_float(arr):
             raise NotImplementedError(f"Differentiation of '{name}' with {label} is not supported.")
           foreign.append((label, arr))
 
@@ -240,12 +242,11 @@ def _wrap(fn: Callable) -> Callable:
     for arr in promote:
       if not arr.requires_grad:
         arr.requires_grad = True
-        _PROMOTED.add(arr)
 
     # The forward runs on a scratch tape, whose launches are checked before native rules append
     # them to `tape`; custom rules record their backward instead:
     fwd_tape = _ScratchTape()
-    result = _call(fwd_tape, fn, *args, **kwargs)
+    result = _call(fwd_tape, fn, *args, verify_access=rule.backward is None, **kwargs)
     launches = fwd_tape.launches
 
     # Reading a foreign field would drop its gradient, and writing it would send this call's output
@@ -254,7 +255,7 @@ def _wrap(fn: Callable) -> Callable:
     for label, arr in foreign:
       if id(arr) in accessed:
         raise NotImplementedError(
-          f"Differentiation of '{name}' is not supported: it accesses {label}, which an earlier call differentiates."
+          f"Differentiation of '{name}' is not supported: it accesses {label}, which is not declared by this rule."
         )
     if rule.backward is None and not all(map(_has_adjoint, launches)):
       raise NotImplementedError(f"Differentiation of '{name}' requires a backward rule.")
