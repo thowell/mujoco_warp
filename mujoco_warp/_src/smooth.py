@@ -14,6 +14,8 @@
 # ==============================================================================
 
 
+from typing import Optional
+
 import warp as wp
 
 from mujoco_warp._src import math
@@ -810,12 +812,16 @@ def com_pos(m: Model, d: Data):
   """
   wp.launch(_subtree_com_init, dim=(d.nworld, m.nbody), inputs=[m.body_mass, d.xipos], outputs=[d.subtree_com])
 
+  det_atomics = bool(m.opt.deterministic & DeterminismType.ATOMICS)
+  subtree_com_in = wp.empty_like(d.subtree_com) if det_atomics else d.subtree_com
   for i in reversed(range(len(m.body_tree))):
     body_tree = m.body_tree[i]
+    if det_atomics:
+      wp.copy(subtree_com_in, d.subtree_com)
     wp.launch(
-      _subtree_com_acc(bool(m.opt.deterministic & DeterminismType.ATOMICS)),
+      _subtree_com_acc(det_atomics),
       dim=(d.nworld, body_tree.size),
-      inputs=[m.body_parentid, d.subtree_com, body_tree],
+      inputs=[m.body_parentid, subtree_com_in, body_tree],
       outputs=[d.subtree_com],
     )
 
@@ -1072,12 +1078,16 @@ def crb(m: Model, d: Data):
   """
   wp.copy(d.crb, d.cinert)
 
+  det_atomics = bool(m.opt.deterministic & DeterminismType.ATOMICS)
+  crb_in = wp.empty_like(d.crb) if det_atomics else d.crb
   for i in reversed(range(len(m.body_tree))):
     body_tree = m.body_tree[i]
+    if det_atomics:
+      wp.copy(crb_in, d.crb)
     wp.launch(
-      _crb_accumulate(bool(m.opt.deterministic & DeterminismType.ATOMICS)),
+      _crb_accumulate(det_atomics),
       dim=(d.nworld, body_tree.size),
-      inputs=[m.body_parentid, d.crb, body_tree],
+      inputs=[m.body_parentid, crb_in, body_tree],
       outputs=[d.crb],
     )
 
@@ -1211,10 +1221,29 @@ def _qLD_acc(nv: int, deterministic: bool = False):
     for j in range(M_rownnz[i]):
       # M(i,j) -= M(k,j) * tmp
       wp.atomic_sub(L_out[worldid], Madr_i + j, L_in[worldid, M_rowadr[k] + j] * tmp)
-    # M(k,i) = tmp
-    L_out[worldid, Madr_ki] = tmp
+    if wp.static(not deterministic):
+      # M(k,i) = tmp
+      L_out[worldid, Madr_ki] = tmp
 
   return kernel
+
+
+@wp.kernel
+def _qLD_scale(
+  # Model:
+  M_rownnz: wp.array[int],
+  M_rowadr: wp.array[int],
+  # In:
+  qLD_updates_: wp.array[wp.vec3i],
+  L_in: wp.array2d[float],
+  # Out:
+  L_out: wp.array2d[float],
+):
+  worldid, nodeid = wp.tid()
+  update = qLD_updates_[nodeid]
+  k, Madr_ki = update[1], update[2]
+  diag_k = M_rowadr[k] + M_rownnz[k] - 1
+  L_out[worldid, Madr_ki] = L_in[worldid, Madr_ki] / L_in[worldid, diag_k]
 
 
 @wp.kernel
@@ -1237,14 +1266,24 @@ def _factor_i_sparse(m: Model, d: Data, M: wp.array2d[float], L: wp.array2d[floa
   wp.copy(L, M)
 
   det_atomics = bool(m.opt.deterministic & DeterminismType.ATOMICS)
+  L_in = wp.empty_like(L) if det_atomics else L
   for i in reversed(range(len(m.qLD_updates))):
     qLD_updates = m.qLD_updates[i]
+    if det_atomics:
+      wp.copy(L_in, L)
     wp.launch(
       _qLD_acc(m.nv if det_atomics else 0, det_atomics),
       dim=(d.nworld, qLD_updates.size),
-      inputs=[m.M_rownnz, m.M_rowadr, qLD_updates, L],
+      inputs=[m.M_rownnz, m.M_rowadr, qLD_updates, L_in],
       outputs=[L],
     )
+    if det_atomics:
+      wp.launch(
+        _qLD_scale,
+        dim=(d.nworld, qLD_updates.size),
+        inputs=[m.M_rownnz, m.M_rowadr, qLD_updates, L_in],
+        outputs=[L],
+      )
 
   wp.launch(_qLDiag_div, dim=(d.nworld, m.nv), inputs=[m.M_rownnz, m.M_rowadr, L], outputs=[D])
 
@@ -1500,11 +1539,15 @@ def _cfrc_backward(deterministic: bool = False):
 
 
 def _rne_cfrc_backward(m: Model, d: Data):
+  det_atomics = bool(m.opt.deterministic & DeterminismType.ATOMICS)
+  cfrc_int_in = wp.empty_like(d.cfrc_int) if det_atomics else d.cfrc_int
   for body_tree in reversed(m.body_tree):
+    if det_atomics:
+      wp.copy(cfrc_int_in, d.cfrc_int)
     wp.launch(
-      _cfrc_backward(bool(m.opt.deterministic & DeterminismType.ATOMICS)),
+      _cfrc_backward(det_atomics),
       dim=[d.nworld, body_tree.size],
-      inputs=[m.body_parentid, d.cfrc_int, body_tree],
+      inputs=[m.body_parentid, cfrc_int_in, body_tree],
       outputs=[d.cfrc_int],
     )
 
@@ -3611,23 +3654,27 @@ def _solve_LD_sparse(
   D: wp.array2d[float],
   x: wp.array2d[float],
   y: wp.array2d[float],
+  x_scratch: Optional[wp.array] = None,
 ):
   """Computes sparse backsubstitution: x = inv(L'*D*L)*y."""
   if m.opt.deterministic & DeterminismType.ATOMICS:
+    x_in = x_scratch if x_scratch is not None else wp.empty_like(x)
     wp.launch(_solve_LD_sparse_copy, dim=(d.nworld, m.nv), inputs=[m.qLD_block_adr, y], outputs=[x])
     for qLD_updates in reversed(m.qLD_updates):
+      wp.copy(x_in, x)
       wp.launch(
         _solve_LD_sparse_level(True, True),
         dim=(d.nworld, qLD_updates.size),
-        inputs=[L, qLD_updates, x],
+        inputs=[L, qLD_updates, x_in],
         outputs=[x],
       )
     wp.launch(_solve_LD_sparse_diag, dim=(d.nworld, m.nv), inputs=[m.qLD_block_adr, D, x], outputs=[x])
     for qLD_updates in m.qLD_updates:
+      wp.copy(x_in, x)
       wp.launch(
         _solve_LD_sparse_level(False, True),
         dim=(d.nworld, qLD_updates.size),
-        inputs=[L, qLD_updates, x],
+        inputs=[L, qLD_updates, x_in],
         outputs=[x],
       )
     return
@@ -3768,6 +3815,7 @@ def solve_LD(
   D: wp.array2d[float],
   x: wp.array2d[float],
   y: wp.array2d[float],
+  x_scratch: Optional[wp.array] = None,
 ):
   """Computes backsubstitution for the inertia factorization.
 
@@ -3781,15 +3829,16 @@ def solve_LD(
     D: Reciprocal diagonal for compact and sparse blocks.
     x: Output array for the solution.
     y: Input right-hand side array.
+    x_scratch: Preallocated scratch array for deterministic sparse backsubstitution.
   """
   if m.M_tiles:
     _solve_blocks(m, d, L, D, x, y)
   if L.shape[1] > m.qLD_block_total:
-    _solve_LD_sparse(m, d, L[:, m.qLD_block_total :], D, x, y)
+    _solve_LD_sparse(m, d, L[:, m.qLD_block_total :], D, x, y, x_scratch=x_scratch)
 
 
 @event_scope
-def solve_m(m: Model, d: Data, x: wp.array2d[float], y: wp.array2d[float]):
+def solve_m(m: Model, d: Data, x: wp.array2d[float], y: wp.array2d[float], x_scratch: Optional[wp.array] = None):
   """Computes backsubstitution: x = qLD * y.
 
   Args:
@@ -3797,8 +3846,9 @@ def solve_m(m: Model, d: Data, x: wp.array2d[float], y: wp.array2d[float]):
     d: The data object containing factorization results.
     x: Output array for the solution.
     y: Input right-hand side array.
+    x_scratch: Preallocated scratch array for deterministic sparse backsubstitution.
   """
-  solve_LD(m, d, d.qLD, d.qLDiagInv, x, y)
+  solve_LD(m, d, d.qLD, d.qLDiagInv, x, y, x_scratch=x_scratch)
 
 
 @cache_kernel
@@ -4139,11 +4189,50 @@ def _linear_momentum(deterministic: bool = False):
     if bodyid:
       pid = body_parentid[bodyid]
       wp.atomic_add(subtree_linvel_out[worldid], pid, linvel)
-    subtree_linvel_out[worldid, bodyid] = linvel / wp.max(
-      MJ_MINVAL, body_subtreemass[worldid % body_subtreemass.shape[0], bodyid]
-    )
+    if wp.static(not deterministic):
+      subtree_linvel_out[worldid, bodyid] = linvel / wp.max(
+        MJ_MINVAL, body_subtreemass[worldid % body_subtreemass.shape[0], bodyid]
+      )
 
   return kernel
+
+
+@wp.kernel
+def _linear_momentum_div(
+  # Model:
+  body_subtreemass: wp.array2d[float],
+  # Data in:
+  subtree_linvel_in: wp.array2d[wp.vec3],
+  # Data out:
+  subtree_linvel_out: wp.array2d[wp.vec3],
+):
+  worldid, bodyid = wp.tid()
+  subtree_linvel_out[worldid, bodyid] = subtree_linvel_in[worldid, bodyid] / wp.max(
+    MJ_MINVAL, body_subtreemass[worldid % body_subtreemass.shape[0], bodyid]
+  )
+
+
+@wp.kernel
+def _angular_momentum_body(
+  # Model:
+  body_mass: wp.array2d[float],
+  # Data in:
+  xipos_in: wp.array2d[wp.vec3],
+  subtree_com_in: wp.array2d[wp.vec3],
+  subtree_linvel_in: wp.array2d[wp.vec3],
+  subtree_angmom_in: wp.array2d[wp.vec3],
+  # In:
+  subtree_bodyvel_in: wp.array2d[wp.spatial_vector],
+  # Data out:
+  subtree_angmom_out: wp.array2d[wp.vec3],
+):
+  worldid, bodyid = wp.tid()
+  if bodyid == 0:
+    return
+  dx = xipos_in[worldid, bodyid] - subtree_com_in[worldid, bodyid]
+  dv = wp.spatial_bottom(subtree_bodyvel_in[worldid, bodyid]) - subtree_linvel_in[worldid, bodyid]
+  dp = dv * body_mass[worldid % body_mass.shape[0], bodyid]
+  subtree_angmom_out[worldid, bodyid] = subtree_angmom_in[worldid, bodyid] + wp.cross(dx, dp)
 
 
 @cache_kernel
@@ -4177,24 +4266,28 @@ def _angular_momentum(deterministic: bool = False):
 
     pid = body_parentid[bodyid]
 
-    xipos = xipos_in[worldid, bodyid]
     com = subtree_com_in[worldid, bodyid]
     com_parent = subtree_com_in[worldid, pid]
-    vel = subtree_bodyvel_in[worldid, bodyid]
     linvel = subtree_linvel_in[worldid, bodyid]
     linvel_parent = subtree_linvel_in[worldid, pid]  # Data field
-    mass = body_mass[worldid % body_mass.shape[0], bodyid]
     subtreemass = body_subtreemass[worldid % body_subtreemass.shape[0], bodyid]
 
-    # momentum wrt body i
-    dx = xipos - com
-    dv = wp.spatial_bottom(vel) - linvel
-    dp = dv * mass
-    dL = wp.cross(dx, dp)
+    if wp.static(deterministic):
+      angmom = subtree_angmom_in[worldid, bodyid]
+    else:
+      xipos = xipos_in[worldid, bodyid]
+      vel = subtree_bodyvel_in[worldid, bodyid]
+      mass = body_mass[worldid % body_mass.shape[0], bodyid]
 
-    # add to subtree i
-    angmom = subtree_angmom_in[worldid, bodyid] + dL
-    subtree_angmom_out[worldid, bodyid] = angmom
+      # momentum wrt body i
+      dx = xipos - com
+      dv = wp.spatial_bottom(vel) - linvel
+      dp = dv * mass
+      dL = wp.cross(dx, dp)
+
+      # add to subtree i
+      angmom = subtree_angmom_in[worldid, bodyid] + dL
+      subtree_angmom_out[worldid, bodyid] = angmom
 
     # momentum wrt parent
     dx = com - com_parent
@@ -4224,18 +4317,38 @@ def subtree_vel(m: Model, d: Data):
     outputs=[d.subtree_linvel, d.subtree_angmom, subtree_bodyvel],
   )
 
+  det_atomics = bool(m.opt.deterministic & DeterminismType.ATOMICS)
+  subtree_vec_in = wp.empty_like(d.subtree_linvel) if det_atomics else None
+
   # sum body linear momentum recursively up the kinematic tree
   for body_tree in reversed(m.body_tree):
+    if det_atomics:
+      wp.copy(subtree_vec_in, d.subtree_linvel)
     wp.launch(
-      _linear_momentum(bool(m.opt.deterministic & DeterminismType.ATOMICS)),
+      _linear_momentum(det_atomics),
       dim=[d.nworld, body_tree.size],
-      inputs=[m.body_parentid, m.body_subtreemass, d.subtree_linvel, body_tree],
+      inputs=[m.body_parentid, m.body_subtreemass, subtree_vec_in if det_atomics else d.subtree_linvel, body_tree],
       outputs=[d.subtree_linvel],
+    )
+  if det_atomics:
+    wp.launch(
+      _linear_momentum_div,
+      dim=(d.nworld, m.nbody),
+      inputs=[m.body_subtreemass, d.subtree_linvel],
+      outputs=[d.subtree_linvel],
+    )
+    wp.launch(
+      _angular_momentum_body,
+      dim=(d.nworld, m.nbody),
+      inputs=[m.body_mass, d.xipos, d.subtree_com, d.subtree_linvel, d.subtree_angmom, subtree_bodyvel],
+      outputs=[d.subtree_angmom],
     )
 
   for body_tree in reversed(m.body_tree):
+    if det_atomics:
+      wp.copy(subtree_vec_in, d.subtree_angmom)
     wp.launch(
-      _angular_momentum(bool(m.opt.deterministic & DeterminismType.ATOMICS)),
+      _angular_momentum(det_atomics),
       dim=[d.nworld, body_tree.size],
       inputs=[
         m.body_parentid,
@@ -4244,7 +4357,7 @@ def subtree_vel(m: Model, d: Data):
         d.xipos,
         d.subtree_com,
         d.subtree_linvel,
-        d.subtree_angmom,
+        subtree_vec_in if det_atomics else d.subtree_angmom,
         subtree_bodyvel,
         body_tree,
       ],

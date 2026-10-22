@@ -677,12 +677,16 @@ def set_const_fixed(m: types.Model, d: types.Data):
   """
   nworld_subtreemass = m.body_subtreemass.shape[0]
   wp.launch(_init_subtreemass, dim=(nworld_subtreemass, m.nbody), inputs=[m.body_mass], outputs=[m.body_subtreemass])
+  det_atomics = bool(m.opt.deterministic & types.DeterminismType.ATOMICS)
+  subtreemass_in = wp.empty_like(m.body_subtreemass) if det_atomics else m.body_subtreemass
   for i in reversed(range(len(m.body_tree))):
     body_tree = m.body_tree[i]
+    if det_atomics:
+      wp.copy(subtreemass_in, m.body_subtreemass)
     wp.launch(
-      _accumulate_subtreemass(bool(m.opt.deterministic & types.DeterminismType.ATOMICS)),
+      _accumulate_subtreemass(det_atomics),
       dim=(nworld_subtreemass, body_tree.size),
-      inputs=[m.body_parentid, m.body_subtreemass, body_tree],
+      inputs=[m.body_parentid, subtreemass_in, body_tree],
       outputs=[m.body_subtreemass],
     )
 

@@ -2680,6 +2680,7 @@ class SolverContext:
   # inside wp.capture_while where memory cannot be allocated (None otherwise)
   efm_con: Optional[tuple] = None
   flex_scratch: Optional[tuple] = None
+  solve_ld_scratch: Optional[wp.array] = None
 
 
 @dataclasses.dataclass

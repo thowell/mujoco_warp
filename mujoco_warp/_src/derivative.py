@@ -614,11 +614,15 @@ def deriv_rne_vel(m: Model, d: Data, out: wp.array2d[float]):
     )
 
   # Backward pass: accumulate Dcfrcbody from children to parents
+  det_atomics = bool(m.opt.deterministic & DeterminismType.ATOMICS)
+  Dcfrcbody_in = wp.empty_like(Dcfrcbody) if det_atomics else Dcfrcbody
   for body_tree in reversed(m.body_tree):
+    if det_atomics:
+      wp.copy(Dcfrcbody_in, Dcfrcbody)
     wp.launch(
-      deriv_rne_cfrcbody_backward(bool(m.opt.deterministic & DeterminismType.ATOMICS)),
+      deriv_rne_cfrcbody_backward(det_atomics),
       dim=(d.nworld, body_tree.size, m.nv),
-      inputs=[m.body_parentid, body_tree, Dcfrcbody],
+      inputs=[m.body_parentid, body_tree, Dcfrcbody_in],
       outputs=[Dcfrcbody],
     )
 
@@ -4067,6 +4071,7 @@ def eff_prec(
   res: wp.array2d[float],
   vec: wp.array2d[float],
   epL: Optional[wp.array] = None,
+  x_scratch: Optional[wp.array] = None,
 ):
   """Preconditions residual vector using 3x3 flex block Cholesky and backbone qHLD."""
   if m.efm0_active:
@@ -4077,7 +4082,7 @@ def eff_prec(
         inputs=[m.nv, m.efm_dofblk, vec],
         outputs=[res],
       )
-      smooth.solve_LD(m, d, d.qHLD, d.qHDiagInv, res, res)
+      smooth.solve_LD(m, d, d.qHLD, d.qHDiagInv, res, res, x_scratch=x_scratch)
     wp.launch(
       _eff_prec_efm0_solve,
       dim=d.nworld,
@@ -4124,7 +4129,7 @@ def eff_prec(
     inputs=[m.nv, dofblk, vec],
     outputs=[res],
   )
-  smooth.solve_LD(m, d, d.qHLD, d.qHDiagInv, res, res)
+  smooth.solve_LD(m, d, d.qHLD, d.qHDiagInv, res, res, x_scratch=x_scratch)
   wp.launch(
     _eff_block_solve,
     dim=(d.nworld, m.nefmdof),
@@ -4194,8 +4199,13 @@ def eff_solve(m: Model, d: Data, qacc: wp.array2d[float], qfrc: Optional[wp.arra
   efm_iter.zero_()
   # allocated here since _pcg_iteration may run inside wp.capture_while
   efm_con, flex_scratch = eff_mul_m_scratch(m, d)
+  solve_ld_scratch = (
+    wp.empty((d.nworld, m.nv), dtype=float)
+    if (m.opt.deterministic & DeterminismType.ATOMICS) and d.qHLD.shape[1] > m.qLD_block_total
+    else None
+  )
 
-  eff_prec(m, d, efm_z, rhs)
+  eff_prec(m, d, efm_z, rhs, x_scratch=solve_ld_scratch)
   wp.launch_tiled(
     _pcg_init_tiled,
     dim=d.nworld,
@@ -4242,7 +4252,7 @@ def eff_solve(m: Model, d: Data, qacc: wp.array2d[float], qfrc: Optional[wp.arra
       ],
       block_dim=m.block_dim.eff_pcg,
     )
-    eff_prec(m, d, efm_z, efm_r)
+    eff_prec(m, d, efm_z, efm_r, x_scratch=solve_ld_scratch)
     wp.launch_tiled(
       _pcg_beta_and_p_update_tiled,
       dim=d.nworld,
