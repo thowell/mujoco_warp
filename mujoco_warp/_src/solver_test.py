@@ -440,7 +440,6 @@ class SolverTest(parameterized.TestCase):
         wp.zeros((1, 1), dtype=float),
         wp.zeros((1, 1), dtype=float),
         wp.zeros((1, 1), dtype=float),
-        wp.zeros((1, 1), dtype=float),
         wp.array([1.0], dtype=float),
         wp.array([1.0], dtype=float),
         wp.array([1.0], dtype=float),
@@ -470,7 +469,6 @@ class SolverTest(parameterized.TestCase):
         wp.array([1.0e-6], dtype=float),
         100,
         wp.array([1.0], dtype=float),
-        wp.zeros((1, 1), dtype=float),
         wp.zeros((1, 1), dtype=float),
         wp.zeros((1, 1), dtype=float),
         wp.zeros((1, 1), dtype=float),
@@ -2201,7 +2199,7 @@ class SolverTest(parameterized.TestCase):
     nworld=(1, 2),
   )
   def test_discrete_cg_parity_and_empty_efc(self, jacobian, nworld):
-    """Tests discrete Hager-Zhang CG parity and empty-EFC world skip."""
+    """Tests discrete CG parity and empty-EFC world skip."""
     mjm, mjd, m, d = test_data.fixture(
       xml="""
       <mujoco>

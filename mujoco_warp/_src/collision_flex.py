@@ -861,6 +861,7 @@ def _is_passive_flex_cand(
   flex_passive: wp.array[int],
   flex_dim: wp.array[int],
   flex_interp: wp.array[int],
+  flex_rigid: wp.array[bool],
   # In:
   geom_pair: wp.vec2i,
   flex_pair: wp.vec2i,
@@ -871,13 +872,26 @@ def _is_passive_flex_cand(
   f1 = flex_pair[1]
   g0 = geom_pair[0]
   g1 = geom_pair[1]
-  wants = (f0 >= 0 and flex_passive[f0] != 0 and flex_interp[f0] == 0 and flex_dim[f0] >= 2) or (
-    f1 >= 0 and flex_passive[f1] != 0 and flex_interp[f1] == 0 and flex_dim[f1] >= 2
+  wants = (f0 >= 0 and not flex_rigid[f0] and flex_passive[f0] != 0 and flex_interp[f0] == 0 and flex_dim[f0] >= 2) or (
+    f1 >= 0 and not flex_rigid[f1] and flex_passive[f1] != 0 and flex_interp[f1] == 0 and flex_dim[f1] >= 2
   )
   ok = (f0 >= 0 or (g0 >= 0 and body_weldid[geom_bodyid[g0]] == 0)) and (
     f1 >= 0 or (g1 >= 0 and body_weldid[geom_bodyid[g1]] == 0)
   )
   return wants and ok
+
+
+@wp.func
+def _is_reducible_flex_cand(
+  # Model:
+  flex_interp: wp.array[int],
+  flex_rigid: wp.array[bool],
+  # In:
+  flex_pair: wp.vec2i,
+) -> bool:
+  f0 = flex_pair[0]
+  f1 = flex_pair[1]
+  return (f0 >= 0 and (flex_rigid[f0] or flex_interp[f0] != 0)) and (f1 >= 0 and (flex_rigid[f1] or flex_interp[f1] != 0))
 
 
 @cache_kernel
@@ -2158,6 +2172,7 @@ def _filter_flex_candidates_sorted(
   flex_passive: wp.array[int],
   flex_dim: wp.array[int],
   flex_interp: wp.array[int],
+  flex_rigid: wp.array[bool],
   # In:
   ncand: wp.array[int],
   epsilon: float,
@@ -2200,6 +2215,7 @@ def _filter_flex_candidates_sorted(
     flex_passive,
     flex_dim,
     flex_interp,
+    flex_rigid,
     cand_geom[i],
     cand_flex[i],
   )
@@ -2283,6 +2299,7 @@ def _write_filtered_contacts(warn_overflow: int):
     flex_passive: wp.array[int],
     flex_dim: wp.array[int],
     flex_interp: wp.array[int],
+    flex_rigid: wp.array[bool],
     # Data in:
     naconmax_in: int,
     # In:
@@ -2432,6 +2449,7 @@ def _write_filtered_contacts(warn_overflow: int):
       flex_passive,
       flex_dim,
       flex_interp,
+      flex_rigid,
       cand_geom[i],
       cand_flex[i],
     )
@@ -2552,12 +2570,8 @@ def _tie_break_fps(
 @wp.kernel
 def _parallel_fps_find_seed(
   # Model:
-  opt_integrator: int,
-  body_weldid: wp.array[int],
-  geom_bodyid: wp.array[int],
-  flex_passive: wp.array[int],
-  flex_dim: wp.array[int],
   flex_interp: wp.array[int],
+  flex_rigid: wp.array[bool],
   # In:
   flex_group_start_indices_in: wp.array[int],
   flex_num_groups_in: wp.array[int],
@@ -2585,14 +2599,9 @@ def _parallel_fps_find_seed(
     return
 
   first_cand_idx = sort_val[g_start]
-  if cand_geom[first_cand_idx][0] >= 0 or _is_passive_flex_cand(
-    opt_integrator,
-    body_weldid,
-    geom_bodyid,
-    flex_passive,
-    flex_dim,
+  if cand_geom[first_cand_idx][0] >= 0 or not _is_reducible_flex_cand(
     flex_interp,
-    cand_geom[first_cand_idx],
+    flex_rigid,
     cand_flex[first_cand_idx],
   ):
     scratch_count_out[g, tid] = 0
@@ -3052,12 +3061,8 @@ def _run_filter_flex_fps(
     _parallel_fps_find_seed,
     dim=(nmax_groups, _FPS_BLOCK_SIZE),
     inputs=[
-      m.opt.integrator,
-      m.body_weldid,
-      m.geom_bodyid,
-      m.flex_passive,
-      m.flex_dim,
       m.flex_interp,
+      m.flex_rigid,
       ws.flex_group_start_indices,
       ws.flex_num_groups,
       ws.ncand,
@@ -3209,6 +3214,7 @@ def _filter_and_write_contacts(
       m.flex_passive,
       m.flex_dim,
       m.flex_interp,
+      m.flex_rigid,
       ws.ncand,
       _FLEX_CONTACT_DEDUP_TOLERANCE,
       ws.filter_key,
@@ -3292,6 +3298,7 @@ def _filter_and_write_contacts(
       m.flex_passive,
       m.flex_dim,
       m.flex_interp,
+      m.flex_rigid,
       d.naconmax,
       ws.ncand,
       ws.dist,

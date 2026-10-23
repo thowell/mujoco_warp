@@ -551,8 +551,6 @@ def put_model(mjm: mujoco.MjModel, batch_sizes: dict[str, int] | None = None) ->
     if (mjm.geom_type == mujoco.mjtGeom.mjGEOM_HFIELD).any():
       raise NotImplementedError("Flex-HField collision is not implemented.")
     is_discrete = mjm.opt.integrator == mujoco.mjtIntegrator.mjINT_DISCRETE
-    if hasattr(mjm, "flex_internal") and (mjm.flex_internal != 0).any():
-      raise NotImplementedError("Flex internal collisions are not implemented.")
     if np.any((mjm.flex_rigid != 0) & ~(is_discrete & (mjm.flex_dim == 2))):
       raise NotImplementedError("Rigid flexes are not implemented.")
     # TODO(team): skip element pairs driven by a common grid node, as in mjc_ElemSharedNode
@@ -571,8 +569,7 @@ def put_model(mjm: mujoco.MjModel, batch_sizes: dict[str, int] | None = None) ->
     mjm.nflex > 0 and np.any((mjm.flex_passive != 0) & (mjm.flex_rigid == 0) & (mjm.flex_interp == 0) & (mjm.flex_dim >= 2))
   )
   m.has_flex_snh = bool(
-    types.FLEX_STIFFNESS_3D == 24
-    and any(
+    any(
       mjm.flex_interp[f] == 0
       and mjm.flex_dim[f] == 3
       and mjm.flex_stiffnessadr[f] >= 0

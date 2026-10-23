@@ -23,6 +23,7 @@ from mujoco_warp._src.types import IntegratorType
 from mujoco_warp._src.types import ObjType
 from mujoco_warp._src.types import SleepPolicy
 from mujoco_warp._src.types import SleepState
+from mujoco_warp._src.types import SolverType
 from mujoco_warp._src.types import WrapType
 from mujoco_warp._src.warp_util import cache_kernel
 from mujoco_warp._src.warp_util import event_scope
@@ -439,6 +440,7 @@ def _wake_tendon_kernel(
   ntree: int,
   ntendon: int,
   opt_integrator: int,
+  opt_solver: int,
   opt_disableflags: int,
   body_treeid: wp.array[int],
   jnt_bodyid: wp.array[int],
@@ -492,7 +494,11 @@ def _wake_tendon_kernel(
   # Pass 2: If any tree is awake and limit or discrete metric is active, wake sleeping trees
   if any_awake == 1:
     active = _tendon_limit_active(tendon_limited, tendon_range, tendon_margin, ten_length_in, worldid, tenid)
-    if not active and opt_integrator == IntegratorType.DISCRETE:
+    if (
+      not active
+      and opt_integrator == IntegratorType.DISCRETE
+      and (opt_solver == SolverType.CG or opt_solver == SolverType.NEWTON)
+    ):
       active = support.eff_tendon_possible(
         opt_disableflags,
         tendon_stiffness,
@@ -809,6 +815,7 @@ def wake_tendon(m: types.Model, d: types.Data):
       m.ntree,
       m.ntendon,
       m.opt.integrator,
+      m.opt.solver,
       m.opt.disableflags,
       m.body_treeid,
       m.jnt_bodyid,
