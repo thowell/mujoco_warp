@@ -967,6 +967,17 @@ class SleepTest(parameterized.TestCase):
     if nworld == 2:
       self.assertEqual(int(tree_awake[1, 1]), 0)
 
+    # Under PGS, passive tendon stiffness/damping does not wake sleeping trees
+    m.opt.solver = int(mujoco.mjtSolver.mjSOL_PGS)
+    tree_asleep[0, 0] = sleep.K_AWAKE_VAL
+    tree_asleep[0, 1] = 1
+    d.tree_asleep.assign(tree_asleep)
+    sleep.update_sleep(m, d)
+    sleep.wake_tendon(m, d)
+    d.tree_awake.fill_(-1)
+    sleep.update_sleep(m, d)
+    self.assertEqual(int(d.tree_awake.numpy()[0, 1]), 0)
+
 
 # An actuated 2-hinge arm (tree 0, dofs 0-1) plus two free bodies
 # (tree 1, dofs 2-7 and tree 2, dofs 8-13).

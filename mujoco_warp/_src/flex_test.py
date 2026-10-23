@@ -2831,6 +2831,7 @@ class FlexCollisionTest(parameterized.TestCase):
       nworld=nworld,
       nconmax=1500,
     )
+    m.flex_rigid.fill_(True)
     d.nacon.fill_(-1)
     d.contact.dist.fill_(wp.inf)
     mjw.kinematics(m, d)
@@ -2923,6 +2924,7 @@ class FlexCollisionTest(parameterized.TestCase):
       nworld=1,
       nconmax=1500,
     )
+    m.flex_rigid.fill_(True)
     d.nacon.fill_(-1)
     d.contact.dist.fill_(wp.inf)
 
@@ -6090,6 +6092,64 @@ class FlexRodBendingTest(parameterized.TestCase):
     m.opt.integrator = int(types.IntegratorType.DISCRETE)
     with self.assertRaisesRegex(ValueError, "discrete integrator: flex edge stiffness and damping are not supported"):
       mjw.forward(m, d)
+
+  def test_non_reducible_flex_skips_fps_and_rigid_flex_skips_passive(self):
+    """Non-reducible flex-flex contacts skip FPS reduction; rigid 2D flex is not passive."""
+    _, _, m, d = test_data.fixture(
+      xml="""
+      <mujoco>
+        <option integrator="Euler"/>
+        <worldbody>
+          <flexcomp name="c1" type="grid" count="5 5 1" spacing="0.04 0.04 0.04"
+                    pos="0 0 0" dim="2" radius="0.02" mass="0.5">
+            <contact selfcollide="none" passive="false"/>
+          </flexcomp>
+          <flexcomp name="c2" type="grid" count="5 5 1" spacing="0.04 0.04 0.04"
+                    pos="0 0 0.01" dim="2" radius="0.02" mass="0.5">
+            <contact selfcollide="none" passive="false"/>
+          </flexcomp>
+        </worldbody>
+      </mujoco>
+      """
+    )
+    d.nacon.fill_(-1)
+    mjw.kinematics(m, d)
+    mjw.flex(m, d)
+    mjw.collision(m, d)
+    # Without FPS reduction, 2 overlapping 5x5 cloths produce more than MJ_MAXCONPAIR (50) contacts
+    self.assertGreater(int(d.nacon.numpy()[0]), int(types.MJ_MAXCONPAIR))
+
+    # Rigid 2D flex under discrete integrator must not be classified as ContactType.PASSIVE
+    _, _, m_rig, d_rig = test_data.fixture(
+      xml="""
+      <mujoco>
+        <option integrator="discrete"/>
+        <worldbody>
+          <geom type="plane" size="1 1 0.01"/>
+          <flexcomp name="rigid_cloth" type="grid" count="2 2 1" spacing="0.05 0.05 0.05"
+                    pos="0 0 0.005" dim="2" radius="0.015" mass="0.2" rigid="true">
+            <contact selfcollide="none" passive="true"/>
+          </flexcomp>
+          <flexcomp name="soft_cloth" type="grid" count="2 2 1" spacing="0.05 0.05 0.05"
+                    pos="0.3 0 0.005" dim="2" radius="0.015" mass="0.2">
+            <contact selfcollide="none" passive="true"/>
+          </flexcomp>
+        </worldbody>
+      </mujoco>
+      """
+    )
+    mjw.kinematics(m_rig, d_rig)
+    mjw.flex(m_rig, d_rig)
+    mjw.collision(m_rig, d_rig)
+    nacon_rig = int(d_rig.nacon.numpy()[0])
+    c_flex = d_rig.contact.flex.numpy()[:nacon_rig]
+    c_type = d_rig.contact.type.numpy()[:nacon_rig]
+    rigid_mask = c_flex[:, 1] == 0
+    soft_mask = c_flex[:, 1] == 1
+    self.assertGreater(int(np.sum(rigid_mask)), 0)
+    self.assertGreater(int(np.sum(soft_mask)), 0)
+    np.testing.assert_array_equal(c_type[rigid_mask], int(types.ContactType.CONSTRAINT))
+    np.testing.assert_array_equal(c_type[soft_mask], int(types.ContactType.PASSIVE))
 
 
 if __name__ == "__main__":

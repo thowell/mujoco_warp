@@ -1752,7 +1752,7 @@ def _solve_skip_empty_efc(
   worldid = wp.tid()
   if not ctx_done_out[worldid] and nefc_in[worldid] == 0:
     ctx_done_out[worldid] = True
-    wp.atomic_sub(nsolving_out, 0, 1)
+    wp.atomic_sub(nsolving_out, 0, 1)  # kernel_analyzer: ignore[atomic]
 
 
 @cache_kernel
@@ -3787,9 +3787,8 @@ def _solve_search_update_cg_tiled(
 
 
 @cache_kernel
-def _solve_beta_finalize_tiled(warn_overflow: int, hager_zhang: bool = False):
+def _solve_beta_finalize_tiled(warn_overflow: int):
   WARN_OVERFLOW = warn_overflow
-  HAGER_ZHANG = hager_zhang
 
   @wp.kernel(module="unique", enable_backward=False)
   def kernel(
@@ -3803,7 +3802,6 @@ def _solve_beta_finalize_tiled(warn_overflow: int, hager_zhang: bool = False):
     ctx_Mgrad_in: wp.array2d[float],
     ctx_prev_grad_in: wp.array2d[float],
     ctx_prev_Mgrad_in: wp.array2d[float],
-    ctx_search_in: wp.array2d[float],
     ctx_improvement_in: wp.array[float],
     ctx_grad_dot_in: wp.array[float],
     ctx_alpha_in: wp.array[float],
@@ -3821,44 +3819,23 @@ def _solve_beta_finalize_tiled(warn_overflow: int, hager_zhang: bool = False):
     if ctx_done_in[worldid]:
       return
 
+    local_num = float(0.0)
+    local_den = float(0.0)
     BLOCK_DIM = wp.block_dim()
 
-    if wp.static(HAGER_ZHANG):
-      # Hager-Zhang: d' * y, y' * M * y, y' * Mgrad, d' * grad, d' * d, grad' * grad
-      local_a = wp.vec3(0.0)
-      local_b = wp.vec3(0.0)
-      for dofid in range(tid, nv, BLOCK_DIM):
-        grad = ctx_grad_in[worldid, dofid]
-        Mgrad = ctx_Mgrad_in[worldid, dofid]
-        graddif = grad - ctx_prev_grad_in[worldid, dofid]
-        mgraddif = Mgrad - ctx_prev_Mgrad_in[worldid, dofid]
-        search = ctx_search_in[worldid, dofid]
-        local_a += wp.vec3(search * graddif, graddif * mgraddif, graddif * Mgrad)
-        local_b += wp.vec3(search * grad, search * search, grad * grad)
-      sums_a = wp.tile_reduce(wp.add, wp.tile(local_a, preserve_type=True))[0]
-      sums_b = wp.tile_reduce(wp.add, wp.tile(local_b, preserve_type=True))[0]
-    else:
-      local_sums = wp.vec2(0.0)
-      for dofid in range(tid, nv, BLOCK_DIM):
-        grad = ctx_grad_in[worldid, dofid]
-        prev_grad = ctx_prev_grad_in[worldid, dofid]
-        prev_Mgrad = ctx_prev_Mgrad_in[worldid, dofid]
-        mgraddif = ctx_Mgrad_in[worldid, dofid] - prev_Mgrad
-        local_sums += wp.vec2(grad * mgraddif, prev_grad * prev_Mgrad)
-      sums = wp.tile_reduce(wp.add, wp.tile(local_sums, preserve_type=True))[0]
+    for dofid in range(tid, nv, BLOCK_DIM):
+      prev_Mgrad = ctx_prev_Mgrad_in[worldid, dofid]
+      num = ctx_grad_in[worldid, dofid] * (ctx_Mgrad_in[worldid, dofid] - prev_Mgrad)
+      den = ctx_prev_grad_in[worldid, dofid] * prev_Mgrad
+      local_num += num
+      local_den += den
+
+    beta_tile = wp.tile(wp.vec2(local_num, local_den), preserve_type=True)
+    beta_sum = wp.tile_reduce(wp.add, beta_tile)
+    reduced_beta = beta_sum[0]
 
     if tid == 0:
-      if wp.static(HAGER_ZHANG):
-        d_dot_y = sums_a[0]
-        if d_dot_y < types.MJ_MINVAL:
-          # conjugacy lost: restart to steepest descent
-          ctx_beta_out[worldid] = 0.0
-        else:
-          beta_hz = (sums_a[2] - 2.0 * (sums_a[1] / d_dot_y) * sums_b[0]) / d_dot_y
-          eta_k = -1.0 / wp.max(types.MJ_MINVAL, wp.sqrt(sums_b[1]) * wp.min(0.01, wp.sqrt(sums_b[2])))
-          ctx_beta_out[worldid] = wp.max(eta_k, beta_hz)
-      else:
-        ctx_beta_out[worldid] = wp.max(0.0, sums[0] / wp.max(types.MJ_MINVAL, sums[1]))
+      ctx_beta_out[worldid] = wp.max(0.0, reduced_beta[0] / wp.max(types.MJ_MINVAL, reduced_beta[1]))
 
       solver_niter_out[worldid] += 1
       tolerance = opt_tolerance[worldid % opt_tolerance.shape[0]]
@@ -4002,11 +3979,10 @@ def _solver_iteration(
   else:
     _update_gradient(m, d, ctx, compact=compact)
 
-  # Hager-Zhang under the discrete integrator (matches MuJoCo C), else Polak-Ribiere
-  hager_zhang = m.opt.integrator == types.IntegratorType.DISCRETE
+  # polak-ribiere
   if m.opt.solver == types.SolverType.CG:
     wp.launch_tiled(
-      _solve_beta_finalize_tiled(int(m.opt.warn_overflow), hager_zhang),
+      _solve_beta_finalize_tiled(int(m.opt.warn_overflow)),
       dim=d.nworld,
       inputs=[
         m.nv,
@@ -4017,7 +3993,6 @@ def _solver_iteration(
         ctx.Mgrad,
         ctx.prev_grad,
         ctx.prev_Mgrad,
-        ctx.search,
         ctx.improvement,
         ctx.grad_dot,
         ctx.alpha,
@@ -4091,6 +4066,7 @@ def _elliptic_row_cost(
     return cost
   NmT = N - mu * T
   return 0.5 * Dm * NmT * NmT
+
 
 @wp.func
 def _constraint_row_cost_diff(

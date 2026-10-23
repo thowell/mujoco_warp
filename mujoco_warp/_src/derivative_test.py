@@ -3697,6 +3697,70 @@ class DerivativeTest(parameterized.TestCase):
     if nworld == 2:
       self.assertFalse(np.allclose(res_np[0], res_np[1]))
 
+  @parameterized.parameters(1, 2)
+  def test_discrete_free_gyro_skips_stiff_flex_tree_only(self, nworld):
+    """Tests that discrete free-body gyro skips stiff-flex trees while running on uncoupled ones."""
+    mjm, mjd, m, d = test_data.fixture(
+      xml="""
+      <mujoco>
+        <option integrator="discrete" solver="CG" timestep="0.005" gravity="0 0 0"/>
+        <worldbody>
+          <body name="free_coupled" pos="0 0 0.5">
+            <freejoint/>
+            <geom type="box" size="0.1 0.15 0.2" mass="1.5" contype="0" conaffinity="0"/>
+          </body>
+          <body name="free_uncoupled" pos="1 0 0.5">
+            <freejoint/>
+            <geom type="box" size="0.1 0.2 0.3" mass="2.0" contype="0" conaffinity="0"/>
+          </body>
+          <body name="v0" pos="0.2 0 0.5">
+            <inertial pos="0 0 0" mass="0.1" diaginertia="1e-3 1e-3 1e-3"/>
+            <joint type="slide" axis="1 0 0"/>
+            <joint type="slide" axis="0 1 0"/>
+            <joint type="slide" axis="0 0 1"/>
+          </body>
+          <body name="v1" pos="0.2 0.2 0.5">
+            <inertial pos="0 0 0" mass="0.1" diaginertia="1e-3 1e-3 1e-3"/>
+            <joint type="slide" axis="1 0 0"/>
+            <joint type="slide" axis="0 1 0"/>
+            <joint type="slide" axis="0 0 1"/>
+          </body>
+        </worldbody>
+        <deformable>
+          <flex name="patch" dim="2" body="free_coupled v0 v1"
+                vertex="0 0 0  0 0 0  0 0 0" element="0 1 2">
+            <contact selfcollide="none" contype="0" conaffinity="0"/>
+            <elasticity young="500" poisson="0.3" thickness="0.01" elastic2d="stretch" damping="0.05"/>
+          </flex>
+        </deformable>
+      </mujoco>
+      """,
+      qvel_noise=2.0,
+      nworld=nworld,
+    )
+    mjds = [mjd]
+    if nworld == 2:
+      mjd1 = mujoco.MjData(mjm)
+      qvel = d.qvel.numpy()
+      qvel[1] = qvel[0] * 1.4 - 0.3
+      d.qvel.assign(qvel)
+      mjd1.qpos[:] = d.qpos.numpy()[1]
+      mjd1.qvel[:] = qvel[1]
+      mjds.append(mjd1)
+
+    d.qacc_smooth.fill_(wp.inf)
+    d.qacc.fill_(wp.inf)
+    mjw.forward(m, d)
+
+    qacc_smooth = d.qacc_smooth.numpy()
+    qacc = d.qacc.numpy()
+    for w in range(nworld):
+      mujoco.mj_forward(mjm, mjds[w])
+      _assert_eq(qacc_smooth[w], mjds[w].qacc_smooth, f"qacc_smooth_w{w}")
+      _assert_eq(qacc[w], mjds[w].qacc, f"qacc_w{w}")
+    if nworld == 2:
+      self.assertFalse(np.allclose(qacc[0], qacc[1]))
+
 
 if __name__ == "__main__":
   wp.init()
