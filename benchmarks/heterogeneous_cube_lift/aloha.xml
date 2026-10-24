@@ -243,10 +243,10 @@
     <position class="finger" name="right/gripper" joint="right/left_finger" />
   </actuator>
   <visual>
-    <global offwidth="1280" offheight="720" azimuth="135" elevation="-20" />
+    <global offwidth="1280" offheight="720" azimuth="100" elevation="-20" />
     <headlight ambient=".4 .4 .4" diffuse=".7 .7 .7" specular="0 0 0" />
   </visual>
-  <statistic center="-0.2006670417 -0.01899933403 0.307516395" extent=".6" />
+  <statistic center="0 0 .24" extent="1" />
   <keyframe>
     <key name="grasp" qpos="0 -0.96 1.16 0 -0.2 0 0.028 0.028 0 -0.96 1.16 0 -0.2 0 0.028 0.028 -0.2006670417 -0.01899933403 0.307516395 1 0 0 0 0.2006670417 -0.01900066597 0.307516395 1 0 0 0" ctrl="0 -0.96 1.16 0 -0.2 0 0.028 0 -0.96 1.16 0 -0.2 0 0.028" />
   </keyframe>

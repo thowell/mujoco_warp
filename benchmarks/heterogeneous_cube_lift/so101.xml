@@ -167,7 +167,7 @@
     <position class="sts3215" name="gripper" joint="gripper" ctrlrange="-0.17453 1.74533" />
   </actuator>
   <visual />
-  <statistic center="0.1797319558 -0.000421101456 0.07391338407" extent=".6" />
+  <statistic center=".12 0 .14" extent=".4333333333" />
   <keyframe>
     <key name="grasp" qpos="0 -0.5 0.5 1.570796327 0 0.35 0.1797319558 -0.000421101456 0.07391338407 0.9997038027 0 -7.806255642e-17 -0.02433735426" ctrl="0 -0.5 0.5 1.570796327 0 0.35" />
   </keyframe>
