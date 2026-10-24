@@ -17,9 +17,9 @@
 
 uv run python benchmarks/heterogeneous_cube_lift/benchmark.py --assets /path/to/menagerie
 
-Each case advances 8192 worlds of each robot through the same five-second replay.
-Inactive robot and cube trees use ALWAYS; active trees use AUTO_NEVER. Separate
-models stay resident and advance on the same stream. Setup and reset are untimed.
+For each robot, compare 8192 ordinary standalone worlds against 8192 union-model
+worlds with only that robot and its cubes awake. Inactive trees use ALWAYS and
+active trees use AUTO_NEVER. Setup and reset are excluded from timing.
 """
 
 import argparse
@@ -41,6 +41,7 @@ from mujoco_warp._src.types import SleepPolicy
 
 ROOT = Path(__file__).resolve().parents[2]
 KINDS = ("franka", "aloha", "so101")
+CUBES = {"franka": ("cube",), "aloha": ("cube_left", "cube_right"), "so101": ("cube",)}
 MENAGERIE_REF = "affef0836947b64cc06c4ab1cbf0152835693374"
 
 
@@ -76,7 +77,8 @@ def model(kind, assets, sleeping=True):
     replay = np.load(Path(__file__).parent / f"{name}.npz")
     qpos = replay["qpos"][0].copy()
     offset = 1.5 * KINDS.index(name)
-    qpos[cm.joint("cube_joint").qposadr[0] + 1] += offset
+    for cube in CUBES[name]:
+      qpos[cm.joint(cube + "_joint").qposadr[0] + 1] += offset
     initial[prefix] = cm, qpos, replay["ctrl"]
     for key in list(child.keys):
       child.delete(key)
@@ -110,17 +112,16 @@ def arrays_bytes(value, seen=None):
 
 
 def create(kind, args):
-  sleeping = args.case != "separate_no_sleep"
-  mjm, mjd, controls = model(kind, args.assets, sleeping)
-  nworld = args.worlds * (3 if kind == "mixed" else 1)
+  sleeping = args.case.endswith("_mixed")
+  mjm, mjd, controls = model("mixed" if sleeping else kind, args.assets, sleeping)
+  nworld = args.worlds
   m = mjw.put_model(mjm, batch_sizes={"tree_sleep_policy": nworld})
   policy = np.full((nworld, mjm.ntree), int(SleepPolicy.AUTO_NEVER), dtype=np.int32)
-  if kind == "mixed":
-    for group, active in enumerate(KINDS):
-      for tree in range(mjm.ntree):
-        body = np.flatnonzero(mjm.body_treeid == tree)[0]
-        if not mjm.body(body).name.startswith(active + "/"):
-          policy[group * args.worlds : (group + 1) * args.worlds, tree] = int(SleepPolicy.ALWAYS)
+  if sleeping:
+    for tree in range(mjm.ntree):
+      body = np.flatnonzero(mjm.body_treeid == tree)[0]
+      if not mjm.body(body).name.startswith(kind + "/"):
+        policy[:, tree] = int(SleepPolicy.ALWAYS)
   m.tree_sleep_policy.assign(policy)
   # Capacities are identical per world except nvmax, which reflects each layout's active DOFs.
   nvmax = int(np.max((policy != int(SleepPolicy.ALWAYS)) @ mjm.tree_dofnum))
@@ -179,21 +180,17 @@ def diagnostics(state):
   }
 
 
-def snapshot(states, storage):
-  for kind, mjm, _, _, d, _ in states:
-    groups = KINDS if kind == "mixed" else (kind,)
-    qpos, qvel = d.qpos.numpy(), d.qvel.numpy()
-    for group, name in enumerate(groups):
-      count = d.nworld // 3 if kind == "mixed" else d.nworld
-      row = group * count if kind == "mixed" else 0
-      for field, array, addresses, total in (("qpos", qpos, mjm.jnt_qposadr, mjm.nq), ("qvel", qvel, mjm.jnt_dofadr, mjm.nv)):
-        indices = []
-        for j in range(mjm.njnt):
-          if mjm.joint(j).name.startswith(name + "/"):
-            indices.extend(range(addresses[j], addresses[j + 1] if j + 1 < mjm.njnt else total))
-        values = array[row : row + count, indices]
-        storage.setdefault(f"{name}_{field}_spread", []).append(np.max(np.abs(values - values[0]), axis=0))
-        storage.setdefault(f"{name}_{field}", []).append(values[0].copy())
+def snapshot(state, storage):
+  kind, mjm, _, _, d, _ = state
+  qpos, qvel = d.qpos.numpy(), d.qvel.numpy()
+  for field, array, addresses, total in (("qpos", qpos, mjm.jnt_qposadr, mjm.nq), ("qvel", qvel, mjm.jnt_dofadr, mjm.nv)):
+    indices = []
+    for j in range(mjm.njnt):
+      if mjm.joint(j).name.startswith(kind + "/"):
+        indices.extend(range(addresses[j], addresses[j + 1] if j + 1 < mjm.njnt else total))
+    values = array[:, indices]
+    storage.setdefault(field + "_spread", []).append(np.max(np.abs(values - values[0]), axis=0))
+    storage.setdefault(field, []).append(values[0].copy())
 
 
 def worker(args):
@@ -204,32 +201,29 @@ def worker(args):
     raise ValueError("This benchmark requires CUDA graph execution")
   free_start = wp.get_device().free_memory
   start = time.perf_counter()
-  created = [create(k, args) for k in (KINDS if args.case.startswith("separate") else ("mixed",))]
-  states = [s for s, _ in created]
+  kind = args.case.rsplit("_", 1)[0]
+  state, controls = create(kind, args)
+  _, mjm, mjd, m, d, _ = state
   index = wp.zeros(1, dtype=int)
   wp.synchronize()
   setup_s = time.perf_counter() - start
   start = time.perf_counter()
-  for state in states:
-    mjw.step(state[3], state[4])
+  mjw.step(m, d)
   wp.synchronize()
   with wp.ScopedCapture() as capture:
-    for state, controls in created:
-      wp.launch(replay_control, (state[4].nworld, state[1].nu), inputs=[controls, index], outputs=[state[4].ctrl])
-      mjw.step(state[3], state[4])
+    wp.launch(replay_control, (d.nworld, mjm.nu), inputs=[controls, index], outputs=[d.ctrl])
+    mjw.step(m, d)
     wp.launch(advance, 1, outputs=[index])
   for _ in range(args.warmup):
     wp.capture_launch(capture.graph)
   wp.synchronize()
   compile_warmup_s = time.perf_counter() - start
-  # All separate models remain resident; one graph advances every world once in either layout.
   gpu_ms, wall_ms = [], []
   begin, end = wp.Event(enable_timing=True), wp.Event(enable_timing=True)
   samples_diagnostics = []
   for _ in range(args.repeats):
     index.zero_()
-    for state in states:
-      reset(state)
+    reset(state)
     wp.synchronize()
     start = time.perf_counter()
     wp.record_event(begin)
@@ -239,47 +233,40 @@ def worker(args):
     wp.synchronize()
     wall_ms.append(1000 * (time.perf_counter() - start) / args.steps)
     gpu_ms.append(wp.get_event_elapsed_time(begin, end) / args.steps)
-    samples_diagnostics.append([diagnostics(state) for state in states])
+    samples_diagnostics.append(diagnostics(state))
   memory = {
-    "model_array_bytes": sum(arrays_bytes(s[3]) for s in states),
-    "data_array_bytes": sum(arrays_bytes(s[4]) for s in states),
-    "replay_array_bytes": sum(arrays_bytes(c) for _, c in created) + arrays_bytes(index),
+    "model_array_bytes": arrays_bytes(m),
+    "data_array_bytes": arrays_bytes(d),
+    "replay_array_bytes": arrays_bytes(controls) + arrays_bytes(index),
     "device_used_delta_bytes": free_start - wp.get_device().free_memory,
   }
   # Replay outside timing and sample state and awake-tree checks every 100 ms.
   trajectory = {}
   index.zero_()
-  for state in states:
-    reset(state)
+  reset(state)
   for step in range(args.steps):
     wp.capture_launch(capture.graph)
     if step % 50 == 0 or step == args.steps - 1:
-      for state in states:
-        diagnostics(state)
-      snapshot(states, trajectory)
+      diagnostics(state)
+      snapshot(state, trajectory)
   lifts = {}
-  for state in states:
-    kind, mjm, mjd, _, d, _ = state
-    qpos = d.qpos.numpy()
-    for group, name in enumerate(KINDS if kind == "mixed" else (kind,)):
-      adr = mjm.joint(name + "/cube_joint").qposadr[0] + 2
-      row = group * args.worlds if kind == "mixed" else 0
-      height = qpos[row : row + args.worlds, adr] - mjd.qpos[adr]
-      lifts[name] = float(height.min())
-      if height.min() < 0.03:
-        raise RuntimeError(f"{name}: cube did not lift: {height.min()} m")
+  qpos = d.qpos.numpy()
+  for cube in CUBES[kind]:
+    adr = mjm.joint(kind + "/" + cube + "_joint").qposadr[0] + 2
+    height = qpos[:, adr] - mjd.qpos[adr]
+    lifts[cube] = float(height.min())
+    if height.min() < 0.03:
+      raise RuntimeError(f"{kind}/{cube}: cube did not lift: {height.min()} m")
   np.savez(args.output / f"{args.case}_trajectory.npz", **trajectory)
-  nworld = sum(s[4].nworld for s in states)
   result = {
     "case": args.case,
     "minimum_cube_lift_m": lifts,
-    "worlds": nworld,
+    "worlds": d.nworld,
     "setup_s": setup_s,
     "compile_warmup_s": compile_warmup_s,
     "gpu_batch_step_ms": gpu_ms,
     "wall_batch_step_ms": wall_ms,
-    "world_steps_per_second": nworld * 1000 / float(np.median(wall_ms)),
-    "simulated_seconds_per_second": nworld * 2 / float(np.median(wall_ms)),
+    "fps": d.nworld * 1000 / float(np.median(wall_ms)),
     "memory": memory,
     "diagnostics": samples_diagnostics,
     "gpu": wp.get_device().name,
@@ -297,7 +284,8 @@ def main():
   parser.add_argument("--repeats", type=int, default=3)
   parser.add_argument("--warmup", type=int, default=10)
   parser.add_argument("--device", default="cuda:0")
-  parser.add_argument("--case", choices=("mixed", "separate", "separate_no_sleep"), help=argparse.SUPPRESS)
+  cases = [f"{kind}_{layout}" for kind in KINDS for layout in ("alone", "mixed")]
+  parser.add_argument("--case", choices=cases, help=argparse.SUPPRESS)
   args = parser.parse_args()
   args.steps = 2500
   if min(args.worlds, args.repeats, args.warmup) < 1:
@@ -316,7 +304,7 @@ def main():
     if key not in ("case", "steps"):
       child_args.extend(["--" + key, str(value)])
   results = []
-  for case in ("mixed", "separate", "separate_no_sleep"):
+  for case in cases:
     print(f"Running {case} in a fresh process...", flush=True)
     with (args.output / f"{case}.log").open("w") as log:
       subprocess.run(
@@ -327,34 +315,36 @@ def main():
         cwd=ROOT,
       )
     results.append(json.loads((args.output / f"{case}.json").read_text()))
-  mixed = np.load(args.output / "mixed_trajectory.npz")
   parity = {}
   cube_position_errors = {}
   world_spread = {}
   failures = []
   # Contact order can differ across layouts. Bound raw qpos component differences
   # by 0.002 and qvel by 0.1, and report actual errors and within-layout variation.
-  for case in ("separate", "separate_no_sleep"):
-    with np.load(args.output / f"{case}_trajectory.npz") as reference:
+  for kind in KINDS:
+    with (
+      np.load(args.output / f"{kind}_mixed_trajectory.npz") as mixed,
+      np.load(args.output / f"{kind}_alone_trajectory.npz") as reference,
+    ):
       for key in reference.files:
         delta = float(np.max(np.abs(mixed[key] - reference[key])))
         if key.endswith("_spread"):
-          world_spread[f"mixed/{key}"] = float(mixed[key].max())
-          world_spread[f"{case}/{key}"] = float(reference[key].max())
+          world_spread[f"{kind}_mixed/{key}"] = float(mixed[key].max())
+          world_spread[f"{kind}_alone/{key}"] = float(reference[key].max())
           tolerance = 0.002 if "qpos" in key else 0.1
-          if max(world_spread[f"mixed/{key}"], world_spread[f"{case}/{key}"]) > tolerance:
-            failures.append(f"{case}/{key}: within-layout spread exceeds {tolerance}")
+          if max(mixed[key].max(), reference[key].max()) > tolerance:
+            failures.append(f"{kind}/{key}: within-layout spread exceeds {tolerance}")
           continue
-        if key.endswith("qpos"):
-          # Each source scene appends the cube's free joint after its robot joints.
-          cube_position_errors[f"{case}/{key}"] = float(
-            np.linalg.norm(mixed[key][:, -7:-4] - reference[key][:, -7:-4], axis=1).max()
-          )
-        if not key.endswith("_spread") and not np.allclose(
-          mixed[key], reference[key], atol=0.002 if key.endswith("qpos") else 0.1, rtol=0
-        ):
-          failures.append(f"{case}/{key}: max absolute error {delta:g}")
-        parity[f"{case}/{key}"] = delta
+        if key == "qpos":
+          # Source scenes append the cubes' free joints after their robot joints.
+          for i, cube in enumerate(CUBES[kind]):
+            start = mixed[key].shape[1] - 7 * (len(CUBES[kind]) - i)
+            cube_position_errors[f"{kind}/{cube}"] = float(
+              np.linalg.norm(mixed[key][:, start : start + 3] - reference[key][:, start : start + 3], axis=1).max()
+            )
+        if not np.allclose(mixed[key], reference[key], atol=0.002 if key == "qpos" else 0.1, rtol=0):
+          failures.append(f"{kind}/{key}: max absolute error {delta:g}")
+        parity[f"{kind}/{key}"] = delta
   report = {
     "config": {k: str(v) if isinstance(v, Path) else v for k, v in vars(args).items()},
     "git_commit": subprocess.check_output(["git", "rev-parse", "HEAD"], text=True, cwd=ROOT).strip(),
@@ -371,15 +361,11 @@ def main():
     raise RuntimeError(
       "Trajectory parity failed; timings are not validated equal work. See results.json: " + "; ".join(failures)
     )
-  print("case              worlds  wall ms/step  GPU ms/step  world-steps/s  arrays MiB  GPU delta MiB")
-  for result in results:
-    mem = result["memory"]
-    arrays = mem["model_array_bytes"] + mem["data_array_bytes"] + mem["replay_array_bytes"]
-    print(
-      f"{result['case']:17} {result['worlds']:6} {np.median(result['wall_batch_step_ms']):13.3f} "
-      f"{np.median(result['gpu_batch_step_ms']):12.3f} {result['world_steps_per_second']:14,.0f} "
-      f"{arrays / 2**20:11.2f} {mem['device_used_delta_bytes'] / 2**20:14.2f}"
-    )
+  print("robot     worlds   standalone FPS   mixed FPS   mixed / standalone")
+  by_case = {r["case"]: r for r in results}
+  for kind in KINDS:
+    alone, mixed = by_case[kind + "_alone"], by_case[kind + "_mixed"]
+    print(f"{kind:8} {args.worlds:7} {alone['fps']:16,.0f} {mixed['fps']:11,.0f} {mixed['fps'] / alone['fps']:19.3f}")
   print("Trajectory parity passed; full samples and metadata:", args.output / "results.json")
 
 

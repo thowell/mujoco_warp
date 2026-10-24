@@ -15,6 +15,9 @@
     <mesh file="vx300s_8_custom_finger_left.stl" />
     <mesh file="vx300s_8_custom_finger_right.stl" />
     <mesh file="d405_solid.stl" />
+    <texture type="skybox" builtin="gradient" rgb1=".3 .5 .7" rgb2="0 0 0" width="512" height="3072" />
+    <texture type="2d" name="groundplane" builtin="checker" mark="edge" rgb1=".2 .3 .4" rgb2=".1 .2 .3" markrgb=".8 .8 .8" width="300" height="300" />
+    <material name="groundplane" texture="groundplane" texuniform="true" texrepeat="5 5" reflectance=".2" />
   </asset>
   <default>
     <default class="vx300s">
@@ -202,11 +205,16 @@
         </body>
       </body>
     </body>
-    <geom name="floor" type="plane" size="2 2 .05" rgba=".22 .25 .28 1" contype="1" conaffinity="1" />
-    <geom name="pedestal" type="box" pos="-0.2006670417 -0.01899933403 0.1462581975" size="0.045 0.045 0.1462581975" rgba=".35 .4 .45 1" />
-    <body name="cube" pos="-0.2006670417 -0.01899933403 0.307516395" quat="1 0 0 0">
-      <freejoint name="cube_joint" />
-      <geom name="cube" type="box" size="0.015 0.015 0.015" mass=".025" friction="1 .005 .0001" rgba=".85 .3 .1 1" condim="4" />
+    <geom name="floor" type="plane" size="0 0 .05" material="groundplane" contype="1" conaffinity="1" />
+    <geom name="cube_left_stand" type="box" pos="-0.2006670417 -0.01899933403 0.1462581975" size="0.045 0.045 0.1462581975" rgba=".35 .4 .45 1" />
+    <body name="cube_left" pos="-0.2006670417 -0.01899933403 0.307516395" quat="1 0 0 0">
+      <freejoint name="cube_left_joint" />
+      <geom name="cube_left" type="box" size="0.015 0.015 0.015" mass=".025" friction="1 .005 .0001" rgba=".85 .3 .1 1" condim="4" />
+    </body>
+    <geom name="cube_right_stand" type="box" pos="0.2006670417 -0.01900066597 0.1462581975" size="0.045 0.045 0.1462581975" rgba=".35 .4 .45 1" />
+    <body name="cube_right" pos="0.2006670417 -0.01900066597 0.307516395" quat="1 0 0 0">
+      <freejoint name="cube_right_joint" />
+      <geom name="cube_right" type="box" size="0.015 0.015 0.015" mass=".025" friction="1 .005 .0001" rgba=".85 .3 .1 1" condim="4" />
     </body>
     <light pos="0 0 2" dir="0 0 -1" diffuse=".6 .6 .6" />
   </worldbody>
@@ -240,6 +248,6 @@
   </visual>
   <statistic center="-0.2006670417 -0.01899933403 0.307516395" extent=".6" />
   <keyframe>
-    <key name="grasp" qpos="0 -0.96 1.16 0 -0.2 0 0.028 0.028 0 -0.96 1.16 0 -0.3 0 0.0084 0.0084 -0.2006670417 -0.01899933403 0.307516395 1 0 0 0" ctrl="0 -0.96 1.16 0 -0.2 0 0.028 0 -0.96 1.16 0 -0.3 0 0.0084" />
+    <key name="grasp" qpos="0 -0.96 1.16 0 -0.2 0 0.028 0.028 0 -0.96 1.16 0 -0.2 0 0.028 0.028 -0.2006670417 -0.01899933403 0.307516395 1 0 0 0 0.2006670417 -0.01900066597 0.307516395 1 0 0 0" ctrl="0 -0.96 1.16 0 -0.2 0 0.028 0 -0.96 1.16 0 -0.2 0 0.028" />
   </keyframe>
 </mujoco>
