@@ -1750,7 +1750,9 @@ class DerivativeTest(parameterized.TestCase):
     for i in range(len(forces)):
       if forces[i] > 0:
         nnz_i = con_nnz[i]
-        self.assertIn(nnz_i, (3, 9))
+        # at most 3 dofs for each of the 3 element vertices; vertices with zero barycentric weight
+        # and zero components of the contact normal are compacted out
+        self.assertBetween(nnz_i, 1, 9)
         dofs = con_dof[i, :nnz_i]
         self.assertTrue(np.all(dofs >= 0) and np.all(dofs < m.nv))
         vals = con_val[i, :nnz_i]
@@ -1758,6 +1760,84 @@ class DerivativeTest(parameterized.TestCase):
 
     if nworld == 2:
       self.assertFalse(np.allclose(d.qfrc_spring.numpy()[0], d.qfrc_spring.numpy()[1]))
+
+  # TODO(team): remove version check once mujoco >= 3.17.1 is required.
+  @absltest.skipIf(not util_pkg.check_version("mujoco>=3.17.1.dev1005593014"), "Requires MuJoCo >= 3.17.1.dev1005593014")
+  @parameterized.product(dim=(2, 3), nworld=(1, 2))
+  def test_eff_contact_element_weights(self, dim, nworld):
+    """Passive flex element contacts weight the element vertices as MuJoCo C does."""
+    if dim == 2:
+      flexcomp = """
+        <flexcomp name="flex" type="grid" count="3 3 1" spacing="0.1 0.1 0.1" pos="0.03 0.02 0.19" dim="2"
+                  mass="0.09">
+          <contact passive="true" selfcollide="none"/>
+          <elasticity young="1e3" poisson="0.3" thickness="1e-3" damping="0" elastic2d="both"/>
+        </flexcomp>
+      """
+    else:
+      flexcomp = """
+        <flexcomp name="flex" type="grid" count="3 3 2" spacing="0.1 0.1 0.1" pos="0.03 0.02 0.24" dim="3"
+                  mass="0.18">
+          <contact passive="true" selfcollide="none"/>
+          <elasticity young="1e3" poisson="0.3" damping="0"/>
+        </flexcomp>
+      """
+    mjm, mjd, m, d = test_data.fixture(
+      xml=f"""
+      <mujoco>
+        <option solver="CG" integrator="discrete" timestep="0.002"/>
+        <worldbody>
+          <geom type="sphere" size="0.2"/>
+          {flexcomp}
+        </worldbody>
+      </mujoco>
+      """,
+      nworld=nworld,
+    )
+    if nworld == 2:
+      qpos = d.qpos.numpy()
+      qpos[1] += 0.002 * np.sin(np.arange(mjm.nq))
+      d.qpos = wp.array(qpos, dtype=float)
+
+    mjw.forward(m, d)
+    nacon = d.nacon.numpy()[0]
+    efm_con = derivative.build_efm_contact(m, d)
+    con_dof, con_val, con_scale, con_force, con_nnz = (x.numpy()[:nacon] for x in efm_con)
+    con_pos = d.contact.pos.numpy()[:nacon]
+    con_elem = d.contact.elem.numpy()[:nacon]
+    con_worldid = d.contact.worldid.numpy()[:nacon]
+
+    for worldid in range(nworld):
+      mjd.qpos[:] = d.qpos.numpy()[worldid]
+      mujoco.mj_forward(mjm, mjd)
+
+      # MuJoCo C rows, packed [nnz, conid, colind...] and [scale, force, val...]
+      rows = {}
+      adr = 0
+      while adr < mjd.nefmcon:
+        nnz, conid = mjd.efm_con_ind[adr], mjd.efm_con_ind[adr + 1]
+        row = np.zeros(mjm.nv)
+        row[mjd.efm_con_ind[adr + 2 : adr + 2 + nnz]] = mjd.efm_con_val[adr + 2 : adr + 2 + nnz]
+        rows[conid] = (mjd.efm_con_val[adr], mjd.efm_con_val[adr + 1], row)
+        adr += 2 + nnz
+
+      # each MuJoCo Warp row matches the C row of the contact with the same element and position
+      nelem = 0
+      for i in np.nonzero((con_worldid == worldid) & (con_nnz > 0))[0]:
+        match = [
+          c
+          for c in rows
+          if (mjd.contact.elem[c] == con_elem[i]).all() and np.allclose(mjd.contact.pos[c], con_pos[i], atol=1e-5)
+        ]
+        self.assertLen(match, 1)
+        scale, force, row = rows[match[0]]
+        row_warp = np.zeros(mjm.nv)
+        row_warp[con_dof[i, : con_nnz[i]]] = con_val[i, : con_nnz[i]]
+        _assert_eq(con_scale[i], scale, "scale")
+        _assert_eq(con_force[i], force, "force")
+        _assert_eq(row_warp, row, "row")
+        nelem += (con_elem[i] >= 0).any()
+      self.assertGreater(nelem, 0)
 
   @parameterized.parameters(1, 2)
   def test_eff_contact_shift_and_mul_add(self, nworld):
@@ -1997,8 +2077,8 @@ class DerivativeTest(parameterized.TestCase):
           </spatial>
         </tendon>
         <actuator>
-          <general joint="j0" gear="2.5" damping="1.5" gaintype="fixed" gainprm="10"/>
-          <general tendon="t0" gear="1.8" damping="1.2" gaintype="fixed" gainprm="5"/>
+          <general joint="j0" gear="2.5" damping="1.5 0.4 0.2" gaintype="fixed" gainprm="10"/>
+          <general tendon="t0" gear="1.8" damping="1.2 0.3 0.1" gaintype="fixed" gainprm="5"/>
           <muscle tendon="t0" lengthrange="0.2 0.6"/>
         </actuator>
         <keyframe>
@@ -2007,7 +2087,6 @@ class DerivativeTest(parameterized.TestCase):
       </mujoco>
       """,
       keyframe=0,
-      overrides={"actuator_dampingpoly": np.array([[0.4, 0.2], [0.3, 0.1], [0.0, 0.0]])},
       nworld=nworld,
     )
     if nworld == 2:
@@ -2775,7 +2854,6 @@ class DerivativeTest(parameterized.TestCase):
           </flex>
           <flex name="cable" dim="1" body="v0 v1"
                 vertex="0 0 0  0 0 0" element="0 1">
-            <edge stiffness="50"/>
             <contact selfcollide="none"/>
           </flex>
         </deformable>
