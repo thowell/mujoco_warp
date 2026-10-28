@@ -21,6 +21,7 @@ without a registered `AdjointRule` raise `NotImplementedError`, and functions wi
 validated and recorded with either a custom backward or their native kernel adjoints.
 """
 
+import contextlib
 import dataclasses
 import functools
 import inspect
@@ -40,14 +41,17 @@ class _ScratchTape(wp.Tape):
 
 def _call(tape: wp.Tape | None, fn: Callable, *args, verify_access: bool = True, **kwargs):
   """Calls `fn` with `tape` as the active Warp tape (`None` pauses recording)."""
-  prev_tape, wp_context.runtime.tape = wp_context.runtime.tape, tape
-  prev_verify = wp.config.verify_autograd_array_access
-  if not verify_access:
-    wp.config.verify_autograd_array_access = False
-  result = fn(*args, **kwargs)
-  wp_context.runtime.tape = prev_tape
-  wp.config.verify_autograd_array_access = prev_verify
-  return result
+  with contextlib.ExitStack() as cleanup:
+    cleanup.callback(vars(wp_context.runtime).__setitem__, "tape", wp_context.runtime.tape)
+    cleanup.callback(
+      vars(wp.config).__setitem__,
+      "verify_autograd_array_access",
+      wp.config.verify_autograd_array_access,
+    )
+    wp_context.runtime.tape = tape
+    if not verify_access:
+      wp.config.verify_autograd_array_access = False
+    return fn(*args, **kwargs)
 
 
 def _is_float(arr: wp.array) -> bool:

@@ -196,6 +196,7 @@ class DiffApiTest(parameterized.TestCase):
 
   def tearDown(self):
     # Remove test functions, restore the API rules, and disable gradients on the shared fixture:
+    wp.config.verify_autograd_array_access = False
     for k in list(diff.RULES):
       if k not in _API_RULES:
         del diff.RULES[k], diff._PARAMS[k]
@@ -240,6 +241,24 @@ class DiffApiTest(parameterized.TestCase):
     self.assertNotIn("_private", diff.RULES)
     self.assertEqual(wrapped(self.m, self.d), "result")
     self._assert_not_supported("'custom' is not supported", wrapped, self.m, self.d)
+
+    # Taped and untaped wrapped calls produce bitwise-identical forward outputs to unwrapped calls:
+    fields = ("qpos", "qvel", "qacc")
+    diff.register_adjoint("step", lambda *args: None, in_fields=("qpos", "qvel", "qfrc_applied"), out_fields=fields)
+
+    def run_step(fn, taped: bool) -> tuple[bytes, ...]:
+      m = mjw.put_model(self.mjm)
+      d = mjw.make_data(self.mjm)
+      d.qpos.fill_(0.3)
+      d.qvel.fill_(0.2)
+      d.qfrc_applied.fill_(0.1)
+      with wp.Tape() if taped else contextlib.nullcontext():
+        fn(m, d)
+      return tuple(diff.get(d, f).numpy().tobytes() for f in fields)
+
+    baseline = run_step(mjw.step.__wrapped__, taped=False)
+    for fn, taped in ((mjw.step.__wrapped__, True), (mjw.step, False), (mjw.step, True)):
+      self.assertEqual(run_step(fn, taped), baseline)
 
   def test_fields(self):
     # _FIELDS covers every float array of Model, Data, and RenderContext, including nested ones:
@@ -295,6 +314,52 @@ class DiffApiTest(parameterized.TestCase):
     self.assertEqual([diff._has_adjoint(l) for l in tape.launches], [True, True, True, False, True])
     self.assertEqual(diff._accessed([copy, func]), {id(self.d.qpos), id(self.d.qacc)})
     self.assertEqual(diff._accessed([axpy]), {id(self.d.qacc), id(self.d.qvel)})
+
+    # Errors in forward, supported, or backward restore the active tape and access check:
+    def fail_fwd(x, y):
+      wp.launch(_scale_kernel, dim=1, inputs=[x])  # missing output y raises RuntimeError
+
+    def sup_fwd(x, y):
+      wp.launch(_scale_kernel, dim=x.shape, inputs=[x], outputs=[y])
+
+    def bwd_fwd(x, y):
+      wp.launch(_scale_kernel, dim=x.shape, inputs=[x], outputs=[y])
+
+    def fail_sup(x, y):
+      raise ValueError("supported error")
+
+    def fail_bwd(x, y):
+      raise ValueError("backward error")
+
+    bad_fwd = _register(fail_fwd, lambda x, y: None, array_args=("x", "y"))
+    bad_sup = _register(sup_fwd, lambda x, y: None, array_args=("x", "y"), supported=fail_sup)
+    bad_bwd = _register(bwd_fwd, fail_bwd, array_args=("x", "y"))
+
+    wp.config.verify_autograd_array_access = True
+    for fn, err in ((bad_fwd, RuntimeError), (bad_sup, ValueError)):
+      # Uncaught errors propagate cleanly through wp.Tape.__exit__ without a secondary RuntimeError:
+      with self.assertRaises(err), wp.Tape():
+        fn(self.d.qpos, self.d.qacc)
+      self.assertIsNone(wp_context.runtime.tape)
+      self.assertTrue(wp.config.verify_autograd_array_access)
+
+      # Caught errors leave the outer tape active, clean, and able to record subsequent launches:
+      with _requires_grad(self.d.qpos, self.d.qacc), wp.Tape() as tape:
+        with self.assertRaises(err):
+          fn(self.d.qpos, self.d.qacc)
+        self.assertIs(wp_context.runtime.tape, tape)
+        self.assertTrue(wp.config.verify_autograd_array_access)
+        self.assertEmpty(tape.launches)
+        wp.launch(_scale_kernel, dim=self.d.qpos.shape, inputs=[self.d.qpos], outputs=[self.d.qacc])
+      self.assertLen(tape.launches, 1)
+
+    with wp.Tape() as tape:
+      bad_bwd(self.d.qpos, self.d.qacc)
+      with self.assertRaisesRegex(ValueError, "backward error"):
+        tape.backward()
+      self.assertIs(wp_context.runtime.tape, tape)
+      self.assertTrue(wp.config.verify_autograd_array_access)
+    wp.config.verify_autograd_array_access = False
 
   @parameterized.parameters(*sorted(_API_RULES))
   def test_api_function_raises_not_implemented(self, fn_name: str):
