@@ -1427,9 +1427,10 @@ def _get_padded_sizes(nv: int, njmax: int, is_sparse: bool, tile_size: int, augm
 
 
 def _nvmax_pad(nvmax: int) -> int:
-  """Reserve an augmented column and round nvmax up to the dense tile size."""
+  """Reserve an augmented column for blocked Cholesky (n > 32) and round up to dense tile size."""
   t = types.TILE_SIZE_JTDAJ_DENSE
-  return ((max(nvmax, 1) + t) // t) * t
+  n = max(nvmax, 1)
+  return ((n + t - 1) // t) * t if n <= 32 else ((n + t) // t) * t
 
 
 def _default_nconmax(mjm: mujoco.MjModel, mjd: Optional[mujoco.MjData] = None) -> int:
@@ -1794,9 +1795,6 @@ _COMPACT_DATA_FIELDS: tuple[str, ...] = (
   "cdof_tri_row",
   "cdof_tri_col",
   "cM",
-  "cqLD",
-  "crhs",
-  "cx",
   "cJ",
   "cMa",
   "cqfrc_smooth",
@@ -1832,22 +1830,18 @@ def _allocate_compact_arrays(
   njp = njmax_pad if compact else 0
 
   if compact:
-    # all (i, j) DOF pairs of the nvmax_pad-wide compacted Hessian (the global dof_tri,
-    # triu over full nv, would index out of bounds).
-    idx = np.arange(nvmax_pad, dtype=np.int32)
-    d.cdof_tri_row = wp.array(np.repeat(idx, nvmax_pad), dtype=int)
-    d.cdof_tri_col = wp.array(np.tile(idx, nvmax_pad), dtype=int)
+    # upper-triangular (i <= j) DOF pairs of the nvmax_pad-wide compacted Hessian
+    tri_row, tri_col = np.triu_indices(nvmax_pad)
+    d.cdof_tri_row = wp.array(tri_row.astype(np.int32), dtype=int)
+    d.cdof_tri_col = wp.array(tri_col.astype(np.int32), dtype=int)
   else:
     d.cdof_tri_row = wp.empty(0, dtype=int)
     d.cdof_tri_col = wp.empty(0, dtype=int)
 
-  alloc_cJ = compact and not is_sparse(mjm)
+  alloc_dense_compact = compact and not is_sparse(mjm)
 
-  d.cM = wp.empty((nw, nvp, nvp), dtype=float)
-  d.cqLD = wp.empty((nw, nvp, nvp), dtype=float)
-  d.crhs = wp.empty((nw, nvp, 1), dtype=float)
-  d.cx = wp.empty((nw, nvp, 1), dtype=float)
-  d.cJ = wp.empty((nw, njp, nvp), dtype=float) if alloc_cJ else wp.empty((0, 0, 0), dtype=float)
+  d.cM = wp.empty((nw, nvp, nvp), dtype=float) if alloc_dense_compact else wp.empty((0, 0, 0), dtype=float)
+  d.cJ = wp.empty((nw, njp, nvp), dtype=float) if alloc_dense_compact else wp.empty((0, 0, 0), dtype=float)
   d.cMa = wp.empty((nw, nvp), dtype=float)
   d.cqfrc_smooth = wp.empty((nw, nvp), dtype=float)
   d.cqacc_smooth = wp.empty((nw, nvp), dtype=float)
@@ -1909,9 +1903,7 @@ def make_data(
   if njmax is None:
     njmax = _default_njmax(mjm)
 
-  sleep_enabled = bool(mjm.opt.enableflags & mujoco.mjtEnableBit.mjENBL_SLEEP) and not bool(
-    mjm.opt.disableflags & mujoco.mjtDisableBit.mjDSBL_ISLAND
-  )
+  sleep_enabled = bool(mjm.opt.enableflags & mujoco.mjtEnableBit.mjENBL_SLEEP)
   compact_alloc = sleep_enabled or (nvmax is not None)
 
   if nvmax is None:
@@ -1968,7 +1960,7 @@ def make_data(
   sizes["njmax"] = njmax
   sizes["nvmax"] = nvmax
   sizes["nvmax_pad"] = _nvmax_pad(nvmax)
-  sizes["nvmax_pad_sq"] = sizes["nvmax_pad"] * sizes["nvmax_pad"]
+  sizes["ncdof_tri"] = sizes["nvmax_pad"] * (sizes["nvmax_pad"] + 1) // 2
   sizes["nflexintcell"] = _get_nflexintcell(mjm)
   sizes["nflexface"] = _get_nflexface(mjm)
   efm_d = _get_efm_data(mjm)
@@ -2134,9 +2126,7 @@ def put_data(
   if njmax is None:
     njmax = _default_njmax(mjm, mjd)
 
-  sleep_enabled = bool(mjm.opt.enableflags & mujoco.mjtEnableBit.mjENBL_SLEEP) and not bool(
-    mjm.opt.disableflags & mujoco.mjtDisableBit.mjDSBL_ISLAND
-  )
+  sleep_enabled = bool(mjm.opt.enableflags & mujoco.mjtEnableBit.mjENBL_SLEEP)
   compact_alloc = sleep_enabled or (nvmax is not None)
 
   if nvmax is None:
@@ -2203,7 +2193,7 @@ def put_data(
   sizes["njmax"] = njmax
   sizes["nvmax"] = nvmax
   sizes["nvmax_pad"] = _nvmax_pad(nvmax)
-  sizes["nvmax_pad_sq"] = sizes["nvmax_pad"] * sizes["nvmax_pad"]
+  sizes["ncdof_tri"] = sizes["nvmax_pad"] * (sizes["nvmax_pad"] + 1) // 2
   sizes["nflexface"] = _get_nflexface(mjm)
   efm_d = _get_efm_data(mjm)
   sizes["nefmK"] = int(efm_d.nefmK) if efm_d else 0

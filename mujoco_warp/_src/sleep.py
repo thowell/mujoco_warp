@@ -87,36 +87,54 @@ def _tendon_limit_active(
   return False
 
 
-@wp.kernel
-def _zero_sleep_counters(
-  # Data out:
-  ntree_awake_out: wp.array[int],
-  nbody_awake_out: wp.array[int],
-  nv_awake_out: wp.array[int],
-):
-  worldid = wp.tid()
-  ntree_awake_out[worldid] = 0
-  nbody_awake_out[worldid] = 0
-  nv_awake_out[worldid] = 0
+@cache_kernel
+def _zero_sleep_counters(has_woke: bool = False):
+  @wp.kernel(module="unique", enable_backward=False)
+  def kernel(
+    # In:
+    woke_in: wp.array[int],
+    # Data out:
+    ntree_awake_out: wp.array[int],
+    nbody_awake_out: wp.array[int],
+    nv_awake_out: wp.array[int],
+  ):
+    worldid = wp.tid()
+    if wp.static(has_woke):
+      if woke_in[0] == 0:
+        return
+    ntree_awake_out[worldid] = 0
+    nbody_awake_out[worldid] = 0
+    nv_awake_out[worldid] = 0
 
-
-@wp.kernel
-def _update_sleep_trees(
-  # Data in:
-  tree_asleep_in: wp.array2d[int],
-  # Data out:
-  ntree_awake_out: wp.array[int],
-  tree_awake_out: wp.array2d[int],
-):
-  worldid, treeid = wp.tid()
-  is_awake = int(tree_asleep_in[worldid, treeid] < 0)
-  tree_awake_out[worldid, treeid] = is_awake
-  if is_awake == 1:
-    wp.atomic_add(ntree_awake_out, worldid, 1)  # kernel_analyzer: ignore[atomic]
+  return kernel
 
 
 @cache_kernel
-def _update_sleep_bodies(deterministic: bool = False):
+def _update_sleep_trees(has_woke: bool = False):
+  @wp.kernel(module="unique", enable_backward=False)
+  def kernel(
+    # Data in:
+    tree_asleep_in: wp.array2d[int],
+    # In:
+    woke_in: wp.array[int],
+    # Data out:
+    ntree_awake_out: wp.array[int],
+    tree_awake_out: wp.array2d[int],
+  ):
+    worldid, treeid = wp.tid()
+    if wp.static(has_woke):
+      if woke_in[0] == 0:
+        return
+    is_awake = int(tree_asleep_in[worldid, treeid] < 0)
+    tree_awake_out[worldid, treeid] = is_awake
+    if is_awake == 1:
+      wp.atomic_add(ntree_awake_out, worldid, 1)  # kernel_analyzer: ignore[atomic]
+
+  return kernel
+
+
+@cache_kernel
+def _update_sleep_bodies(has_woke: bool = False, deterministic: bool = False):
   module_options = {"enable_backward": False}
   if deterministic:
     module_options["deterministic"] = wp.DeterministicMode.RUN_TO_RUN
@@ -132,12 +150,16 @@ def _update_sleep_bodies(deterministic: bool = False):
     tree_awake_in: wp.array2d[int],
     # In:
     flg_staticawake: int,
+    woke_in: wp.array[int],
     # Data out:
     nbody_awake_out: wp.array[int],
     body_awake_out: wp.array2d[int],
     body_awake_ind_out: wp.array2d[int],
   ):
     worldid, bodyid = wp.tid()
+    if wp.static(has_woke):
+      if woke_in[0] == 0:
+        return
 
     tree = body_treeid[bodyid]
 
@@ -162,7 +184,7 @@ def _update_sleep_bodies(deterministic: bool = False):
 
 
 @cache_kernel
-def _update_sleep_dofs(deterministic: bool = False):
+def _update_sleep_dofs(has_woke: bool = False, deterministic: bool = False):
   module_options = {"enable_backward": False}
   if deterministic:
     module_options["deterministic"] = wp.DeterministicMode.RUN_TO_RUN
@@ -174,11 +196,16 @@ def _update_sleep_dofs(deterministic: bool = False):
     dof_bodyid: wp.array[int],
     # Data in:
     body_awake_in: wp.array2d[int],
+    # In:
+    woke_in: wp.array[int],
     # Data out:
     nv_awake_out: wp.array[int],
     dof_awake_ind_out: wp.array2d[int],
   ):
     worldid, dofid = wp.tid()
+    if wp.static(has_woke):
+      if woke_in[0] == 0:
+        return
     bodyid = dof_bodyid[dofid]
     if body_treeid[bodyid] >= 0 and body_awake_in[worldid, bodyid] == SleepState.AWAKE:
       idx = wp.atomic_add(nv_awake_out, worldid, 1)
@@ -188,24 +215,33 @@ def _update_sleep_dofs(deterministic: bool = False):
 
 
 @event_scope
-def update_sleep(m: types.Model, d: types.Data, flg_staticawake: int = 0):
+def update_sleep(
+  m: types.Model,
+  d: types.Data,
+  flg_staticawake: int = 0,
+  woke: Optional[wp.array] = None,
+):
   """Computes sleeping arrays from tree_asleep."""
+  has_woke = woke is not None
+  woke_arr = woke if woke is not None else d.nacon
+  det_atomics = bool(m.opt.deterministic & DeterminismType.ATOMICS)
+
   wp.launch(
-    _zero_sleep_counters,
+    _zero_sleep_counters(has_woke),
     dim=d.nworld,
-    inputs=[],
+    inputs=[woke_arr],
     outputs=[d.ntree_awake, d.nbody_awake, d.nv_awake],
   )
 
   wp.launch(
-    _update_sleep_trees,
+    _update_sleep_trees(has_woke),
     dim=(d.nworld, m.ntree),
-    inputs=[d.tree_asleep],
+    inputs=[d.tree_asleep, woke_arr],
     outputs=[d.ntree_awake, d.tree_awake],
   )
 
   wp.launch(
-    _update_sleep_bodies(bool(m.opt.deterministic & DeterminismType.ATOMICS)),
+    _update_sleep_bodies(has_woke, det_atomics),
     dim=(d.nworld, m.nbody),
     inputs=[
       m.body_parentid,
@@ -214,6 +250,7 @@ def update_sleep(m: types.Model, d: types.Data, flg_staticawake: int = 0):
       m.body_treeid,
       d.tree_awake,
       flg_staticawake,
+      woke_arr,
     ],
     outputs=[
       d.nbody_awake,
@@ -223,32 +260,15 @@ def update_sleep(m: types.Model, d: types.Data, flg_staticawake: int = 0):
   )
 
   wp.launch(
-    _update_sleep_dofs(bool(m.opt.deterministic & DeterminismType.ATOMICS)),
+    _update_sleep_dofs(has_woke, det_atomics),
     dim=(d.nworld, m.nv),
     inputs=[
       m.body_treeid,
       m.dof_bodyid,
       d.body_awake,
+      woke_arr,
     ],
     outputs=[d.nv_awake, d.dof_awake_ind],
-  )
-
-
-@event_scope
-def update_sleep_trees(m: types.Model, d: types.Data):
-  """Lightweight update of tree_awake array only, avoiding body/dof kernel launches."""
-  wp.launch(
-    _zero_sleep_counters,
-    dim=d.nworld,
-    inputs=[],
-    outputs=[d.ntree_awake, d.nbody_awake, d.nv_awake],
-  )
-
-  wp.launch(
-    _update_sleep_trees,
-    dim=(d.nworld, m.ntree),
-    inputs=[d.tree_asleep],
-    outputs=[d.ntree_awake, d.tree_awake],
   )
 
 
@@ -365,6 +385,8 @@ def _wake_kernel(
 
   asleep = int(tree_asleep_out[worldid, treeid] >= 0)
   if asleep == 0:
+    if tree_awake_in[worldid, treeid] == 0:
+      woke_out[0] = 1
     return
 
   # if tree_awake mismatch or cannot sleep: wake up
@@ -877,6 +899,8 @@ def _sweep_awake_trees(  # kernel_analyzer: ignore
   tree_dofnum: wp.array[int],
   tree_sleep_policy: wp.array[int],
   # Data in:
+  nefc_in: wp.array[int],
+  nisland_in: wp.array[int],
   qvel_in: wp.array2d[float],
   qfrc_applied_in: wp.array2d[float],
   xfrc_applied_in: wp.array2d[wp.spatial_vector],
@@ -888,6 +912,9 @@ def _sweep_awake_trees(  # kernel_analyzer: ignore
   has_sleep_candidate_out: wp.array[int],
 ):
   worldid, treeid = wp.tid()
+  # Constrained worlds without island discovery cannot sleep
+  if nefc_in[worldid] > 0 and nisland_in[worldid] == 0:
+    return
   sleep_tolerance = opt_sleep_tolerance[worldid % opt_sleep_tolerance.shape[0]]
   as_val = tree_asleep_out[worldid, treeid]
   if as_val >= 0:
@@ -944,6 +971,7 @@ def _build_cycles(  # kernel_analyzer: ignore
   tree_dofadr: wp.array[int],
   tree_dofnum: wp.array[int],
   # Data in:
+  nefc_in: wp.array[int],
   nisland_in: wp.array[int],
   tree_island_in: wp.array2d[int],
   # In:
@@ -959,6 +987,8 @@ def _build_cycles(  # kernel_analyzer: ignore
   worldid = wp.tid()
 
   if has_sleep_candidate_in[0] == 0:
+    return
+  if nefc_in[worldid] > 0 and nisland_in[worldid] == 0:
     return
 
   asleep_any = int(0)
@@ -993,13 +1023,9 @@ def _build_cycles(  # kernel_analyzer: ignore
       if tree_asleep_out[worldid, t] == -1:
         tree_asleep_out[worldid, t] = t  # self-cycle
         asleep_any = 1
-
-      # Ensure sleeping tree dof velocity and acceleration remain exactly zero
-      if tree_asleep_out[worldid, t] >= 0:
         dofadr = tree_dofadr[t]
         dofnum = tree_dofnum[t]
         for d in range(dofnum):
-          # TODO(team): shouldn't be necessary to zero if island is already asleep
           qvel_out[worldid, dofadr + d] = 0.0
           qacc_out[worldid, dofadr + d] = 0.0
 
@@ -1016,7 +1042,7 @@ def sleep(m: types.Model, d: types.Data) -> wp.array:
   has_sleep_candidate = wp.zeros(1, dtype=int)
   nslept = wp.zeros(1, dtype=int)
 
-  # 1. Sweep over awake trees and increment counter if they can sleep
+  # Sweep over awake trees and increment counter if they can sleep
   wp.launch(
     _sweep_awake_trees,
     dim=(d.nworld, m.ntree),
@@ -1027,6 +1053,8 @@ def sleep(m: types.Model, d: types.Data) -> wp.array:
       m.tree_dofadr,
       m.tree_dofnum,
       m.tree_sleep_policy,
+      d.nefc,
+      d.nisland,
       d.qvel,
       d.qfrc_applied,
       d.xfrc_applied,
@@ -1035,7 +1063,7 @@ def sleep(m: types.Model, d: types.Data) -> wp.array:
     outputs=[d.tree_asleep, has_sleep_candidate],
   )
 
-  # 2. Check which constraint islands can sleep (all trees in island must be asleep)
+  # Check which constraint islands can sleep (all trees in island must be asleep)
   island_can_sleep = wp.ones((d.nworld, m.ntree), dtype=int)
   wp.launch(
     _check_island_can_sleep,
@@ -1049,7 +1077,7 @@ def sleep(m: types.Model, d: types.Data) -> wp.array:
     outputs=[island_can_sleep],
   )
 
-  # 3. Build sleep cycles for sleeping islands and sleep unconstrained trees
+  # Build sleep cycles for sleeping islands and sleep unconstrained trees
   wp.launch(
     _build_cycles,
     dim=d.nworld,
@@ -1057,6 +1085,7 @@ def sleep(m: types.Model, d: types.Data) -> wp.array:
       m.ntree,
       m.tree_dofadr,
       m.tree_dofnum,
+      d.nefc,
       d.nisland,
       d.tree_island,
       island_can_sleep,
