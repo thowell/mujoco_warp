@@ -732,6 +732,7 @@ class DeterminismTest(parameterized.TestCase):
       qvel_noise=0.1,
       ctrl_noise=0.5,
     )
+    # eff_prec_fold is called from solver under EnableBit.IPC in the follow-up IPC PR
     extra = (lambda m, d: derivative.eff_prec_fold(m, d, out=d.efm_L)) if m.opt.solver == SolverType.CG else None
     # stiff passive contacts amplify differences in summation order
     self._check_scene(mjm, m, d, covers, replay=True, extra=extra, tol=1e-2)

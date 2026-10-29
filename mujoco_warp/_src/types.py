@@ -1586,6 +1586,8 @@ class Model:
     has_flex_snh: whether any flex uses 3D SNH elasticity
     has_non_simple_flex: whether any flex has non-simple vertex bodies
     has_flex_edge_stiff_damp: whether any non-rigid flex has edge stiffness or damping
+    has_flex_stiff: whether any flex contributes elastic stiffness
+    has_reducible_flex: whether any flex is rigid or interpolated
     has_tendon_stiffness: whether any tendon has positive stiffness
     has_tendon_damping: whether any tendon has positive damping
     has_efm_actuator: whether any actuator contributes effective metric coupling
@@ -1693,6 +1695,7 @@ class Model:
     flex_shelladr: maps each flex to its start shell index                  (nflex,)
     flex_faceadr: maps each flex to its start face index                    (nflex,)
     flex_simple: whether all vertices of flex are on simple bodies          (nflex,)
+    flex_stiff_possible: whether flex contributes elastic stiffness         (nflex,)
     flex_cell_map: precomputed flex cell mapping (nflexintcell,)
     flexstrain_J_rownnz: number of nonzeros in flex strain Jacobian row     (neq_flexstrain,)
     flexstrain_J_rowadr: row start address in colind array (neq_flexstrain,)
@@ -2126,6 +2129,8 @@ class Model:
   has_flex_snh: bool
   has_non_simple_flex: bool
   has_flex_edge_stiff_damp: bool
+  has_flex_stiff: bool
+  has_reducible_flex: bool
   has_tendon_stiffness: bool
   has_tendon_damping: bool
   has_efm_actuator: bool
@@ -2228,6 +2233,7 @@ class Model:
   flex_shelladr: array("nflex", int)
   flex_faceadr: array("nflex", int)
   flex_simple: array("nflex", bool)
+  flex_stiff_possible: array("nflex", bool)
   flex_cell_map: array("nflexintcell", wp.vec4i)
   flexstrain_J_rownnz: array("neq_flexstrain", int)
   flexstrain_J_rowadr: array("neq_flexstrain", int)

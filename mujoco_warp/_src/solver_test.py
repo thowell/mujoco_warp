@@ -440,6 +440,7 @@ class SolverTest(parameterized.TestCase):
         wp.zeros((1, 1), dtype=float),
         wp.zeros((1, 1), dtype=float),
         wp.zeros((1, 1), dtype=float),
+        wp.zeros((1, 1), dtype=float),
         wp.array([1.0], dtype=float),
         wp.array([1.0], dtype=float),
         wp.array([1.0], dtype=float),
@@ -473,6 +474,7 @@ class SolverTest(parameterized.TestCase):
         wp.zeros((1, 1), dtype=float),
         wp.zeros((1, 1), dtype=float),
         wp.zeros((1, 1), dtype=float),
+        wp.zeros((1, 1), dtype=float),
         wp.array([1.0], dtype=float),
         wp.array([1.0], dtype=float),
         wp.array([0.0], dtype=float),
@@ -485,6 +487,50 @@ class SolverTest(parameterized.TestCase):
     self.assertEqual(solver_niter.numpy()[0], 1)
     self.assertEqual(nsolving.numpy()[0], 0)
     self.assertEqual(overflow.numpy()[0], 0)
+
+  def test_solve_cg_finalize_hager_zhang_beta(self):
+    """CG beta finalize computes Hager-Zhang beta with HZ+ truncation and conjugacy restart."""
+    solver_niter = wp.zeros(3, dtype=int)
+    nsolving = wp.array([3], dtype=int)
+    done = wp.zeros(3, dtype=bool)
+    overflow = wp.zeros(3, dtype=int)
+    beta = wp.full(3, wp.inf, dtype=float)
+
+    grad = wp.array([[2.0, 2.0], [2.0, 2.0], [2.0, 2.0]], dtype=float)
+    prev_grad = wp.array([[1.0, 2.0], [1.0, 2.0], [1.0, 2.0]], dtype=float)
+    Mgrad = wp.array([[4.0, 4.0], [4.0, 4.0], [4.0, 4.0]], dtype=float)
+    prev_Mgrad = wp.array([[2.0, 4.0], [2.0, 4.0], [2.0, 4.0]], dtype=float)
+    search = wp.array([[2.0, -1.5], [2.0, 1.0], [-1.0, -3.0]], dtype=float)
+
+    wp.launch_tiled(
+      solver._solve_beta_finalize_tiled(types.OverflowType.NONE),
+      dim=3,
+      inputs=[
+        2,
+        wp.array([1.0e-6], dtype=float),
+        100,
+        wp.ones(3, dtype=float),
+        grad,
+        Mgrad,
+        prev_grad,
+        prev_Mgrad,
+        search,
+        wp.ones(3, dtype=float),
+        wp.ones(3, dtype=float),
+        wp.ones(3, dtype=float),
+        done,
+      ],
+      outputs=[solver_niter, overflow, beta, nsolving, done],
+      block_dim=32,
+    )
+
+    beta_np = beta.numpy()
+    # World 0: exact Hager-Zhang beta = (4 - 2 * (2 / 2) * 1) / 2 = 1.0 (distinct from PRP = 0.4)
+    self.assertAlmostEqual(beta_np[0], 1.0, places=5)
+    # World 1: negative beta_hz = (4 - 2 * (2 / 2) * 6) / 2 = -4.0 clamped to 0 in float32 (HZ+)
+    self.assertEqual(beta_np[1], 0.0)
+    # World 2: d' * y = -1 < MJ_MINVAL restarts to steepest descent (raw beta_hz = 28 > 0)
+    self.assertEqual(beta_np[2], 0.0)
 
   # Transition cases use powers of two so the exact delta is below the absolute-cost ulp.
   @parameterized.named_parameters(

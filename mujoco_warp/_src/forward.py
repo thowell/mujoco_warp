@@ -62,7 +62,7 @@ def check_discrete(m: Model):
       raise ValueError("stable Neo-Hookean elasticity requires integrator='discrete'")
     if passive.flex_passive_contact(m):
       raise ValueError("passive flex contact requires an integrator with the effective metric: set integrator='discrete'")
-    if m.opt.integrator in (IntegratorType.IMPLICIT, IntegratorType.IMPLICITFAST) and (m.nefmK > 0 or m.has_non_simple_flex):
+    if m.opt.integrator in (IntegratorType.IMPLICIT, IntegratorType.IMPLICITFAST) and m.has_flex_stiff:
       raise ValueError(
         "flex elasticity is no longer integrated implicitly under integrator='implicit' and 'implicitfast': "
         "set integrator='discrete', or 'Euler' with a small timestep"
@@ -1193,58 +1193,6 @@ def implicit_free_body(m: Model, d: Data, vec_in: wp.array2d[float], vec_out: wp
   )
 
 
-@wp.func
-def _eff_flex_stiff_possible(
-  # Model:
-  nflex: int,
-  nflexbending: int,
-  flex_dim: wp.array[int],
-  flex_interp: wp.array[int],
-  flex_cellnum: wp.array[wp.vec3i],
-  flex_stiffnessadr: wp.array[int],
-  flex_bendingadr: wp.array[int],
-  flex_stiffness: wp.array[float],
-  flex_bending: wp.array[float],
-  flex_edgeequality: wp.array[int],
-  flex_rigid: wp.array[bool],
-  # In:
-  f: int,
-) -> bool:
-  if flex_rigid[f]:
-    return False
-  badr = flex_bendingadr[f]
-  if flex_dim[f] == 1:
-    return badr >= 0
-  if flex_edgeequality[f] != 3:
-    sadr = flex_stiffnessadr[f]
-    if sadr >= 0:
-      order = flex_interp[f]
-      if order < 0:
-        return True
-      elif order == 0:
-        if flex_stiffness[sadr] != 0.0:
-          return True
-      else:
-        cell = flex_cellnum[f]
-        npe = (order + 1) * (order + 1) * (order + 1)
-        nelem = cell[0] * cell[1] * cell[2]
-        stride = 9 * npe * npe
-        for e in range(nelem):
-          if flex_stiffness[sadr + e * stride] != 0.0:
-            return True
-  if badr < 0:
-    return False
-  end = nflexbending
-  for g in range(f + 1, nflex):
-    if flex_bendingadr[g] >= 0:
-      end = flex_bendingadr[g]
-      break
-  for i in range(badr, end):
-    if flex_bending[i] != 0.0:
-      return True
-  return False
-
-
 @cache_kernel
 def _discrete_free_gyro_kernel(
   has_fluid: bool,
@@ -1258,28 +1206,19 @@ def _discrete_free_gyro_kernel(
     # Model:
     nactuator: int,
     nflex: int,
-    nflexbending: int,
     ntendon: int,
     opt_timestep: wp.array[float],
     opt_enableflags: int,
     body_dofadr: wp.array[int],
     body_treeid: wp.array[int],
     dof_treeid: wp.array[int],
-    flex_dim: wp.array[int],
     flex_interp: wp.array[int],
-    flex_cellnum: wp.array[wp.vec3i],
     flex_nodeadr: wp.array[int],
     flex_nodenum: wp.array[int],
     flex_vertadr: wp.array[int],
     flex_vertnum: wp.array[int],
-    flex_stiffnessadr: wp.array[int],
-    flex_bendingadr: wp.array[int],
     flex_nodebodyid: wp.array[int],
     flex_vertbodyid: wp.array[int],
-    flex_stiffness: wp.array[float],
-    flex_bending: wp.array[float],
-    flex_edgeequality: wp.array[int],
-    flex_rigid: wp.array[bool],
     ten_J_rownnz: wp.array[int],
     ten_J_rowadr: wp.array[int],
     ten_J_colind: wp.array[int],
@@ -1288,6 +1227,7 @@ def _discrete_free_gyro_kernel(
     M_colind: wp.array[int],
     efm_K_rownnz: wp.array[int],
     body_freeadr: wp.array[int],
+    flex_stiff_possible: wp.array[bool],
     # Data in:
     nefc_in: wp.array[int],
     qvel_in: wp.array2d[float],
@@ -1339,20 +1279,7 @@ def _discrete_free_gyro_kernel(
     coupled = int(0)
     if wp.static(has_flex_stiff):
       for f in range(nflex):
-        if _eff_flex_stiff_possible(
-          nflex,
-          nflexbending,
-          flex_dim,
-          flex_interp,
-          flex_cellnum,
-          flex_stiffnessadr,
-          flex_bendingadr,
-          flex_stiffness,
-          flex_bending,
-          flex_edgeequality,
-          flex_rigid,
-          f,
-        ):
+        if flex_stiff_possible[f]:
           is_interp = flex_interp[f] != 0
           vadr = flex_nodeadr[f] if is_interp else flex_vertadr[f]
           vnum = flex_nodenum[f] if is_interp else flex_vertnum[f]
@@ -1476,7 +1403,6 @@ def _launch_discrete_free_gyro(m: Model, d: Data, out: wp.array2d[float], qacc: 
   if m.opt.integrator != IntegratorType.DISCRETE:
     return
   has_fluid = m.has_fluid and not ((m.opt.disableflags & DisableBit.SPRING) and (m.opt.disableflags & DisableBit.DAMPER))
-  has_flex_stiff = bool(m.nflex and (m.nefmK > 0 or m.has_flex_stiff_dim23 or m.has_non_simple_flex or m.has_1d_flex))
   if passive.flex_passive_contact(m) and m.body_freeadr.size > 0:
     efm_con_dof, _, efm_con_scale, _, efm_con_nnz = passive.build_efm_contact(m, d)
   else:
@@ -1484,34 +1410,25 @@ def _launch_discrete_free_gyro(m: Model, d: Data, out: wp.array2d[float], qacc: 
     efm_con_scale = wp.empty(0, dtype=float, device=d.qacc.device)
     efm_con_nnz = wp.empty(0, dtype=int, device=d.qacc.device)
   wp.launch_tiled(
-    _discrete_free_gyro_kernel(has_fluid, passive.flex_passive_contact(m), has_flex_stiff, is_inverse, m.is_sparse),
+    _discrete_free_gyro_kernel(has_fluid, passive.flex_passive_contact(m), m.has_flex_stiff, is_inverse, m.is_sparse),
     dim=(d.nworld, m.body_freeadr.size),
     block_dim=m.block_dim.discrete_free_gyro,
     inputs=[
       m.nactuator,
       m.nflex,
-      m.nflexbending,
       m.ntendon,
       m.opt.timestep,
       m.opt.enableflags,
       m.body_dofadr,
       m.body_treeid,
       m.dof_treeid,
-      m.flex_dim,
       m.flex_interp,
-      m.flex_cellnum,
       m.flex_nodeadr,
       m.flex_nodenum,
       m.flex_vertadr,
       m.flex_vertnum,
-      m.flex_stiffnessadr,
-      m.flex_bendingadr,
       m.flex_nodebodyid,
       m.flex_vertbodyid,
-      m.flex_stiffness,
-      m.flex_bending,
-      m.flex_edgeequality,
-      m.flex_rigid,
       m.ten_J_rownnz,
       m.ten_J_rowadr,
       m.ten_J_colind,
@@ -1520,6 +1437,7 @@ def _launch_discrete_free_gyro(m: Model, d: Data, out: wp.array2d[float], qacc: 
       m.M_colind,
       m.efm_K_rownnz,
       m.body_freeadr,
+      m.flex_stiff_possible,
       d.nefc,
       d.qvel,
       qacc,

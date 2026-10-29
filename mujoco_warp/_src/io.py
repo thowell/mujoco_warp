@@ -579,6 +579,10 @@ def put_model(mjm: mujoco.MjModel, batch_sizes: dict[str, int] | None = None) ->
   m.has_flex_edge_stiff_damp = bool(
     any(not mjm.flex_rigid[f] and (mjm.flex_edgestiffness[f] > 0 or mjm.flex_edgedamping[f] > 0) for f in range(mjm.nflex))
   )
+  flex_stiff_possible = np.array([_eff_flex_stiff_possible(mjm, f) for f in range(mjm.nflex)], dtype=bool)
+  m.flex_stiff_possible = flex_stiff_possible
+  m.has_flex_stiff = bool(flex_stiff_possible.any())
+  m.has_reducible_flex = bool(mjm.nflex > 0 and (np.any(mjm.flex_rigid != 0) or np.any(mjm.flex_interp != 0)))
   if (
     mjm.opt.integrator == mujoco.mjtIntegrator.mjINT_DISCRETE
     and mjm.opt.solver == mujoco.mjtSolver.mjSOL_NEWTON

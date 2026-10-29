@@ -159,6 +159,7 @@ def compute_interp_cell_quat(
 def eff_tendon_possible(
   # Model:
   opt_disableflags: int,
+  tendon_actuatorid: wp.array[int],
   tendon_stiffness: wp.array2d[float],
   tendon_stiffnesspoly: wp.array2d[wp.vec2],
   tendon_damping: wp.array2d[float],
@@ -174,7 +175,7 @@ def eff_tendon_possible(
     if spoly[0] != 0.0 or spoly[1] != 0.0:
       return True
   if not (opt_disableflags & DisableBit.DAMPER):
-    if tendon_damping[worldid % tendon_damping.shape[0], tenid] != 0.0:
+    if tendon_damping[worldid % tendon_damping.shape[0], tenid] != 0.0 or tendon_actuatorid[tenid] != -1:
       return True
     dpoly = tendon_dampingpoly[worldid % tendon_dampingpoly.shape[0], tenid]
     if dpoly[0] != 0.0 or dpoly[1] != 0.0:

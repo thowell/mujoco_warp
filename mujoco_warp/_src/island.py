@@ -409,6 +409,7 @@ def _island_dsu_metric_couplings(
   body_treeid: wp.array[int],
   dof_treeid: wp.array[int],
   site_bodyid: wp.array[int],
+  tendon_actuatorid: wp.array[int],
   ten_J_rownnz: wp.array[int],
   ten_J_rowadr: wp.array[int],
   ten_J_colind: wp.array[int],
@@ -435,6 +436,7 @@ def _island_dsu_metric_couplings(
   if idx < ntendon:
     if support.eff_tendon_possible(
       opt_disableflags,
+      tendon_actuatorid,
       tendon_stiffness,
       tendon_stiffnesspoly,
       tendon_damping,
@@ -623,6 +625,7 @@ def direct_dsu(m: types.Model, d: types.Data, island_parent: wp.array2d[int]):
         m.body_treeid,
         m.dof_treeid,
         m.site_bodyid,
+        m.tendon_actuatorid,
         m.ten_J_rownnz,
         m.ten_J_rowadr,
         m.ten_J_colind,

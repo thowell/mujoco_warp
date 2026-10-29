@@ -896,7 +896,6 @@ def _linesearch_iterative_kernel(
   is_sparse: bool,
   incremental: bool,
   warn_overflow: int,
-  exact_gtol: bool = False,
 ):
   """Factory for iterative linesearch kernel.
 
@@ -907,10 +906,8 @@ def _linesearch_iterative_kernel(
     is_sparse: Use sparse matrix representation for constraint Jacobian.
     incremental: Use incremental linesearch updates.
     warn_overflow: Overflow warning bitmask.
-    exact_gtol: Use the MuJoCo C gradient tolerance without float32 noise allowances.
   """
   LS_ITERATIONS = ls_iterations
-  EXACT_GTOL = exact_gtol
   IS_ELLIPTIC = cone_type == types.ConeType.ELLIPTIC
   FUSE_JV = fuse_jv
   INCREMENTAL = incremental
@@ -1095,9 +1092,7 @@ def _linesearch_iterative_kernel(
     tolerance = opt_tolerance[worldid % opt_tolerance.shape[0]]
     ls_tolerance = opt_ls_tolerance[worldid % opt_ls_tolerance.shape[0]]
     snorm = wp.sqrt(ctx_search_dot_in[worldid])
-    gtol = tolerance * ls_tolerance * snorm / ctx_inertia_scale_in[worldid]
-    if wp.static(not EXACT_GTOL):
-      gtol = wp.max(gtol, 1e-6)
+    gtol = wp.max(tolerance * ls_tolerance * snorm / ctx_inertia_scale_in[worldid], 1e-6)
 
     # quad_gauss = [0, search.T @ Ma - search.T @ qfrc_smooth, 0.5 * search.T @ mv] + equality
     local_gauss = wp.vec2(0.0)
@@ -1193,9 +1188,7 @@ def _linesearch_iterative_kernel(
     q1_abs = wp.sqrt(2.0 * wp.max(rows[0], 0.0) * wp.max(rows[2], 0.0)) + wp.abs(ctx_quad_gauss[1])
 
     # set acceptance tolerance to avoid exceeding gtol in f32
-    gtol_accept = gtol
-    if wp.static(not EXACT_GTOL):
-      gtol_accept = wp.max(gtol, _ALPHA_NOISE_EPS * q1_abs)
+    gtol_accept = wp.max(gtol, _ALPHA_NOISE_EPS * q1_abs)
 
     noise_floor = float(0.0)
     if wp.static(INCREMENTAL):
@@ -1205,7 +1198,7 @@ def _linesearch_iterative_kernel(
     improvement = float(0.0)
 
     # a slope at alpha = 0 below rounding noise means the start is already the line minimum
-    ls_converged = (p0[1] == 0.0) if wp.static(EXACT_GTOL) else (wp.abs(p0[1]) < _ALPHA_NOISE_EPS * q1_abs)
+    ls_converged = wp.abs(p0[1]) < _ALPHA_NOISE_EPS * q1_abs
 
     # lo_in at lo_alpha_in = -p0[1] / p0[2]
     lo_alpha_in = -math.safe_div(p0[1], p0[2])
@@ -1487,7 +1480,6 @@ def _linesearch_iterative(m: types.Model, d: types.Data, ctx: SolverContext, fus
       m.is_sparse,
       _use_incremental(m),
       int(m.opt.warn_overflow),
-      m.opt.integrator == types.IntegratorType.DISCRETE,
     ),
     dim=d.nworld,
     inputs=[
@@ -3802,6 +3794,7 @@ def _solve_beta_finalize_tiled(warn_overflow: int):
     ctx_Mgrad_in: wp.array2d[float],
     ctx_prev_grad_in: wp.array2d[float],
     ctx_prev_Mgrad_in: wp.array2d[float],
+    ctx_search_in: wp.array2d[float],
     ctx_improvement_in: wp.array[float],
     ctx_grad_dot_in: wp.array[float],
     ctx_alpha_in: wp.array[float],
@@ -3819,23 +3812,30 @@ def _solve_beta_finalize_tiled(warn_overflow: int):
     if ctx_done_in[worldid]:
       return
 
-    local_num = float(0.0)
-    local_den = float(0.0)
+    # Hager-Zhang: d' * y, y' * M * y, y' * Mgrad, d' * grad
+    local_sums = wp.vec4(0.0)
     BLOCK_DIM = wp.block_dim()
 
     for dofid in range(tid, nv, BLOCK_DIM):
-      prev_Mgrad = ctx_prev_Mgrad_in[worldid, dofid]
-      num = ctx_grad_in[worldid, dofid] * (ctx_Mgrad_in[worldid, dofid] - prev_Mgrad)
-      den = ctx_prev_grad_in[worldid, dofid] * prev_Mgrad
-      local_num += num
-      local_den += den
+      grad = ctx_grad_in[worldid, dofid]
+      Mgrad = ctx_Mgrad_in[worldid, dofid]
+      graddif = grad - ctx_prev_grad_in[worldid, dofid]
+      mgraddif = Mgrad - ctx_prev_Mgrad_in[worldid, dofid]
+      search = ctx_search_in[worldid, dofid]
+      local_sums += wp.vec4(search * graddif, graddif * mgraddif, graddif * Mgrad, search * grad)
 
-    beta_tile = wp.tile(wp.vec2(local_num, local_den), preserve_type=True)
-    beta_sum = wp.tile_reduce(wp.add, beta_tile)
-    reduced_beta = beta_sum[0]
+    sums = wp.tile_reduce(wp.add, wp.tile(local_sums, preserve_type=True))[0]
 
     if tid == 0:
-      ctx_beta_out[worldid] = wp.max(0.0, reduced_beta[0] / wp.max(types.MJ_MINVAL, reduced_beta[1]))
+      d_dot_y = sums[0]
+      if d_dot_y < types.MJ_MINVAL:
+        # conjugacy lost: restart to steepest descent
+        ctx_beta_out[worldid] = 0.0
+      else:
+        beta_hz = (sums[2] - 2.0 * (sums[1] / d_dot_y) * sums[3]) / d_dot_y
+        # diverge from MuJoCo C (eta_k < 0): clamp beta >= 0 in float32 (HZ+) so inexact
+        # linesearch residuals d' * grad and active-set flips restart instead of opposing descent
+        ctx_beta_out[worldid] = wp.max(0.0, beta_hz)
 
       solver_niter_out[worldid] += 1
       tolerance = opt_tolerance[worldid % opt_tolerance.shape[0]]
@@ -3979,7 +3979,7 @@ def _solver_iteration(
   else:
     _update_gradient(m, d, ctx, compact=compact)
 
-  # polak-ribiere
+  # Hager-Zhang conjugate direction update
   if m.opt.solver == types.SolverType.CG:
     wp.launch_tiled(
       _solve_beta_finalize_tiled(int(m.opt.warn_overflow)),
@@ -3993,6 +3993,7 @@ def _solver_iteration(
         ctx.Mgrad,
         ctx.prev_grad,
         ctx.prev_Mgrad,
+        ctx.search,
         ctx.improvement,
         ctx.grad_dot,
         ctx.alpha,
@@ -4360,8 +4361,9 @@ def _solve(m: types.Model, d: types.Data, ctx: SolverContext, compact: bool = Fa
       ctx.flex_scratch = passive.flex_stretch_scratch(m, d)
 
   warmstart = not (m.opt.disableflags & types.DisableBit.WARMSTART)
+  run_qacc_smooth = not smooth.skip_qacc_smooth(m, d)
   wp.launch(
-    _solve_init_dof(warmstart, m.is_sparse, not smooth.skip_qacc_smooth(m, d)),
+    _solve_init_dof(warmstart, m.is_sparse, run_qacc_smooth),
     dim=(d.nworld, m.nv),
     inputs=[d.nefc, d.qacc_warmstart, d.qacc_smooth],
     outputs=[d.qacc, d.qfrc_constraint],
@@ -4373,7 +4375,7 @@ def _solve(m: types.Model, d: types.Data, ctx: SolverContext, compact: bool = Fa
       inputs=[m.dof_treeid, d.tree_awake],
       outputs=[d.qacc],
     )
-  if warmstart and m.opt.integrator == types.IntegratorType.DISCRETE and not compact:
+  if warmstart and run_qacc_smooth and m.opt.integrator == types.IntegratorType.DISCRETE and not compact:
     _warmstart_best(m, d, ctx)
 
   #  context
@@ -4390,7 +4392,7 @@ def _solve(m: types.Model, d: types.Data, ctx: SolverContext, compact: bool = Fa
     nsolving.fill_(d.nworld)
   else:
     nsolving = wp.full(shape=(1,), value=d.nworld, dtype=int)
-  if m.opt.integrator == types.IntegratorType.DISCRETE:
+  if run_qacc_smooth and m.opt.integrator == types.IntegratorType.DISCRETE:
     wp.launch(
       _solve_skip_empty_efc,
       dim=d.nworld,

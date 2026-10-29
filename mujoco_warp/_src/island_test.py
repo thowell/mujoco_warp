@@ -499,18 +499,26 @@ class IslandDiscoveryConstraintsTest(parameterized.TestCase):
     np.testing.assert_array_equal(d.efc.island.numpy()[0, : mjd.nefc], mjd.efc_island[: mjd.nefc])
 
   @parameterized.named_parameters(
-    ("stiffness_only", '<spatial stiffness="5"><site site="s0"/><site site="s1"/></spatial>', "", 1),
-    ("stiffnesspoly_only", '<spatial stiffness="0 2 0"><site site="s0"/><site site="s1"/></spatial>', "", 1),
-    ("dampingpoly_only", '<spatial damping="0 2 0"><site site="s0"/><site site="s1"/></spatial>', "", 1),
+    ("stiffness_only", '<spatial stiffness="5"><site site="s0"/><site site="s1"/></spatial>', "", "", 1),
+    ("stiffnesspoly_only", '<spatial stiffness="0 2 0"><site site="s0"/><site site="s1"/></spatial>', "", "", 1),
+    ("dampingpoly_only", '<spatial damping="0 2 0"><site site="s0"/><site site="s1"/></spatial>', "", "", 1),
     (
       "all_disabled",
       '<spatial stiffness="5" damping="2"><site site="s0"/><site site="s1"/></spatial>',
+      "",
       'spring="disable" damper="disable"',
       2,
     ),
+    (
+      "actuator_damping",
+      '<spatial name="t"><site site="s0"/><site site="s1"/></spatial>',
+      '<motor tendon="t" damping="2"/>',
+      "",
+      1,
+    ),
   )
-  def test_eff_tendon_possible_branches(self, tendon_xml, flags, expected_nisland):
-    """Tests eff_tendon_possible stiffness, polynomial stiffness/damping, and disable flags."""
+  def test_eff_tendon_possible_branches(self, tendon_xml, actuator_xml, flags, expected_nisland):
+    """Tests eff_tendon_possible stiffness, polynomial/actuator damping, and disable flags."""
     mjm, mjd, m, d = test_data.fixture(
       xml=f"""
       <mujoco>
@@ -521,6 +529,7 @@ class IslandDiscoveryConstraintsTest(parameterized.TestCase):
           <body name="b1" pos="0.5 0 0.08"><freejoint/><geom size="0.1"/><site name="s1"/></body>
         </worldbody>
         <tendon>{tendon_xml}</tendon>
+        <actuator>{actuator_xml}</actuator>
       </mujoco>
       """,
     )

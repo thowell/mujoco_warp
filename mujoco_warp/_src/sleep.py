@@ -448,6 +448,7 @@ def _wake_tendon_kernel(
   site_bodyid: wp.array[int],
   tendon_adr: wp.array[int],
   tendon_num: wp.array[int],
+  tendon_actuatorid: wp.array[int],
   tendon_limited: wp.array[int],
   tendon_range: wp.array2d[wp.vec2],
   tendon_margin: wp.array2d[float],
@@ -501,6 +502,7 @@ def _wake_tendon_kernel(
     ):
       active = support.eff_tendon_possible(
         opt_disableflags,
+        tendon_actuatorid,
         tendon_stiffness,
         tendon_stiffnesspoly,
         tendon_damping,
@@ -823,6 +825,7 @@ def wake_tendon(m: types.Model, d: types.Data):
       m.site_bodyid,
       m.tendon_adr,
       m.tendon_num,
+      m.tendon_actuatorid,
       m.tendon_limited,
       m.tendon_range,
       m.tendon_margin,

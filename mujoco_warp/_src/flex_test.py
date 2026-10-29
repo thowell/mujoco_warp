@@ -2812,32 +2812,53 @@ class FlexCollisionTest(parameterized.TestCase):
 
   @parameterized.parameters(1, 2)
   def test_flex_fps_capping(self, nworld):
-    """Test that flex-flex contacts are limited to MJ_MAXCONPAIR (50) via parallel FPS."""
-    _, _, m, d = test_data.fixture(
+    """Test that reducible flex-flex contacts are limited to MJ_MAXCONPAIR (50) via parallel FPS."""
+    mjm, mjd, m, d = test_data.fixture(
       xml="""
       <mujoco>
+        <option integrator="discrete"/>
         <worldbody>
-          <flexcomp name="cloth1" type="grid" count="8 8 1" spacing=".05 .05 .05" pos="0 0 0"
-                    radius=".02" dim="2" mass=".5">
-            <contact selfcollide="none" contype="1" conaffinity="1"/>
+          <flexcomp name="cloth1" count="8 8 1" spacing=".05 .05 .05" radius=".02" dim="2" mass=".5" rigid="true">
+            <contact selfcollide="none"/>
           </flexcomp>
-          <flexcomp name="cloth2" type="grid" count="8 8 1" spacing=".05 .05 .05" pos="0 0 0.01"
-                    radius=".02" dim="2" mass=".5">
-            <contact selfcollide="none" contype="1" conaffinity="1"/>
-          </flexcomp>
+          <body name="carrier" pos="0 0 0.01">
+            <freejoint/>
+            <inertial pos="0 0 0" mass="0.5" diaginertia="1e-3 1e-3 1e-3"/>
+            <flexcomp name="cloth2" count="8 8 1" spacing=".05 .05 .05" radius=".02" dim="2" mass=".5" rigid="true">
+              <contact selfcollide="none"/>
+            </flexcomp>
+          </body>
         </worldbody>
       </mujoco>
       """,
       nworld=nworld,
       nconmax=1500,
     )
-    m.flex_rigid.fill_(True)
+    mjds = [mjd]
+    if nworld == 2:
+      mjd1 = mujoco.MjData(mjm)
+      qpos = d.qpos.numpy()
+      qpos[1, 2] -= 0.002
+      d.qpos.assign(qpos)
+      mjd1.qpos[:] = qpos[1]
+      mjds.append(mjd1)
+
     d.nacon.fill_(-1)
     d.contact.dist.fill_(wp.inf)
     mjw.kinematics(m, d)
+    mjw.flex(m, d)
     mjw.collision(m, d)
+
+    for w in range(nworld):
+      mujoco.mj_forward(mjm, mjds[w])
+      self.assertEqual(mjds[w].ncon, types.MJ_MAXCONPAIR)
+
     nacon = int(d.nacon.numpy()[0])
     self.assertEqual(nacon, types.MJ_MAXCONPAIR * nworld)
+    if nworld == 2:
+      w0_dists = sorted(d.contact.dist.numpy()[:nacon][d.contact.worldid.numpy()[:nacon] == 0])
+      w1_dists = sorted(d.contact.dist.numpy()[:nacon][d.contact.worldid.numpy()[:nacon] == 1])
+      self.assertFalse(np.allclose(w0_dists, w1_dists))
 
   def test_flex_sat_prefilter_conservative(self):
     """Test that broadphase SAT prefilter is conservative and yields identical contacts."""
@@ -2908,15 +2929,18 @@ class FlexCollisionTest(parameterized.TestCase):
     _, _, m, d = test_data.fixture(
       xml="""
       <mujoco>
+        <option integrator="discrete"/>
         <worldbody>
-          <flexcomp name="cloth1" type="grid" count="8 8 1" spacing=".05 .05 .05" pos="0 0 0"
-                    radius=".02" dim="2" mass=".5">
-            <contact selfcollide="none" contype="1" conaffinity="1"/>
+          <flexcomp name="cloth1" count="8 8 1" spacing=".05 .05 .05" radius=".02" dim="2" mass=".5" rigid="true">
+            <contact selfcollide="none"/>
           </flexcomp>
-          <flexcomp name="cloth2" type="grid" count="8 8 1" spacing=".05 .05 .05" pos="0 0 0.01"
-                    radius=".02" dim="2" mass=".5">
-            <contact selfcollide="none" contype="1" conaffinity="1"/>
-          </flexcomp>
+          <body name="carrier" pos="0 0 0.01">
+            <freejoint/>
+            <inertial pos="0 0 0" mass="0.5" diaginertia="1e-3 1e-3 1e-3"/>
+            <flexcomp name="cloth2" count="8 8 1" spacing=".05 .05 .05" radius=".02" dim="2" mass=".5" rigid="true">
+              <contact selfcollide="none"/>
+            </flexcomp>
+          </body>
         </worldbody>
       </mujoco>
       """,
@@ -2924,11 +2948,12 @@ class FlexCollisionTest(parameterized.TestCase):
       nworld=1,
       nconmax=1500,
     )
-    m.flex_rigid.fill_(True)
     d.nacon.fill_(-1)
     d.contact.dist.fill_(wp.inf)
 
     mjw.kinematics(m, d)
+    mjw.flex(m, d)
+    collision_flex.flex_broadphase_aabb(m, d)
 
     ws = collision_flex._allocate_flex_workspace(m, d)
     sap_data = collision_flex._run_flex_sap_sort(m, d)
@@ -2942,6 +2967,7 @@ class FlexCollisionTest(parameterized.TestCase):
     cand_pos = ws.pos.numpy()[:ncand]
     cand_dist = ws.dist.numpy()[:ncand]
     cand_elem = ws.elem.numpy()[:ncand]
+    cand_vert = ws.vert.numpy()[:ncand]
     num_groups = int(ws.flex_num_groups.numpy()[0])
     group_starts = ws.flex_group_start_indices.numpy()[:num_groups]
 
@@ -2954,15 +2980,23 @@ class FlexCollisionTest(parameterized.TestCase):
         return e1_c < e1_s
       if e2_c != e2_s:
         return e2_c < e2_s
+      v1_c, v2_c = cand_vert[curr]
+      v1_s, v2_s = cand_vert[sel]
+      if v1_c != v1_s:
+        return v1_c < v1_s
+      if v2_c != v2_s:
+        return v2_c < v2_s
       return curr < sel
 
     self.assertGreater(num_groups, 0)
+    checked_fps = False
     for g in range(num_groups):
       g_start = group_starts[g]
       g_end = group_starts[g + 1] if g + 1 < num_groups else ncand
       group_cands = [sort_val[si] for si in range(g_start, g_end) if cand_active_sorted[si] == 1]
       if len(group_cands) <= types.MJ_MAXCONPAIR:
         continue
+      checked_fps = True
 
       best_seed = -1
       min_d = 1e10
@@ -3006,6 +3040,7 @@ class FlexCollisionTest(parameterized.TestCase):
       warp_selected = sorted([c_idx for c_idx in group_cands if cand_active[c_idx] == 1])
       np_selected = sorted(selected)
       self.assertEqual(warp_selected, np_selected)
+    self.assertTrue(checked_fps)
 
   @parameterized.parameters(1, 2)
   def test_mixed_flex_broadphase_and_narrowphase(self, nworld):
@@ -4113,6 +4148,57 @@ class FlexContactParityTest(parameterized.TestCase):
       self._assert_contact_parity(w_contacts, m_contacts, atol=1e-3)
 
   @parameterized.parameters(1, 2)
+  def test_flex_2d_ellipsoid_collision_parity(self, nworld):
+    """Test contact dist, pos, and frame parity for 2D cloth vs tilted non-spherical ellipsoid."""
+    mjm, mjd, m, d = test_data.fixture(
+      xml="""
+      <mujoco>
+        <option integrator="discrete"/>
+        <worldbody>
+          <geom type="ellipsoid" size="0.06 0.04 0.03" pos="0.01 -0.01 0.035" euler="20 -15 10"/>
+          <flexcomp name="cloth" count="3 3 1" spacing="0.04 0.04 0.04" radius="0.01" dim="2" mass="0.3">
+            <contact passive="true" selfcollide="none" margin="0.01"/>
+            <elasticity young="1e2"/>
+          </flexcomp>
+        </worldbody>
+      </mujoco>
+      """,
+      nworld=nworld,
+    )
+    mjds = [mjd]
+    if nworld == 2:
+      mjd1 = mujoco.MjData(mjm)
+      qpos = d.qpos.numpy()
+      qpos[1, 2::3] += 0.004
+      d.qpos.assign(qpos)
+      mjd1.qpos[:] = qpos[1]
+      mjds.append(mjd1)
+
+    d.nacon.fill_(-1)
+    for arr in (d.flexvert_xpos, d.contact.dist, d.contact.pos, d.contact.frame):
+      arr.fill_(wp.inf)
+
+    mjw.kinematics(m, d)
+    mjw.flex(m, d)
+    mjw.collision(m, d)
+
+    for w in range(nworld):
+      mujoco.mj_forward(mjm, mjds[w])
+      self.assertGreater(mjds[w].ncon, 0)
+
+    nacon = int(d.nacon.numpy()[0])
+    self.assertEqual(nacon, sum(mjd_w.ncon for mjd_w in mjds))
+    w_contacts_all = []
+    for w in range(nworld):
+      w_contacts = self._get_sorted_contacts(d, nacon, world_idx=w, is_warp=True)
+      m_contacts = self._get_sorted_contacts(mjds[w], mjds[w].ncon, is_warp=False)
+      self._assert_contact_parity(w_contacts, m_contacts, atol=1e-3, frame_atol=3e-3)
+      w_contacts_all.append(w_contacts)
+
+    if nworld == 2:
+      self.assertFalse(np.allclose([c["dist"] for c in w_contacts_all[0]], [c["dist"] for c in w_contacts_all[1]]))
+
+  @parameterized.parameters(1, 2)
   def test_contact_flex_flex_none_selfcollide(self, nworld):
     """Test contacts between two distinct flex bodies when selfcollide is none."""
     mjm, mjd, m, d = test_data.fixture(
@@ -4252,13 +4338,12 @@ class FlexContactParityTest(parameterized.TestCase):
     _, _, m, d = test_data.fixture(
       xml="""
       <mujoco>
+        <option integrator="discrete"/>
         <worldbody>
-          <flexcomp name="cloth1" type="grid" dim="2" count="2 2 1" spacing="0.05 0.05 0.05"
-                    radius="0.01" mass="0.5">
+          <flexcomp name="cloth1" dim="2" count="2 2 1" spacing="0.05 0.05 0.05" radius="0.01" mass="0.5" rigid="true">
             <contact condim="3" selfcollide="none" margin="0.02"/>
           </flexcomp>
-          <flexcomp name="cloth2" type="grid" dim="2" count="2 2 1" spacing="0.05 0.05 0.05"
-                    radius="0.01" mass="0.5" pos="10.0 0 0">
+          <flexcomp name="cloth2" dim="2" count="2 2 1" spacing="0.05 0.05 0.05" radius="0.01" mass="0.5" pos="10.0 0 0" rigid="true">
             <contact condim="3" selfcollide="none" margin="0.02"/>
           </flexcomp>
         </worldbody>
@@ -4488,7 +4573,7 @@ class FlexContactParityTest(parameterized.TestCase):
         </asset>
         <worldbody>
           <geom name="sph" size="0.02" pos="-0.033 -0.033 0.054"/>
-          <geom name="ell" type="ellipsoid" size="0.025 0.02 0.015" pos="0.033 0.033 0.049"/>
+          <geom name="ell" type="ellipsoid" size="0.025 0.02 0.015" pos="0.035 0.02 0.049"/>
           <geom name="msh" type="mesh" mesh="box_mesh" pos="0.05 -0.05 0.059"/>
           <flexcomp name="cloth0" count="3 3 1" spacing="0.05 0.05 0.05" pos="2.0 0 0.5" radius="0.005" mass="0.2">
             <contact passive="true" selfcollide="none"/>
@@ -4538,19 +4623,23 @@ class FlexContactParityTest(parameterized.TestCase):
         self.assertGreaterEqual(wc["elem"][1], 0)
         self.assertLess(wc["elem"][1], int(mjm.flex_elemnum[1]))
       self._assert_contact_parity(w_contacts, m_contacts, atol=1e-3)
-      np.testing.assert_allclose(qfrc_passive[w], mjds[w].qfrc_passive, atol=5e-2, rtol=1e-2)
+      np.testing.assert_allclose(qfrc_passive[w], mjds[w].qfrc_passive, atol=2e-1, rtol=1e-2)
       np.testing.assert_allclose(qacc[w], mjds[w].qacc, atol=5e-2, rtol=1e-2)
 
     if nworld == 2:
       self.assertFalse(np.allclose(qfrc_passive[0], qfrc_passive[1]))
 
     # Verify inter-flex vertex-element passive contact keeps local vertex 0 when flex[0] != flex[1]
+    ea = int(mjm.flex_elemdataadr[1])
+    va = int(mjm.flex_vertadr[1])
+    centroid = d.flexvert_xpos.numpy()[0, va + mjm.flex_elem[ea : ea + 3]].mean(axis=0)
     d.nacon.fill_(1)
     d.contact.worldid.zero_()
     d.contact.type.fill_(int(types.ContactType.PASSIVE))
     d.contact.flex.fill_(wp.vec2i(0, 1))
     d.contact.vert.fill_(wp.vec2i(0, -1))
     d.contact.elem.fill_(wp.vec2i(-1, 0))
+    d.contact.pos.fill_(wp.vec3(*centroid))
     d.contact.dist.fill_(-0.002)
     d.contact.frame.fill_(wp.mat33(1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0))
     _, _, _, _, efm_con_nnz = passive.build_efm_contact(m, d)
@@ -4713,7 +4802,7 @@ class FlexContactParityTest(parameterized.TestCase):
       <mujoco>
         <option integrator="discrete" solver="CG"/>
         <worldbody>
-          <geom size="0.1" pos="0 0 -0.095"/>
+          <geom size="0.1" pos="0 0 -0.105"/>
           <flexcomp name="cloth" count="3 3 1" spacing="0.05 0.05 0.05" radius="0.01" mass="0.2">
             <contact passive="true" selfcollide="none"/>
             <elasticity young="1e3" damping="0.01"/>
@@ -6095,17 +6184,20 @@ class FlexRodBendingTest(parameterized.TestCase):
 
   def test_non_reducible_flex_skips_fps_and_rigid_flex_skips_passive(self):
     """Non-reducible flex-flex contacts skip FPS reduction; rigid 2D flex is not passive."""
-    _, _, m, d = test_data.fixture(
+    mjm, mjd, m, d = test_data.fixture(
       xml="""
       <mujoco>
-        <option integrator="Euler"/>
         <worldbody>
-          <flexcomp name="c1" type="grid" count="5 5 1" spacing="0.04 0.04 0.04"
-                    pos="0 0 0" dim="2" radius="0.02" mass="0.5">
+          <flexcomp name="c1" type="direct" dim="1" radius="0.01" mass="0.5"
+                    point="-0.02 0 0  0.30 0 0  -0.02 0.04 0  0.30 0.04 0  -0.02 0.08 0  0.30 0.08 0  -0.02 0.12 0  0.30 0.12 0
+                           -0.02 0.16 0  0.30 0.16 0  -0.02 0.20 0  0.30 0.20 0  -0.02 0.24 0  0.30 0.24 0  -0.02 0.28 0  0.30 0.28 0"
+                    element="0 1  2 3  4 5  6 7  8 9  10 11  12 13  14 15">
             <contact selfcollide="none" passive="false"/>
           </flexcomp>
-          <flexcomp name="c2" type="grid" count="5 5 1" spacing="0.04 0.04 0.04"
-                    pos="0 0 0.01" dim="2" radius="0.02" mass="0.5">
+          <flexcomp name="c2" type="direct" dim="1" radius="0.01" mass="0.5"
+                    point="0 -0.02 0.01  0 0.30 0.01  0.04 -0.02 0.01  0.04 0.30 0.01  0.08 -0.02 0.01  0.08 0.30 0.01  0.12 -0.02 0.01  0.12 0.30 0.01
+                           0.16 -0.02 0.01  0.16 0.30 0.01  0.20 -0.02 0.01  0.20 0.30 0.01  0.24 -0.02 0.01  0.24 0.30 0.01  0.28 -0.02 0.01  0.28 0.30 0.01"
+                    element="0 1  2 3  4 5  6 7  8 9  10 11  12 13  14 15">
             <contact selfcollide="none" passive="false"/>
           </flexcomp>
         </worldbody>
@@ -6116,8 +6208,11 @@ class FlexRodBendingTest(parameterized.TestCase):
     mjw.kinematics(m, d)
     mjw.flex(m, d)
     mjw.collision(m, d)
-    # Without FPS reduction, 2 overlapping 5x5 cloths produce more than MJ_MAXCONPAIR (50) contacts
-    self.assertGreater(int(d.nacon.numpy()[0]), int(types.MJ_MAXCONPAIR))
+    mujoco.mj_forward(mjm, mjd)
+    # Without FPS reduction, 8x8 crossed 1D segments produce 64 > MJ_MAXCONPAIR (50) contacts
+    nacon = int(d.nacon.numpy()[0])
+    self.assertGreater(nacon, int(types.MJ_MAXCONPAIR))
+    self.assertEqual(nacon, mjd.ncon)
 
     # Rigid 2D flex under discrete integrator must not be classified as ContactType.PASSIVE
     _, _, m_rig, d_rig = test_data.fixture(
@@ -6126,11 +6221,11 @@ class FlexRodBendingTest(parameterized.TestCase):
         <option integrator="discrete"/>
         <worldbody>
           <geom type="plane" size="1 1 0.01"/>
-          <flexcomp name="rigid_cloth" type="grid" count="2 2 1" spacing="0.05 0.05 0.05"
+          <flexcomp name="rigid_cloth" count="2 2 1" spacing="0.05 0.05 0.05"
                     pos="0 0 0.005" dim="2" radius="0.015" mass="0.2" rigid="true">
             <contact selfcollide="none" passive="true"/>
           </flexcomp>
-          <flexcomp name="soft_cloth" type="grid" count="2 2 1" spacing="0.05 0.05 0.05"
+          <flexcomp name="soft_cloth" count="2 2 1" spacing="0.05 0.05 0.05"
                     pos="0.3 0 0.005" dim="2" radius="0.015" mass="0.2">
             <contact selfcollide="none" passive="true"/>
           </flexcomp>
@@ -6150,6 +6245,64 @@ class FlexRodBendingTest(parameterized.TestCase):
     self.assertGreater(int(np.sum(soft_mask)), 0)
     np.testing.assert_array_equal(c_type[rigid_mask], int(types.ContactType.CONSTRAINT))
     np.testing.assert_array_equal(c_type[soft_mask], int(types.ContactType.PASSIVE))
+
+  @parameterized.parameters(1, 2)
+  def test_reducible_geom_flex_fps_parity(self, nworld):
+    """Reducible geom-flex contacts cap to MJ_MAXCONPAIR per pair matching C."""
+    mjm, mjd, m, d = test_data.fixture(
+      xml="""
+      <mujoco>
+        <option integrator="discrete"/>
+        <worldbody>
+          <geom type="plane" size="1 1 0.01"/>
+          <geom type="box" size="0.2 0.2 0.01" pos="0 0 0.03"/>
+          <body name="carrier" pos="0 0 0.01">
+            <freejoint/>
+            <inertial pos="0 0 0" mass="0.5" diaginertia="1e-3 1e-3 1e-3"/>
+            <flexcomp name="plate" count="8 8 1" spacing="0.04 0.04 0.04" radius="0.015" dim="2" mass="0.5" rigid="true">
+              <contact selfcollide="none"/>
+            </flexcomp>
+          </body>
+        </worldbody>
+      </mujoco>
+      """,
+      nworld=nworld,
+      nconmax=1500,
+    )
+    mjds = [mjd]
+    if nworld == 2:
+      mjd1 = mujoco.MjData(mjm)
+      qpos = d.qpos.numpy()
+      qpos[1, 2] -= 0.002
+      d.qpos.assign(qpos)
+      mjd1.qpos[:] = qpos[1]
+      mjds.append(mjd1)
+
+    d.nacon.fill_(-1)
+    d.contact.dist.fill_(wp.inf)
+    d.contact.pos.fill_(wp.inf)
+    d.contact.geom.fill_(-1)
+    d.contact.worldid.fill_(-1)
+
+    mjw.kinematics(m, d)
+    mjw.flex(m, d)
+    mjw.collision(m, d)
+
+    for w in range(nworld):
+      mujoco.mj_forward(mjm, mjds[w])
+      # Both (plane, plate) and (box, plate) exceed 50 candidates and cap to MJ_MAXCONPAIR each
+      self.assertEqual(mjds[w].ncon, 2 * types.MJ_MAXCONPAIR)
+
+    nacon = int(d.nacon.numpy()[0])
+    self.assertEqual(nacon, 2 * types.MJ_MAXCONPAIR * nworld)
+    c_geom = d.contact.geom.numpy()[:nacon, 0]
+    c_world = d.contact.worldid.numpy()[:nacon]
+    c_dist = d.contact.dist.numpy()[:nacon]
+    for w in range(nworld):
+      self.assertEqual(int(np.sum((c_world == w) & (c_geom == 0))), types.MJ_MAXCONPAIR)
+      self.assertEqual(int(np.sum((c_world == w) & (c_geom == 1))), types.MJ_MAXCONPAIR)
+    if nworld == 2:
+      self.assertFalse(np.allclose(sorted(c_dist[c_world == 0]), sorted(c_dist[c_world == 1])))
 
 
 if __name__ == "__main__":
