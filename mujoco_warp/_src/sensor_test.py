@@ -1054,6 +1054,55 @@ class SensorTest(parameterized.TestCase):
 
     _assert_eq(d.sensordata.numpy()[0], mjd.sensordata, "sensordata")
 
+  @parameterized.product(dist=(1e-6, -1e-6), nworld=(1, 2))
+  def test_sensor_collision_shallow(self, dist, nworld):
+    """Tests collision sensors for two spheres a micrometer apart, away from the origin."""
+    direction = np.array([0.48, -0.6, 0.64])
+    pos = 1.0 + (0.2 + dist) * direction
+    mjm, mjd, m, d = test_data.fixture(
+      xml=f"""
+      <mujoco>
+        <worldbody>
+          <geom name="sphere0" type="sphere" size=".1" pos="1 1 1"/>
+          <body pos="{pos[0]:.17g} {pos[1]:.17g} {pos[2]:.17g}">
+            <freejoint/>
+            <geom name="sphere1" type="sphere" size=".1"/>
+          </body>
+        </worldbody>
+        <sensor>
+          <normal geom1="sphere0" geom2="sphere1" cutoff="1"/>
+          <normal geom1="sphere1" geom2="sphere0" cutoff="1"/>
+          <fromto geom1="sphere0" geom2="sphere1" cutoff="1"/>
+          <fromto geom1="sphere1" geom2="sphere0" cutoff="1"/>
+        </sensor>
+      </mujoco>
+      """,
+      nworld=nworld,
+    )
+
+    mjds = [mjd]
+    if nworld == 2:
+      # world 1 on the other side of contact
+      mjd1 = mujoco.MjData(mjm)
+      qpos = d.qpos.numpy()
+      qpos[1, :3] = 1.0 + (0.2 - dist) * direction
+      d.qpos.assign(qpos)
+      mjd1.qpos[:] = qpos[1]
+      mujoco.mj_forward(mjm, mjd1)
+      mjw.kinematics(m, d)
+      mjds.append(mjd1)
+
+    d.sensordata.fill_(wp.inf)
+    mjw.collision(m, d)
+    mjw.sensor_pos(m, d)
+
+    sensordata = d.sensordata.numpy()
+    for w in range(nworld):
+      _assert_eq(sensordata[w], mjds[w].sensordata, f"sensordata_world_{w}")
+
+    if nworld == 2:
+      self.assertFalse(np.allclose(sensordata[0], sensordata[1]))
+
   def test_sensor_collision_gjk_tuned_direction(self):
     """A distance sensor reads MuJoCo's depth where GJK tunes its support direction."""
     _, mjd, m, d = test_data.fixture(
