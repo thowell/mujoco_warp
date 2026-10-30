@@ -4057,26 +4057,21 @@ class FlexContactParityTest(parameterized.TestCase):
         )
 
       # Geom-flex ground plane contacts parity
+      nacon = int(d.nacon.numpy()[0])
       for w in range(nworld):
-        w_geom_contacts = [
-          c for c in self._get_sorted_contacts(d, d.nacon.numpy()[0], world_idx=w, is_warp=True) if c["geom"][0] >= 0
-        ]
+        w_geom_contacts = [c for c in self._get_sorted_contacts(d, nacon, world_idx=w, is_warp=True) if c["geom"][0] >= 0]
         m_geom_contacts = [c for c in self._get_sorted_contacts(mjd, mjd.ncon, is_warp=False) if c["geom"][0] >= 0]
-        if len(w_geom_contacts) == len(m_geom_contacts) and len(m_geom_contacts) > 0:
+        self.assertEqual(len(w_geom_contacts), len(m_geom_contacts))
+        # Skip per-contact parity when FPS subsamples the symmetric 8x8 grid
+        if 0 < len(m_geom_contacts) < types.MJ_MAXCONPAIR:
           self._assert_contact_parity(w_geom_contacts, m_geom_contacts, atol=1e-4)
 
       # Flex-flex contact count parity and constraint parity
       if curr_step in (0, 250, 500, 1000):
-        if curr_step == 250:
-          # MuJoCo caps contact pairs at mjMAXCONPAIR=50 (50 plane + 50 flex-flex = 100),
-          # whereas Warp detects all 64 vertices on the ground plane (64 + 50 = 114).
-          self.assertEqual(d.nacon.numpy()[0], nworld * 114, f"nacon mismatch at step {curr_step}")
-          for w in range(nworld):
-            self.assertEqual(d.nefc.numpy()[w], 456, f"nefc mismatch at step {curr_step} (world {w})")
-        else:
-          self.assertEqual(d.nacon.numpy()[0], nworld * mjd.ncon, f"nacon mismatch at step {curr_step}")
-          for w in range(nworld):
-            self.assertEqual(d.nefc.numpy()[w], mjd.nefc, f"nefc mismatch at step {curr_step} (world {w})")
+        self.assertEqual(nacon, nworld * mjd.ncon, f"nacon mismatch at step {curr_step}")
+        nefc = d.nefc.numpy()
+        for w in range(nworld):
+          self.assertEqual(nefc[w], mjd.nefc, f"nefc mismatch at step {curr_step} (world {w})")
 
   @parameterized.parameters(1, 2)
   def test_contact_mesh_flex_3d_parity(self, nworld):
@@ -4561,6 +4556,8 @@ class FlexContactParityTest(parameterized.TestCase):
       self.assertFalse(np.allclose([c["dist"] for c in w_contacts_all[0]], [c["dist"] for c in w_contacts_all[1]]))
       self.assertFalse(np.allclose(d.qfrc_constraint.numpy()[0], d.qfrc_constraint.numpy()[1]))
 
+  # TODO(team): remove version check once mujoco >= 3.17.1 is required.
+  @absltest.skipIf(not util_pkg.check_version("mujoco>=3.17.1.dev1005593014"), "Requires MuJoCo >= 3.17.1.dev1005593014")
   @parameterized.parameters(1, 2)
   def test_contact_multiflex_elem_and_passive_parity(self, nworld):
     """Test multi-flex geom collisions write local elem indices and match passive forces."""
@@ -4794,6 +4791,8 @@ class FlexContactParityTest(parameterized.TestCase):
       w1 = self._get_sorted_contacts(d, nacon, world_idx=1, is_warp=True)
       self.assertFalse(np.allclose(w0[0]["dist"], w1[0]["dist"]))
 
+  # TODO(team): remove version check once mujoco >= 3.17.1 is required.
+  @absltest.skipIf(not util_pkg.check_version("mujoco>=3.17.1.dev1005593014"), "Requires MuJoCo >= 3.17.1.dev1005593014")
   @parameterized.parameters(1, 2)
   def test_passive_flex_shared_vertex_contacts_parity(self, nworld):
     """Test that passive flex contacts on adjacent triangles sharing a vertex are not dropped."""
@@ -4845,6 +4844,8 @@ class FlexContactParityTest(parameterized.TestCase):
     if nworld == 2:
       self.assertFalse(np.allclose(qfrc_passive[0], qfrc_passive[1]))
 
+  # TODO(team): remove version check once mujoco >= 3.17.1 is required.
+  @absltest.skipIf(not util_pkg.check_version("mujoco>=3.17.1.dev1005593014"), "Requires MuJoCo >= 3.17.1.dev1005593014")
   @parameterized.parameters(1, 2)
   def test_passive_flex_flex_no_fps_truncation_parity(self, nworld):
     """Test that passive flex-flex collisions exceeding MJ_MAXCONPAIR are not truncated by FPS."""

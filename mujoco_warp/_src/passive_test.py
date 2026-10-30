@@ -801,6 +801,8 @@ class PassiveTest(parameterized.TestCase):
     self.assertGreater(nefc, 0)
     _assert_eq(d.efc.aref.numpy()[0, :nefc], mjd.efc_aref[:nefc], "efc_aref")
 
+  # TODO(team): remove version check once mujoco >= 3.17.1 is required.
+  @absltest.skipIf(not util_pkg.check_version("mujoco>=3.17.1.dev1005593014"), "Requires MuJoCo >= 3.17.1.dev1005593014")
   @parameterized.product(
     mode=("pinned", "carrier", "reordered_slides", "hinge_vert"),
     nworld=(1, 2),
